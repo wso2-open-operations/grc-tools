@@ -50,18 +50,7 @@ export default function IdleTimeoutProvider({
     }
   };
 
-  const { activate } = useIdleTimer({
-    onPrompt,
-    timeout: IDLE_TIMEOUT_MS,
-    promptBeforeIdle: IDLE_PROMPT_BEFORE_MS,
-    throttle: IDLE_THROTTLE_MS,
-  });
-
-  const handleContinue = () => {
-    setSessionWarningOpen(false);
-    activate();
-  };
-
+  // Defined before useIdleTimer so onIdle can reference it (does not use `activate`).
   const handleLogout = async () => {
     setSessionWarningOpen(false);
     clearUserPreferredTimeZone();
@@ -71,6 +60,25 @@ export default function IdleTimeoutProvider({
     } catch {
       logger.error("Error signing out");
     }
+  };
+
+  const { activate } = useIdleTimer({
+    onPrompt,
+    // Enforce logout when the full timeout is reached (warning ignored), so an
+    // unattended session is not left authenticated.
+    onIdle: () => {
+      if (isSignedIn && !isLoading) {
+        void handleLogout();
+      }
+    },
+    timeout: IDLE_TIMEOUT_MS,
+    promptBeforeIdle: IDLE_PROMPT_BEFORE_MS,
+    throttle: IDLE_THROTTLE_MS,
+  });
+
+  const handleContinue = () => {
+    setSessionWarningOpen(false);
+    activate();
   };
 
   return (

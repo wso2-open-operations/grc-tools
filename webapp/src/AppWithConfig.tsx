@@ -73,9 +73,7 @@ export default function AppWithConfig(): JSX.Element {
       clientId={authConfig.clientId}
       afterSignInUrl={authConfig.signInRedirectURL}
       afterSignOutUrl={authConfig.signOutRedirectURL}
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      periodicTokenRefresh
+      tokenLifecycle={{ refreshToken: { autoRefresh: true } }}
       scopes={["openid", "email", "groups", "profile"]}
       preferences={{
         theme: {

@@ -25,9 +25,18 @@ export interface AuthConfig {
 
 const getAuthConfig = (): AuthConfig => {
   const config = window.config;
+  const isMockAuth = config?.GRC_PLATFORM_MOCK_AUTH === true;
+  const baseUrl = config?.GRC_PLATFORM_AUTH_BASE_URL || "";
+  const clientId = config?.GRC_PLATFORM_AUTH_CLIENT_ID || "";
+
+  if (!isMockAuth && (!baseUrl || !clientId)) {
+    console.error(
+      "[AuthConfig] Missing required auth configuration. Set GRC_PLATFORM_AUTH_BASE_URL and GRC_PLATFORM_AUTH_CLIENT_ID in public/config.js or enable GRC_PLATFORM_MOCK_AUTH for local development."
+    );
+  }
   return {
-    baseUrl: config?.GRC_PLATFORM_AUTH_BASE_URL || "",
-    clientId: config?.GRC_PLATFORM_AUTH_CLIENT_ID || "",
+    baseUrl,
+    clientId,
     signInRedirectURL:
       config?.GRC_PLATFORM_AUTH_SIGN_IN_REDIRECT_URL || window.location.origin + "/",
     signOutRedirectURL:

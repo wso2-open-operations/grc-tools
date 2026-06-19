@@ -44,7 +44,8 @@ export default function SuccessBanner({
         position: "fixed",
         top: HEADER_HEIGHT_PX + BANNER_HEADER_GAP_PX,
         right: BANNER_RIGHT_GAP_PX,
-        width: 400,
+        maxWidth: 400,
+        width: { xs: "calc(100vw - 32px)", sm: 400 },
         zIndex: 1500,
       }}
     >

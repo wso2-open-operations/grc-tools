@@ -27,7 +27,7 @@ export interface GRCPlatformWindowConfig {
 
 declare global {
   interface Window {
-    config: GRCPlatformWindowConfig;
+    config?: GRCPlatformWindowConfig;
   }
 }
 

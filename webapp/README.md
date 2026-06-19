@@ -98,7 +98,7 @@ Open [http://localhost:3000](http://localhost:3000). The root path redirects to
 | `GRC_PLATFORM_AUTH_SIGN_OUT_REDIRECT_URL` | When not mocking | Post-logout redirect (must match the IdP logout allowlist) |
 | `GRC_PLATFORM_BACKEND_BASE_URL` | For real data | GRC backend REST base URL (no trailing slash) |
 | `GRC_PLATFORM_THEME` | No | Oxygen UI theme: `acrylicOrange` (default), `acrylicPurple`, `highContrast`, `classic` |
-| `GRC_PLATFORM_LOG_LEVEL` | No | Console log level: `ERROR`, `WARN`, `INFO`, `DEBUG` |
+| `GRC_PLATFORM_LOG_LEVEL` | No | Console log level: `ERROR` (default), `WARN`, `INFO`, `DEBUG`. The supplied `config.js` sets this to `DEBUG` for local development. |
 
 ### Authentication modes
 
@@ -122,9 +122,8 @@ webapp/
 │   ├── hooks/               # Shared hooks (logger, auth API client, responsive)
 │   ├── layouts/             # App shell, auth guard, error layout
 │   ├── modules/             # Feature modules
-│   │   ├── registry.ts      # Module definitions (Audit Hub, Risk Hub)
-│   │   ├── audit/           # Audit Hub — pages, constants (roles), …
-│   │   └── risk/            # Risk Hub — pages, constants (roles), …
+│   │   ├── audit/           # Audit Hub — pages, routes.tsx, nav.ts
+│   │   └── risk/            # Risk Hub — pages, routes.tsx, nav.ts
 │   ├── providers/           # Cross-cutting providers (idle-timeout session guard)
 │   ├── utils/               # Shared utilities
 │   ├── App.tsx              # Routes
@@ -136,8 +135,9 @@ webapp/
 
 ### Modules
 
-Domain code lives under `src/modules/`. Each module owns its pages, routes, and
-sidebar nav, and is registered in `src/modules/registry.ts`.
+Domain code lives under `src/modules/`. Each module owns its pages, routes
+(`routes.tsx`), and sidebar nav (`nav.ts`), which the shared `App.tsx` and
+`SideBar.tsx` import and spread (see the registration pattern below).
 
 | Module | Base path | Purpose |
 |--------|-----------|---------|

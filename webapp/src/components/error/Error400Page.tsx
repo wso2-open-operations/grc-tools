@@ -16,7 +16,7 @@
 
 import { type JSX } from "react";
 import ErrorPage from "./ErrorPage";
-import illustration from "@assets/error/error-500.svg";
+import illustration from "@assets/error/error-404.svg";
 
 interface Error400PageProps {
   message?: string;

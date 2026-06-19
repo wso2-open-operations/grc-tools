@@ -14,13 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import React, { type JSX } from "react";
+import { type ComponentType, type JSX } from "react";
 import { Box, Button, Card, type SxProps, type Theme } from "@wso2/oxygen-ui";
 
 export interface TabOption {
   id: string;
   label: string;
-  icon?: React.ElementType;
+  icon?: ComponentType<{ size?: number }>;
   count?: number | string;
   badgeColor?: string;
 }
@@ -92,7 +92,7 @@ const TabBar = ({
               height: "auto",
               minHeight: 32,
               "&:hover": {
-                bgcolor: isActive ? "background.paper" : "text.secondary.light",
+                bgcolor: isActive ? "background.paper" : "action.hover",
               },
             }}
           >

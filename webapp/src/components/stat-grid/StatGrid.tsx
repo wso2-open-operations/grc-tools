@@ -89,7 +89,7 @@ export default function StatGrid<T extends string>({
   const theme = useTheme();
   const xs = itemSize.xs ?? 12;
   const sm = itemSize.sm ?? 6;
-  const md = itemSize.md ?? 3;
+  const md = itemSize.md ?? 6;
   const lg = itemSize.lg ?? md;
   const xl = itemSize.xl ?? lg;
 
