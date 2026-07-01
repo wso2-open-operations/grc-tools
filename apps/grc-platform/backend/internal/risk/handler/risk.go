@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -53,7 +54,7 @@ func (d *Deps) handleNextSequenceID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nextID, err := d.Risk.NextSequenceID(r.Context(), sourceRegisterID, year, quarter)
+	nextID, err := d.Risk.NextSequenceID(r.Context(), sourceRegisterID)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
@@ -92,6 +93,7 @@ func (d *Deps) handleCreateRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Location", fmt.Sprintf("/api/v1/risks/%d", result.ID))
 	response.WriteJSONValue(w, http.StatusCreated, result)
 }
 

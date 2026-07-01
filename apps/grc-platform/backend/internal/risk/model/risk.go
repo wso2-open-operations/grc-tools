@@ -21,38 +21,38 @@ import "time"
 
 // Risk represents a GRC risk item, mapping to the `risk` table.
 type Risk struct {
-	ID                     int        `json:"id"`
-	RiskYear               int        `json:"risk_year"`
-	SourceRegisterID       int        `json:"source_register_id"`
-	RiskQuarter            string     `json:"risk_quarter"`
-	RiskCode               string     `json:"risk_code"`
-	RiskTitle              string     `json:"risk_title"`
-	RiskDescription        string     `json:"risk_description"`
-	RiskIdentifiedDate     *string    `json:"risk_identified_date"`
-	IdentifiedByType       *string    `json:"identified_by_type"`
-	IdentifiedByUserID     *int       `json:"identified_by_user_id"`
-	IdentifiedByName       *string    `json:"identified_by_name"`
-	AssignerID             int        `json:"assigner_id"`
-	OwnerID                int        `json:"owner_id"`
-	ImpactDescription      *string    `json:"impact_description"`
-	GrossScoreID           *int       `json:"gross_score_id"`
-	TreatmentStrategy      *string    `json:"treatment_strategy"`
-	ActionPlanID           *int       `json:"action_plan_id"`
-	AssignmentTeamID       int        `json:"assignment_team_id"`
-	Progress               *string    `json:"progress"`
-	ImplementationDate     *string    `json:"implementation_date"`
-	ReassessmentDate       *string    `json:"reassessment_date"`
-	ComplianceApprovalBy   *int       `json:"compliance_approval_by"`
-	ComplianceApprovalDate *string    `json:"compliance_approval_date"`
-	GitIssueURL            *string    `json:"git_issue_url"`
-	EmailSubject           *string    `json:"email_subject"`
-	Remarks                *string    `json:"remarks"`
-	WorkflowStatus         string     `json:"workflow_status"`
-	RejectionComment       *string    `json:"rejection_comment"`
-	CreatedAt              time.Time  `json:"created_at"`
-	CreatedBy              string     `json:"created_by"`
-	UpdatedAt              time.Time  `json:"updated_at"`
-	UpdatedBy              string     `json:"updated_by"`
+	ID                     int       `json:"id"`
+	RiskYear               int       `json:"risk_year"`
+	SourceRegisterID       int       `json:"source_register_id"`
+	RiskQuarter            string    `json:"risk_quarter"`
+	RiskCode               string    `json:"risk_code"`
+	RiskTitle              string    `json:"risk_title"`
+	RiskDescription        string    `json:"risk_description"`
+	RiskIdentifiedDate     *string   `json:"risk_identified_date"`
+	IdentifiedByType       *string   `json:"identified_by_type"`
+	IdentifiedByUserID     *int      `json:"identified_by_user_id"`
+	IdentifiedByName       *string   `json:"identified_by_name"`
+	AssignerID             int       `json:"assigner_id"`
+	OwnerID                int       `json:"owner_id"`
+	ImpactDescription      *string   `json:"impact_description"`
+	GrossScoreID           *int      `json:"gross_score_id"`
+	TreatmentStrategy      *string   `json:"treatment_strategy"`
+	ActionPlanID           *int      `json:"action_plan_id"`
+	AssignmentTeamID       int       `json:"assignment_team_id"`
+	Progress               *string   `json:"progress"`
+	ImplementationDate     *string   `json:"implementation_date"`
+	ReassessmentDate       *string   `json:"reassessment_date"`
+	ComplianceApprovalBy   *int      `json:"compliance_approval_by"`
+	ComplianceApprovalDate *string   `json:"compliance_approval_date"`
+	GitIssueURL            *string   `json:"git_issue_url"`
+	EmailSubject           *string   `json:"email_subject"`
+	Remarks                *string   `json:"remarks"`
+	WorkflowStatus         string    `json:"workflow_status"`
+	RejectionComment       *string   `json:"rejection_comment"`
+	CreatedAt              time.Time `json:"created_at"`
+	CreatedBy              string    `json:"created_by"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	UpdatedBy              string    `json:"updated_by"`
 }
 
 // CreateRiskRequest is the payload for POST /api/v1/risks.
@@ -110,21 +110,133 @@ type NextSequenceIDResponse struct {
 
 // ListRisksFilter holds query parameters for filtering the risk list.
 type ListRisksFilter struct {
-	Status   string
-	TeamID   int
-	Level    string
-	Search   string
+	Statuses []string // workflow_status values to include (empty = all)
+	TeamID   int      // source_register_id; 0 = all
+	Level    string   // LOW / MEDIUM / HIGH; empty = all
+	Search   string   // matched against risk_code and risk_title
+	RiskType string   // NEW / UPDATED; empty = all
+}
+
+// RiskListItem is the lightweight DTO returned by GET /api/v1/risks.
+// Joins resolve display names so the frontend table needs no secondary fetches.
+type RiskListItem struct {
+	ID                 int     `json:"id"`
+	RiskCode           string  `json:"risk_code"`
+	RiskTitle          string  `json:"risk_title"`
+	SourceRegisterName string  `json:"source_register_name"`
+	RiskLevel          string  `json:"risk_level"`
+	RiskLevelColor     string  `json:"risk_level_color"`
+	OwnerName          string  `json:"owner_name"`
+	AssignerName       string  `json:"assigner_name"`
+	WorkflowStatus     string  `json:"workflow_status"`
+	RiskType           string  `json:"risk_type"`
+	ImplementationDate *string `json:"implementation_date"`
+	RejectionComment   *string `json:"rejection_comment"`
+	RejectionStage     *string `json:"rejection_stage"`
+	CreatedAt          string  `json:"created_at"`
+}
+
+// RiskDetail is the enriched DTO returned by GET /api/v1/risks/{id}.
+// Includes all risk fields, resolved display names, and related entities.
+type RiskDetail struct {
+	// Core risk fields
+	ID                     int     `json:"id"`
+	RiskCode               string  `json:"risk_code"`
+	RiskYear               int     `json:"risk_year"`
+	RiskQuarter            string  `json:"risk_quarter"`
+	RiskTitle              string  `json:"risk_title"`
+	RiskDescription        string  `json:"risk_description"`
+	RiskIdentifiedDate     *string `json:"risk_identified_date"`
+	IdentifiedByType       *string `json:"identified_by_type"`
+	IdentifiedByUserID     *int    `json:"identified_by_user_id"`
+	IdentifiedByName       *string `json:"identified_by_name"`
+	AssignerID             int     `json:"assigner_id"`
+	OwnerID                int     `json:"owner_id"`
+	ImpactDescription      *string `json:"impact_description"`
+	TreatmentStrategy      *string `json:"treatment_strategy"`
+	AssignmentTeamID       int     `json:"assignment_team_id"`
+	Progress               *string `json:"progress"`
+	ImplementationDate     *string `json:"implementation_date"`
+	ReassessmentDate       *string `json:"reassessment_date"`
+	GitIssueURL            *string `json:"git_issue_url"`
+	EmailSubject           *string `json:"email_subject"`
+	Remarks                *string `json:"remarks"`
+	WorkflowStatus         string  `json:"workflow_status"`
+	RiskType               string  `json:"risk_type"`
+	RejectionComment       *string `json:"rejection_comment"`
+	RejectionStage         *string `json:"rejection_stage"`
+	OwnerFirstApprovedAt   *string `json:"owner_first_approved_at"`
+	ComplianceApprovalDate *string `json:"compliance_approval_date"`
+	CreatedAt              string  `json:"created_at"`
+	UpdatedAt              string  `json:"updated_at"`
+
+	// Resolved display names
+	SourceRegisterName     string  `json:"source_register_name"`
+	AssignmentTeamName     string  `json:"assignment_team_name"`
+	OwnerName              string  `json:"owner_name"`
+	AssignerName           string  `json:"assigner_name"`
+	IdentifiedByUserName   *string `json:"identified_by_user_name"`
+	ComplianceApproverName *string `json:"compliance_approver_name"`
+
+	// Gross score (from risk_score join)
+	GrossScore *RiskScore `json:"gross_score"`
+
+	// Related entities
+	ComplianceReferences []ComplianceReference `json:"compliance_references"`
+	ActionPlan           *ActionPlanDetail     `json:"action_plan"`
+	Assessments          []RiskAssessment      `json:"assessments"`
+}
+
+// ActionPlanDetail is ActionPlan with its steps embedded, used inside RiskDetail.
+type ActionPlanDetail struct {
+	ID            int              `json:"id"`
+	ActionOwnerID *int             `json:"action_owner_id"`
+	Description   *string          `json:"description"`
+	Status        string           `json:"status"`
+	PlanType      string           `json:"plan_type"`
+	Steps         []ActionPlanStep `json:"steps"`
 }
 
 // UpdateRiskRequest is the payload for PUT /api/v1/risks/{id}.
+// Three fields trigger PENDING_AMENDMENT when changed on an IN_REMEDIATION risk:
+//   - ImplementationDate
+//   - EmailSubject
+//   - ActionSteps
+//
+// All other fields are free-edit and do not affect workflow status.
 type UpdateRiskRequest struct {
-	RiskTitle         string  `json:"risk_title"`
-	RiskDescription   string  `json:"risk_description"`
-	ImpactDescription string  `json:"impact_description"`
-	Progress          string  `json:"progress"`
-	GitIssueURL       string  `json:"git_issue_url"`
-	EmailSubject      string  `json:"email_subject"`
-	Remarks           string  `json:"remarks"`
+	RiskTitle              string  `json:"risk_title"`
+	RiskDescription        string  `json:"risk_description"`
+	RiskIdentifiedDate     string  `json:"risk_identified_date,omitempty"`
+	IdentifiedByType       string  `json:"identified_by_type,omitempty"`
+	IdentifiedByUserID     *int    `json:"identified_by_user_id,omitempty"`
+	IdentifiedByName       *string `json:"identified_by_name,omitempty"`
+	AssignerID             *int    `json:"assigner_id,omitempty"`
+	OwnerID                *int    `json:"owner_id,omitempty"`
+	ImpactDescription      string  `json:"impact_description"`
+	ComplianceReferenceIDs []int   `json:"compliance_reference_ids"`
+	Progress               string  `json:"progress,omitempty"`
+	GitIssueURL            string  `json:"git_issue_url,omitempty"`
+	Remarks                string  `json:"remarks,omitempty"`
+	TreatmentStrategy      string  `json:"treatment_strategy,omitempty"`
+	AssignmentTeamID       *int    `json:"assignment_team_id,omitempty"`
+	ActionPlanDescription  string  `json:"action_plan_description,omitempty"`
+	ActionOwnerID          *int    `json:"action_owner_id,omitempty"`
+
+	// RESTRICTED — trigger PENDING_AMENDMENT if changed on an IN_REMEDIATION risk
+	ImplementationDate string                    `json:"implementation_date,omitempty"`
+	EmailSubject       string                    `json:"email_subject"`
+	ActionSteps        []UpdateActionStepRequest `json:"action_steps,omitempty"`
+
+	// Full-edit only (editable before risk owner approval)
+	ReassessmentDate string `json:"reassessment_date,omitempty"`
+	GrossScoreID     *int   `json:"gross_score_id,omitempty"`
+}
+
+// UpdateActionStepRequest is one step inside UpdateRiskRequest.ActionSteps.
+type UpdateActionStepRequest struct {
+	ID          *int   `json:"id,omitempty"` // nil = new step; non-nil = update existing
+	Description string `json:"description"`
 }
 
 // RejectRiskRequest carries the mandatory rejection comment.
@@ -138,8 +250,6 @@ type EscalateRiskRequest struct {
 	Reason      string `json:"reason"`
 }
 
-// AssessRiskRequest carries residual assessment values.
-type AssessRiskRequest struct {
-	NewTreatmentStrategy string `json:"new_treatment_strategy"`
-	Decision             string `json:"decision"`
-}
+// TODO: escalation — for MEDIUM/HIGH risks past their implementation_date deadline,
+// compliance can escalate to management via POST /api/v1/risks/{id}/escalate.
+// Management responds by adding a MANAGEMENT action plan. See risk_escalation table.

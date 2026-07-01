@@ -180,3 +180,17 @@ export function formatBackendTimestampForDisplay(
   return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(date);
 }
 
+/**
+ * Formats a local Date as a "YYYY-MM-DD" string for API payloads.
+ *
+ * @param d - Date to format, or null/undefined.
+ * @returns {string | undefined} Date-only string, or undefined when d is null/undefined.
+ */
+export function toDateOnlyString(d: Date | null | undefined): string | undefined {
+  if (!d) return undefined;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+

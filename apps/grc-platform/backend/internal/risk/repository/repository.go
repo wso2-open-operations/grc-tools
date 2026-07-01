@@ -25,12 +25,26 @@ import (
 
 // RiskRepository is the data-access contract for risk records.
 type RiskRepository interface {
-	List(ctx context.Context, filter model.ListRisksFilter) ([]*model.Risk, error)
-	GetByID(ctx context.Context, id int) (*model.Risk, error)
+	List(ctx context.Context, filter model.ListRisksFilter) ([]*model.RiskListItem, error)
+	GetByID(ctx context.Context, id int) (*model.RiskDetail, error)
+	// GetWorkflowStatus is a lightweight single-column fetch for callers that only
+	// need to guard a workflow transition, avoiding GetByID's full join + related-entity queries.
+	GetWorkflowStatus(ctx context.Context, id int) (string, error)
 	Create(ctx context.Context, req model.CreateRiskRequest, createdBy string) (*model.CreateRiskResponse, error)
-	Update(ctx context.Context, id int, req model.UpdateRiskRequest, updatedBy string) error
+	Update(ctx context.Context, id int, req model.UpdateRiskRequest, updatedBy string) (restrictedChanged bool, err error)
 	UpdateStatus(ctx context.Context, id int, status, updatedBy string) error
-	NextSequenceID(ctx context.Context, sourceRegisterID, year int, quarter string) (int, error)
+	SetRejection(ctx context.Context, id int, comment, stage, updatedBy string) error
+	ClearRejection(ctx context.Context, id int, updatedBy string) error
+	SetRiskType(ctx context.Context, id int, riskType, updatedBy string) error
+	SetOwnerFirstApprovedAt(ctx context.Context, id int, updatedBy string) error
+	Cancel(ctx context.Context, id int, updatedBy string) error
+	NextSequenceID(ctx context.Context, sourceRegisterID int) (int, error)
+}
+
+// RiskAssessmentRepository is the data-access contract for residual risk assessments.
+type RiskAssessmentRepository interface {
+	Create(ctx context.Context, riskID int, req model.CreateAssessmentRequest, assessedBy string) (*model.RiskAssessment, error)
+	ListByRiskID(ctx context.Context, riskID int) ([]model.RiskAssessment, error)
 }
 
 // TeamRepository is the data-access contract for risk teams.

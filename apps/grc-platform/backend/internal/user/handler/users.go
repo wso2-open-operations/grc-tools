@@ -31,6 +31,9 @@ func handleListUsers(repo userentity.Repository) http.HandlerFunc {
 			response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 			return
 		}
+		if users == nil {
+			users = []*userentity.User{}
+		}
 		response.WriteJSONValue(w, http.StatusOK, users)
 	}
 }

@@ -15,6 +15,7 @@
 // under the License.
 
 import { BACKEND_BASE_URL } from "@config/apiConfig";
+import { toDateOnlyString } from "@utils/dateTime";
 import type { AddRiskFormValues } from "../pages/add-risk/types";
 
 // ── Response types (mirror Go models) ─────────────────────────────────────────
@@ -58,6 +59,149 @@ export interface NextSequenceIDResponse {
   next_sequence_id: number;
 }
 
+// ── Risk Registers types ───────────────────────────────────────────────────────
+
+export interface RiskListItem {
+  id: number;
+  risk_code: string;
+  risk_title: string;
+  source_register_name: string;
+  risk_level: string;
+  risk_level_color: string;
+  owner_name: string;
+  assigner_name: string;
+  workflow_status: string;
+  risk_type: string;
+  implementation_date: string | null;
+  rejection_comment: string | null;
+  rejection_stage: string | null;
+  created_at: string;
+}
+
+export interface RiskScoreInfo {
+  id: number;
+  likelihood: number;
+  impact: number;
+  risk_rating: number;
+  risk_level: string;
+  color_code: string;
+}
+
+export interface ActionPlanStep {
+  id: number;
+  plan_id: number;
+  step_no: number;
+  description: string;
+  status: string;
+  completed_date: string | null;
+}
+
+export interface ActionPlanDetail {
+  id: number;
+  action_owner_id: number | null;
+  description: string | null;
+  status: string;
+  plan_type: string;
+  steps: ActionPlanStep[];
+}
+
+export interface RiskAssessmentRecord {
+  id: number;
+  risk_id: number;
+  score_id: number;
+  progress: string;
+  reassessment_date: string;
+  assessed_by: string;
+  created_at: string;
+  residual_likelihood: number;
+  residual_impact: number;
+  residual_rating: number;
+  residual_level: string;
+  residual_color_code: string;
+}
+
+export interface RiskDetail {
+  id: number;
+  risk_code: string;
+  risk_year: number;
+  risk_quarter: string;
+  risk_title: string;
+  risk_description: string;
+  risk_identified_date: string | null;
+  identified_by_type: string | null;
+  identified_by_user_id: number | null;
+  identified_by_name: string | null;
+  assigner_id: number;
+  owner_id: number;
+  impact_description: string | null;
+  treatment_strategy: string | null;
+  assignment_team_id: number;
+  progress: string | null;
+  implementation_date: string | null;
+  reassessment_date: string | null;
+  git_issue_url: string | null;
+  email_subject: string | null;
+  remarks: string | null;
+  workflow_status: string;
+  risk_type: string;
+  rejection_comment: string | null;
+  rejection_stage: string | null;
+  owner_first_approved_at: string | null;
+  compliance_approval_date: string | null;
+  created_at: string;
+  updated_at: string;
+  source_register_name: string;
+  assignment_team_name: string;
+  owner_name: string;
+  assigner_name: string;
+  identified_by_user_name: string | null;
+  compliance_approver_name: string | null;
+  gross_score: RiskScoreInfo | null;
+  compliance_references: ComplianceReference[];
+  action_plan: ActionPlanDetail | null;
+  assessments: RiskAssessmentRecord[];
+}
+
+export interface ListRisksParams {
+  statuses?: string[];
+  team_id?: number;
+  level?: string;
+  search?: string;
+  risk_type?: string;
+}
+
+export interface UpdateRiskPayload {
+  risk_title: string;
+  risk_description: string;
+  risk_identified_date?: string;
+  identified_by_type?: string;
+  identified_by_user_id?: number;
+  identified_by_name?: string;
+  assigner_id?: number;
+  owner_id?: number;
+  impact_description?: string;
+  compliance_reference_ids?: number[];
+  progress?: string;
+  git_issue_url?: string;
+  email_subject?: string;
+  remarks?: string;
+  reassessment_date?: string;
+  gross_score_id?: number;
+  implementation_date?: string;
+  treatment_strategy?: string;
+  assignment_team_id?: number;
+  action_plan_description?: string;
+  action_owner_id?: number;
+  action_steps?: { description: string }[];
+}
+
+export interface CreateAssessmentPayload {
+  likelihood: number;
+  impact: number;
+  progress: string;
+  reassessment_date: string;
+}
+
 // ── API functions ──────────────────────────────────────────────────────────────
 
 type AuthFetch = (input: RequestInfo | URL, options?: RequestInit) => Promise<Response>;
@@ -70,6 +214,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
       data: body,
     });
     throw err;
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return res.json() as Promise<T>;
 }
@@ -130,18 +277,12 @@ export function buildCreateRiskPayload(data: AddRiskFormValues): Record<string, 
       ? { identified_by_user_id: data.identifiedByEmployee !== "" ? data.identifiedByEmployee : undefined }
       : { identified_by_name: data.identifiedByName !== "" ? data.identifiedByName : undefined }),
     assigner_id: data.assignedBy !== "" ? data.assignedBy : undefined,
-    risk_identified_date: data.riskIdentifiedDate
-      ? formatDate(data.riskIdentifiedDate)
-      : undefined,
+    risk_identified_date: toDateOnlyString(data.riskIdentifiedDate),
     likelihood: data.likelihood,
     impact: data.impact,
     impact_description: data.impactDescription,
-    implementation_date: data.implementationDate
-      ? formatDate(data.implementationDate)
-      : undefined,
-    reassessment_date: data.reassessmentDate
-      ? formatDate(data.reassessmentDate)
-      : undefined,
+    implementation_date: toDateOnlyString(data.implementationDate),
+    reassessment_date: toDateOnlyString(data.reassessmentDate),
     assignment_team_id: data.assignmentTeam !== "" ? data.assignmentTeam : undefined,
     owner_id: data.riskOwner !== "" ? data.riskOwner : undefined,
     action_owner_id: data.actionOwner !== "" ? data.actionOwner : undefined,
@@ -166,9 +307,95 @@ export async function createRisk(
   return handleResponse<CreateRiskResponse>(res);
 }
 
-function formatDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+export async function fetchRisks(
+  authFetch: AuthFetch,
+  params: ListRisksParams = {},
+): Promise<RiskListItem[]> {
+  const q = new URLSearchParams();
+  if (params.statuses?.length) q.set("statuses", params.statuses.join(","));
+  if (params.team_id) q.set("team_id", String(params.team_id));
+  if (params.level) q.set("level", params.level);
+  if (params.search) q.set("search", params.search);
+  if (params.risk_type) q.set("risk_type", params.risk_type);
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks?${q}`);
+  return handleResponse<RiskListItem[]>(res);
+}
+
+export async function fetchRiskDetail(
+  authFetch: AuthFetch,
+  id: number,
+): Promise<RiskDetail> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}`);
+  return handleResponse<RiskDetail>(res);
+}
+
+export async function updateRisk(
+  authFetch: AuthFetch,
+  id: number,
+  payload: UpdateRiskPayload,
+): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<void>(res);
+}
+
+export async function approveRisk(authFetch: AuthFetch, id: number): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/approve`, { method: "POST" });
+  return handleResponse<void>(res);
+}
+
+export async function rejectRisk(
+  authFetch: AuthFetch,
+  id: number,
+  rejection_comment: string,
+): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ rejection_comment }),
+  });
+  return handleResponse<void>(res);
+}
+
+export async function completeRisk(authFetch: AuthFetch, id: number): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/complete`, { method: "POST" });
+  return handleResponse<void>(res);
+}
+
+export async function ownerApproveRisk(authFetch: AuthFetch, id: number): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/owner-approve`, { method: "POST" });
+  return handleResponse<void>(res);
+}
+
+export async function closeRisk(authFetch: AuthFetch, id: number): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/close`, { method: "POST" });
+  return handleResponse<void>(res);
+}
+
+export async function managementApproveRisk(authFetch: AuthFetch, id: number): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/management-approve`, { method: "POST" });
+  return handleResponse<void>(res);
+}
+
+export async function cancelRisk(authFetch: AuthFetch, id: number): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/cancel`, { method: "POST" });
+  return handleResponse<void>(res);
+}
+
+export async function resubmitRisk(authFetch: AuthFetch, id: number): Promise<void> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/resubmit`, { method: "POST" });
+  return handleResponse<void>(res);
+}
+
+export async function createAssessment(
+  authFetch: AuthFetch,
+  riskId: number,
+  payload: CreateAssessmentPayload,
+): Promise<RiskAssessmentRecord> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${riskId}/assess`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<RiskAssessmentRecord>(res);
 }

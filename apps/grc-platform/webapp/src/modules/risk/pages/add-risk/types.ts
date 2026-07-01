@@ -28,7 +28,7 @@ export type ImpactLevel     = 1 | 2 | 3;
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
 // Matches risk.treatment_strategy ENUM in risk_schema.sql.
-export type TreatmentStrategy = "MITIGATE" | "ACCEPT" | "TRANSFER" | "VOID";
+export type TreatmentStrategy = "REMEDIATE" | "ACCEPT" | "TRANSFER" | "VOID";
 
 export interface ActionStep {
   description: string;

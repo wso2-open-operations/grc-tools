@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
+import type { FieldPath } from "react-hook-form";
 import { useAsgardeo } from "@asgardeo/react";
 import {
   Alert,
@@ -272,7 +273,7 @@ export default function AddRisk(): JSX.Element {
     }
     data.actionSteps.forEach((step, i) => {
       if (!step.description?.trim()) {
-        setError(`actionSteps.${i}.description` as any, { type: "required", message: "Step description is required" });
+        setError(`actionSteps.${i}.description` as FieldPath<AddRiskFormValues>, { type: "required", message: "Step description is required" });
         hasStep3Error = true;
       }
     });

@@ -24,7 +24,7 @@ export const QUARTERS: { value: Quarter; label: string }[] = [
 ];
 
 export const TREATMENT_STRATEGIES: { value: TreatmentStrategy; label: string }[] = [
-  { value: "MITIGATE", label: "Mitigate" },
+  { value: "REMEDIATE", label: "Remediate" },
   { value: "ACCEPT",   label: "Accept" },
   { value: "TRANSFER", label: "Transfer" },
   { value: "VOID",     label: "Void" },

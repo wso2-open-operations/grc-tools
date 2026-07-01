@@ -14,18 +14,693 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Typography } from "@wso2/oxygen-ui";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  FormControl,
+  IconButton,
+  InputAdornment,
+  InputLabel,
+  MenuItem,
+  PageContent,
+  PageTitle,
+  Paper,
+  Select,
+  Stack,
+  Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tabs,
+  TextField,
+  Tooltip,
+  Typography,
+} from "@wso2/oxygen-ui";
+import { Eye, RefreshCw, Search, X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import {
+  approveRisk,
+  cancelRisk,
+  closeRisk,
+  completeRisk,
+  createAssessment,
+  fetchAssignmentTeams,
+  fetchComplianceReferences,
+  fetchRiskDetail,
+  fetchRisks,
+  fetchRiskScores,
+  fetchSourceRegisterTeams,
+  fetchUsers,
+  managementApproveRisk,
+  ownerApproveRisk,
+  rejectRisk,
+  resubmitRisk,
+  updateRisk,
+} from "../api/riskApi";
+import type {
+  ComplianceReference,
+  RiskDetail,
+  RiskListItem,
+  RiskScore,
+  RiskTeam,
+  UpdateRiskPayload,
+  UserOption,
+} from "../api/riskApi";
+import { useAuthApiClient } from "@hooks/useAuthApiClient";
+import RiskDetailDrawer from "./risk-registers/RiskDetailDrawer";
+import RejectDialog from "./risk-registers/RejectDialog";
+import ReassessmentDialog from "./risk-registers/ReassessmentDialog";
+import EditRiskDialog from "./risk-registers/EditRiskDialog";
+import {
+  APPROVED_ALL_STATUSES,
+  PENDING_COMPLIANCE_STATUSES,
+  PENDING_MANAGEMENT_STATUSES,
+  PENDING_OWNER_STATUSES,
+  PENDING_REVISION_STATUSES,
+  STATUS_CONFIG,
+  calcDue,
+  formatDate,
+} from "./risk-registers/utils";
+
+// ── Tab definitions ────────────────────────────────────────────────────────────
+
+type TabKey = "approved" | "pending-owner" | "pending-management" | "pending-compliance" | "pending-revision";
+
+interface TabDef {
+  key: TabKey;
+  label: string;
+  statuses: string[];
+  showRiskType: boolean;
+}
+
+const TABS: TabDef[] = [
+  { key: "approved",            label: "Approved Risks",              statuses: APPROVED_ALL_STATUSES,        showRiskType: false },
+  { key: "pending-owner",       label: "Pending Risk Owner Approval", statuses: PENDING_OWNER_STATUSES,       showRiskType: true },
+  { key: "pending-management",  label: "Pending Management Approval", statuses: PENDING_MANAGEMENT_STATUSES,  showRiskType: true },
+  { key: "pending-compliance",  label: "Pending Compliance Approval", statuses: PENDING_COMPLIANCE_STATUSES,  showRiskType: true },
+  { key: "pending-revision",    label: "Pending Revision",            statuses: PENDING_REVISION_STATUSES,    showRiskType: true },
+];
+
+// ── Chips ──────────────────────────────────────────────────────────────────────
+
+function OutlinedStatusChip({ status }: { status: string }): JSX.Element {
+  if (status === "IN_REMEDIATION") return <Chip label="Open" color="info" size="small" variant="outlined" />;
+  if (status === "CLOSED") return <Chip label="Closed" color="success" size="small" variant="outlined" />;
+  const cfg = STATUS_CONFIG[status] ?? { label: status, color: "default" as const };
+  return <Chip label={cfg.label} color={cfg.color} size="small" variant="outlined" />;
+}
+
+function LevelChip({ level, color }: { level: string; color: string }): JSX.Element {
+  if (!level) return <Typography variant="body2">—</Typography>;
+  return (
+    <Chip
+      label={level}
+      size="small"
+      sx={{ bgcolor: color || undefined, color: color ? "#fff" : undefined, fontWeight: 700 }}
+    />
+  );
+}
+
+const RISK_CLOSURE_STATUSES = new Set([
+  "PENDING_OWNER_COMPLETION_APPROVAL",
+  "PENDING_COMPLIANCE_CLOSURE",
+]);
+
+function RiskTypeChip({ riskType, workflowStatus, rejectionStage }: { riskType: string; workflowStatus: string; rejectionStage?: string | null }): JSX.Element {
+  const isRiskClosure =
+    RISK_CLOSURE_STATUSES.has(workflowStatus) ||
+    (workflowStatus === "PENDING_REVISION" && rejectionStage === "COMPLETION_OWNER");
+  if (isRiskClosure) {
+    return <Chip label="Risk Closure" color="success" size="small" variant="outlined" />;
+  }
+  return (
+    <Chip
+      label={riskType === "UPDATED" ? "Updated Risk" : "New Risk"}
+      color={riskType === "UPDATED" ? "warning" : "info"}
+      size="small"
+      variant="outlined"
+    />
+  );
+}
+
+// ── Filters ────────────────────────────────────────────────────────────────────
+
+interface Filters {
+  search: string;
+  teamId: number;
+  level: string;
+  status: string;
+  riskType: string;
+}
+
+function FilterBar({
+  filters,
+  teams,
+  showApprovedFilter,
+  approvedFilter,
+  onApprovedFilterChange,
+  showRiskTypeFilter,
+  onChange,
+  onRefresh,
+}: {
+  filters: Filters;
+  teams: RiskTeam[];
+  showApprovedFilter: boolean;
+  approvedFilter: "" | "open" | "closed";
+  onApprovedFilterChange: (val: "" | "open" | "closed") => void;
+  showRiskTypeFilter: boolean;
+  onChange: (f: Filters) => void;
+  onRefresh: () => void;
+}): JSX.Element {
+  return (
+    <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
+      <TextField
+        size="small"
+        placeholder="Search risk code or title..."
+        value={filters.search}
+        onChange={(e) => onChange({ ...filters, search: e.target.value })}
+        sx={{ minWidth: 240 }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <Search size={16} />
+            </InputAdornment>
+          ),
+          endAdornment: filters.search ? (
+            <InputAdornment position="end">
+              <IconButton size="small" onClick={() => onChange({ ...filters, search: "" })}>
+                <X size={14} />
+              </IconButton>
+            </InputAdornment>
+          ) : undefined,
+        }}
+      />
+
+      <FormControl size="small" sx={{ minWidth: 160 }}>
+        <InputLabel>Register</InputLabel>
+        <Select
+          label="Register"
+          value={filters.teamId || ""}
+          onChange={(e) => onChange({ ...filters, teamId: Number(e.target.value) || 0 })}
+        >
+          <MenuItem value="">All Registers</MenuItem>
+          {teams.map((t) => (
+            <MenuItem key={t.id} value={t.id}>
+              {t.name}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      <FormControl size="small" sx={{ minWidth: 130 }}>
+        <InputLabel>Level</InputLabel>
+        <Select
+          label="Level"
+          value={filters.level}
+          onChange={(e) => onChange({ ...filters, level: e.target.value as string })}
+        >
+          <MenuItem value="">All Levels</MenuItem>
+          <MenuItem value="LOW">Low</MenuItem>
+          <MenuItem value="MEDIUM">Medium</MenuItem>
+          <MenuItem value="HIGH">High</MenuItem>
+        </Select>
+      </FormControl>
+
+      {showRiskTypeFilter && (
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Risk Type</InputLabel>
+          <Select
+            label="Risk Type"
+            value={filters.riskType}
+            onChange={(e) => onChange({ ...filters, riskType: e.target.value as string })}
+          >
+            <MenuItem value="">All Types</MenuItem>
+            <MenuItem value="NEW">New Risk</MenuItem>
+            <MenuItem value="UPDATED">Updated Risk</MenuItem>
+          </Select>
+        </FormControl>
+      )}
+
+      {showApprovedFilter && (
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel>Status</InputLabel>
+          <Select
+            label="Status"
+            value={approvedFilter}
+            onChange={(e) => onApprovedFilterChange(e.target.value as "" | "open" | "closed")}
+          >
+            <MenuItem value="">All Risks</MenuItem>
+            <MenuItem value="open">Open</MenuItem>
+            <MenuItem value="closed">Closed</MenuItem>
+          </Select>
+        </FormControl>
+      )}
+
+      <Tooltip title="Refresh">
+        <IconButton size="small" onClick={onRefresh}>
+          <RefreshCw size={16} />
+        </IconButton>
+      </Tooltip>
+    </Stack>
+  );
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function RiskRegisters(): JSX.Element {
+  const authFetch = useAuthApiClient();
+
+  const [activeTab, setActiveTab] = useState<TabKey>("approved");
+  const [approvedFilter, setApprovedFilter] = useState<"" | "open" | "closed">("");
+  const [risks, setRisks] = useState<RiskListItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState("");
+
+  const [sourceTeams, setSourceTeams] = useState<RiskTeam[]>([]);
+  const [assignmentTeams, setAssignmentTeams] = useState<RiskTeam[]>([]);
+  const [riskScores, setRiskScores] = useState<RiskScore[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [complianceRefs, setComplianceRefs] = useState<ComplianceReference[]>([]);
+
+  const [filters, setFilters] = useState<Filters>({
+    search: "",
+    teamId: 0,
+    level: "",
+    status: "",
+    riskType: "",
+  });
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerDetail, setDrawerDetail] = useState<RiskDetail | null>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState("");
+
+  const [editDetail, setEditDetail] = useState<RiskDetail | null>(null);
+  const [assessOpen, setAssessOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+
+  const [actionError, setActionError] = useState("");
+  const [actionSuccess, setActionSuccess] = useState("");
+
+  const activeTabDef = TABS.find((t) => t.key === activeTab)!;
+
+  const getStatuses = useCallback((): string[] => {
+    if (activeTab === "approved") {
+      if (approvedFilter === "open") return ["IN_REMEDIATION"];
+      if (approvedFilter === "closed") return ["CLOSED"];
+      return APPROVED_ALL_STATUSES;
+    }
+    return activeTabDef.statuses;
+  }, [activeTab, activeTabDef.statuses, approvedFilter]);
+
+  useEffect(() => {
+    fetchSourceRegisterTeams(authFetch).then(setSourceTeams).catch(console.error);
+    fetchAssignmentTeams(authFetch).then(setAssignmentTeams).catch(console.error);
+    fetchRiskScores(authFetch).then(setRiskScores).catch(console.error);
+    fetchUsers(authFetch).then(setUsers).catch(console.error);
+    fetchComplianceReferences(authFetch).then(setComplianceRefs).catch(console.error);
+  }, []);
+
+  const loadRisks = useCallback(async () => {
+    setLoading(true);
+    setListError("");
+    try {
+      const items = await fetchRisks(authFetch, {
+        statuses: getStatuses(),
+        team_id: filters.teamId || undefined,
+        level: filters.level || undefined,
+        search: filters.search || undefined,
+        risk_type: filters.riskType || undefined,
+      });
+      setRisks(items ?? []);
+    } catch (e: unknown) {
+      setListError(e instanceof Error ? e.message : "Failed to load risks.");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeTab, filters, getStatuses]);
+
+  useEffect(() => {
+    loadRisks();
+  }, [loadRisks]);
+
+  const openDrawer = async (id: number) => {
+    setDrawerOpen(true);
+    setDrawerDetail(null);
+    setDrawerError("");
+    setDrawerLoading(true);
+    try {
+      const detail = await fetchRiskDetail(authFetch, id);
+      setDrawerDetail(detail);
+    } catch (e: unknown) {
+      setDrawerError(e instanceof Error ? e.message : "Failed to load risk details.");
+    } finally {
+      setDrawerLoading(false);
+    }
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setDrawerDetail(null);
+    setDrawerError("");
+  };
+
+  const runAction = async (fn: () => Promise<void>, successMsg: string) => {
+    setActionError("");
+    setActionSuccess("");
+    try {
+      await fn();
+      setActionSuccess(successMsg);
+      closeDrawer();
+      loadRisks();
+    } catch (e: unknown) {
+      setActionError(e instanceof Error ? e.message : "Action failed.");
+    }
+  };
+
+  const drawerActions = {
+    onOwnerApprove: () =>
+      runAction(
+        () => ownerApproveRisk(authFetch, drawerDetail!.id),
+        "Owner approved.",
+      ),
+
+    onManagementApprove: () =>
+      runAction(
+        () => managementApproveRisk(authFetch, drawerDetail!.id),
+        "Management approved. Risk moved to Pending Compliance Approval.",
+      ),
+
+    onApprove: () =>
+      runAction(
+        () => approveRisk(authFetch, drawerDetail!.id),
+        "Risk approved. It has been moved to Approved Risks.",
+      ),
+
+    onReject: () => setRejectOpen(true),
+
+    onComplete: () =>
+      runAction(
+        () => completeRisk(authFetch, drawerDetail!.id),
+        "Risk submitted for completion approval by risk owner.",
+      ),
+
+    onResubmit: () =>
+      runAction(
+        () => resubmitRisk(authFetch, drawerDetail!.id),
+        "Risk resubmitted and sent for owner approval.",
+      ),
+
+    onCloseRisk: () =>
+      runAction(
+        () => closeRisk(authFetch, drawerDetail!.id),
+        "Risk closed successfully.",
+      ),
+
+    onEdit: () => setEditDetail(drawerDetail),
+    onAssess: () => setAssessOpen(true),
+    onCancel: () => setCancelConfirmOpen(true),
+  };
+
+  const handleRejectConfirm = async (comment: string) => {
+    if (!drawerDetail) return;
+    await rejectRisk(authFetch, drawerDetail.id, comment);
+    setActionSuccess("Risk rejected and returned for revision.");
+    closeDrawer();
+    loadRisks();
+  };
+
+  const handleEditSave = async (payload: UpdateRiskPayload) => {
+    if (!editDetail) return;
+    const savedId = editDetail.id;
+    const isPendingRevision = editDetail.workflow_status === "PENDING_REVISION";
+    const isFullEdit =
+      editDetail.owner_first_approved_at === null &&
+      (editDetail.workflow_status === "PENDING_RISK_OWNER_APPROVAL" ||
+       editDetail.workflow_status === "PENDING_REVISION");
+    await updateRisk(authFetch, savedId, payload);
+    setEditDetail(null);
+    loadRisks();
+    if (isPendingRevision) {
+      openDrawer(savedId);
+    } else {
+      const willMove = editDetail.workflow_status === "IN_REMEDIATION";
+      setActionSuccess(
+        willMove
+          ? "Risk updated. It has been moved for Risk Owner Approval."
+          : "Risk updated successfully.",
+      );
+      closeDrawer();
+    }
+  };
+
+  const handleAssessSubmit = async (payload: Parameters<typeof createAssessment>[2]) => {
+    if (!drawerDetail) return;
+    await createAssessment(authFetch, drawerDetail.id, payload);
+    setActionSuccess("Assessment saved.");
+    setAssessOpen(false);
+    openDrawer(drawerDetail.id);
+    loadRisks();
+  };
+
+  const handleTabChange = (_: React.SyntheticEvent, val: TabKey) => {
+    setActiveTab(val);
+    setFilters({ search: "", teamId: 0, level: "", status: "", riskType: "" });
+    setApprovedFilter("");
+  };
+
+  const showStatusCol = activeTab === "approved";
+  const showRiskTypeCol = activeTabDef.showRiskType;
+  const colSpan = 8 + (showStatusCol ? 1 : 0) + (showRiskTypeCol ? 1 : 0);
+
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Risk Registers
-      </Typography>
-      <Typography variant="body1" color="text.secondary">
-        Risk registers.
-      </Typography>
-    </Box>
+    <PageContent>
+      <PageTitle>
+        <PageTitle.Header>Risk Registers</PageTitle.Header>
+      </PageTitle>
+
+      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 3 }}>
+        <Tabs value={activeTab} onChange={handleTabChange}>
+          {TABS.map((tab) => (
+            <Tab key={tab.key} label={tab.label} value={tab.key} />
+          ))}
+        </Tabs>
+      </Box>
+
+      <Box sx={{ mb: 2 }}>
+        <FilterBar
+          filters={filters}
+          teams={sourceTeams}
+          showApprovedFilter={activeTab === "approved"}
+          approvedFilter={approvedFilter}
+          onApprovedFilterChange={setApprovedFilter}
+          showRiskTypeFilter={activeTabDef.showRiskType}
+          onChange={setFilters}
+          onRefresh={loadRisks}
+        />
+      </Box>
+
+      {actionError && (
+        <Alert severity="error" onClose={() => setActionError("")} sx={{ mb: 2 }}>
+          {actionError}
+        </Alert>
+      )}
+      {actionSuccess && (
+        <Alert severity="success" onClose={() => setActionSuccess("")} sx={{ mb: 2 }}>
+          {actionSuccess}
+        </Alert>
+      )}
+
+      <Paper variant="outlined">
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 700 }}>Risk Code</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Title</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Register</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Level</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Owner</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Submitted</TableCell>
+                {showStatusCol && <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>}
+                {showRiskTypeCol && <TableCell sx={{ fontWeight: 700 }}>Risk Type</TableCell>}
+                <TableCell sx={{ fontWeight: 700 }}>Due</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={colSpan} align="center" sx={{ py: 6 }}>
+                    <CircularProgress size={28} />
+                  </TableCell>
+                </TableRow>
+              ) : listError ? (
+                <TableRow>
+                  <TableCell colSpan={colSpan} align="center" sx={{ py: 4 }}>
+                    <Typography color="error">{listError}</Typography>
+                  </TableCell>
+                </TableRow>
+              ) : risks.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={colSpan} align="center" sx={{ py: 6 }}>
+                    <Typography color="text.secondary">No risks found.</Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                risks.map((risk) => (
+                  <TableRow
+                    key={risk.id}
+                    hover
+                    sx={{ cursor: "pointer" }}
+                    onClick={() => openDrawer(risk.id)}
+                  >
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600} color="primary">
+                        {risk.risk_code}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 220 }}>
+                      <Typography
+                        variant="body2"
+                        sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      >
+                        {risk.risk_title}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{risk.source_register_name}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <LevelChip level={risk.risk_level} color={risk.risk_level_color} />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{risk.owner_name || "—"}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{formatDate(risk.created_at)}</Typography>
+                    </TableCell>
+                    {showStatusCol && (
+                      <TableCell>
+                        <OutlinedStatusChip status={risk.workflow_status} />
+                      </TableCell>
+                    )}
+                    {showRiskTypeCol && (
+                      <TableCell>
+                        <RiskTypeChip riskType={risk.risk_type} workflowStatus={risk.workflow_status} rejectionStage={risk.rejection_stage} />
+                      </TableCell>
+                    )}
+                    <TableCell>
+                      {(() => {
+                        const due = calcDue(risk.implementation_date);
+                        return (
+                          <Typography variant="body2" fontWeight={600} sx={{ color: due.color }}>
+                            {due.label}
+                          </Typography>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                      <Tooltip title="View Details">
+                        <IconButton size="small" onClick={() => openDrawer(risk.id)}>
+                          <Eye size={16} />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      <RiskDetailDrawer
+        open={drawerOpen}
+        detail={drawerDetail}
+        loading={drawerLoading}
+        error={drawerError}
+        onClose={closeDrawer}
+        {...drawerActions}
+      />
+
+      <RejectDialog
+        open={rejectOpen}
+        title="Reject Risk"
+        description="Provide a rejection reason. The risk will be returned for revision."
+        onClose={() => setRejectOpen(false)}
+        onConfirm={handleRejectConfirm}
+      />
+
+      {drawerDetail && (
+        <ReassessmentDialog
+          open={assessOpen}
+          riskCode={drawerDetail.risk_code}
+          riskScores={riskScores}
+          onClose={() => setAssessOpen(false)}
+          onSubmit={handleAssessSubmit}
+        />
+      )}
+
+      {editDetail && (() => {
+        const isFullMode =
+          editDetail.owner_first_approved_at === null &&
+          (editDetail.workflow_status === "PENDING_RISK_OWNER_APPROVAL" ||
+           editDetail.workflow_status === "PENDING_REVISION");
+        return (
+          <EditRiskDialog
+            open
+            detail={editDetail}
+            mode={isFullMode ? "full" : "restricted"}
+            assignmentTeams={assignmentTeams}
+            users={isFullMode ? users : undefined}
+            riskScores={isFullMode ? riskScores : undefined}
+            complianceRefs={isFullMode ? complianceRefs : undefined}
+            onClose={() => setEditDetail(null)}
+            onSave={handleEditSave}
+          />
+        );
+      })()}
+
+      <Dialog open={cancelConfirmOpen} onClose={() => setCancelConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Cancel Risk</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to cancel this risk? It will be removed from the pending queue and cannot be resubmitted.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelConfirmOpen(false)} color="inherit">
+            Go Back
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              setCancelConfirmOpen(false);
+              runAction(
+                () => cancelRisk(authFetch, drawerDetail!.id),
+                "Risk cancelled successfully.",
+              );
+            }}
+          >
+            Cancel Risk
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </PageContent>
   );
 }

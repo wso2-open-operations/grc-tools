@@ -19,8 +19,12 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 
+	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
 	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository"
 )
@@ -36,7 +40,9 @@ func NewRiskRepository(db *sql.DB) repository.RiskRepository {
 // without reserving it. This is a preview — the actual number is assigned
 // atomically inside Create. Reads last_sequence_number from the sequence table;
 // returns 1 if no row exists yet (first risk for this team).
-func (r *riskRepository) NextSequenceID(ctx context.Context, sourceRegisterID, year int, quarter string) (int, error) {
+// The counter never resets per year/quarter (it's unique per team across all
+// time), so the lookup only needs sourceRegisterID.
+func (r *riskRepository) NextSequenceID(ctx context.Context, sourceRegisterID int) (int, error) {
 	var lastSeq int
 	err := r.db.QueryRowContext(ctx,
 		"SELECT last_sequence_number FROM risk_register_sequence WHERE risk_team_id = ?",
@@ -51,7 +57,7 @@ func (r *riskRepository) NextSequenceID(ctx context.Context, sourceRegisterID, y
 			return 0, fmt.Errorf("validate source register for preview: %w", existsErr)
 		}
 		if !exists {
-			return 0, fmt.Errorf("source register %d not found", sourceRegisterID)
+			return 0, &apierror.Error{StatusCode: http.StatusNotFound, Body: fmt.Sprintf("source register %d not found", sourceRegisterID)}
 		}
 		return 1, nil
 	}
@@ -65,7 +71,7 @@ func (r *riskRepository) NextSequenceID(ctx context.Context, sourceRegisterID, y
 //  1. Locks risk_register_sequence row and increments (counter never resets — globally unique per team)
 //  2. Resolves the team code → generates YEAR-CODE-QUARTER-NNNN risk code
 //  3. Resolves gross_score_id from (likelihood, impact)
-//  4. Inserts risk with workflow_status = PENDING_COMPLIANCE_REVIEW
+//  4. Inserts risk with workflow_status = PENDING_RISK_OWNER_APPROVAL
 //  5. Inserts risk_action_plan and links back to risk.action_plan_id
 //  6. Inserts risk_action_step rows
 //  7. Inserts risk_compliance_reference rows
@@ -147,7 +153,7 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 			?, ?, ?,
 			?, ?,
 			?, ?, ?,
-			'PENDING_COMPLIANCE_REVIEW', ?, ?
+			'PENDING_RISK_OWNER_APPROVAL', ?, ?
 		)`,
 		req.Year, req.SourceRegisterID, req.Quarter, riskCode,
 		req.RiskTitle, req.RiskDescription, nullableString(req.RiskIdentifiedDate),
@@ -232,28 +238,440 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 	return &model.CreateRiskResponse{ID: riskID, RiskCode: riskCode}, nil
 }
 
-func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter) ([]*model.Risk, error) {
-	// TODO: SELECT with dynamic WHERE clauses based on filter
-	return nil, nil
+func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter) ([]*model.RiskListItem, error) {
+	query := `
+		SELECT r.id, r.risk_code, r.risk_title,
+		       st.name  AS source_register_name,
+		       COALESCE(rs.risk_level, '')      AS risk_level,
+		       COALESCE(rs.color_code, '')      AS risk_level_color,
+		       COALESCE(owner.display_name, '') AS owner_name,
+		       COALESCE(asgn.display_name, '')  AS assigner_name,
+		       r.workflow_status,
+		       r.risk_type,
+		       r.implementation_date,
+		       r.rejection_comment,
+		       r.rejection_stage,
+		       r.created_at
+		FROM risk r
+		LEFT JOIN risk_team st ON st.id = r.source_register_id
+		LEFT JOIN risk_score rs ON rs.id = r.gross_score_id
+		LEFT JOIN ` + "`user`" + ` owner ON owner.id = r.owner_id
+		LEFT JOIN ` + "`user`" + ` asgn  ON asgn.id  = r.assigner_id`
+
+	var args []any
+	var where []string
+
+	if len(filter.Statuses) > 0 {
+		placeholders := strings.Repeat("?,", len(filter.Statuses))
+		placeholders = placeholders[:len(placeholders)-1]
+		where = append(where, "r.workflow_status IN ("+placeholders+")")
+		for _, s := range filter.Statuses {
+			args = append(args, s)
+		}
+	}
+	if filter.TeamID > 0 {
+		where = append(where, "r.source_register_id = ?")
+		args = append(args, filter.TeamID)
+	}
+	if filter.Level != "" {
+		where = append(where, "rs.risk_level = ?")
+		args = append(args, filter.Level)
+	}
+	if filter.Search != "" {
+		where = append(where, "(r.risk_code LIKE ? OR r.risk_title LIKE ?)")
+		like := "%" + filter.Search + "%"
+		args = append(args, like, like)
+	}
+	if filter.RiskType != "" {
+		where = append(where, "r.risk_type = ?")
+		args = append(args, filter.RiskType)
+	}
+
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY r.created_at DESC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list risks: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*model.RiskListItem
+	for rows.Next() {
+		var item model.RiskListItem
+		var createdAt []byte
+		if err := rows.Scan(
+			&item.ID, &item.RiskCode, &item.RiskTitle,
+			&item.SourceRegisterName, &item.RiskLevel, &item.RiskLevelColor,
+			&item.OwnerName, &item.AssignerName,
+			&item.WorkflowStatus, &item.RiskType, &item.ImplementationDate,
+			&item.RejectionComment, &item.RejectionStage, &createdAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan risk list item: %w", err)
+		}
+		item.CreatedAt = string(createdAt)
+		out = append(out, &item)
+	}
+	return out, rows.Err()
 }
 
-func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.Risk, error) {
-	// TODO: SELECT * FROM risk WHERE id = ?
-	return nil, nil
+func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail, error) {
+	var d model.RiskDetail
+	var createdAt, updatedAt []byte
+	var complianceApprovalDate, ownerFirstApprovedAt []byte
+	var scoreID, scoreLikelihood, scoreImpact, scoreRating sql.NullInt64
+	var scoreLevel, scoreColor sql.NullString
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT r.id, r.risk_code, r.risk_year, r.risk_quarter,
+		       r.risk_title, r.risk_description, r.risk_identified_date,
+		       r.identified_by_type, r.identified_by_user_id, r.identified_by_name,
+		       r.assigner_id, r.owner_id,
+		       r.impact_description, r.treatment_strategy,
+		       r.assignment_team_id,
+		       r.progress, r.implementation_date, r.reassessment_date,
+		       r.git_issue_url, r.email_subject, r.remarks,
+		       r.workflow_status, r.risk_type, r.rejection_comment, r.rejection_stage, r.owner_first_approved_at, r.compliance_approval_date,
+		       r.created_at, r.updated_at,
+		       COALESCE(st.name,'') AS source_register_name,
+		       COALESCE(at.name,'') AS assignment_team_name,
+		       COALESCE(owner.display_name,'') AS owner_name,
+		       COALESCE(asgn.display_name,'')  AS assigner_name,
+		       ibu.display_name                AS identified_by_user_name,
+		       ca.display_name                 AS compliance_approver_name,
+		       rs.id, rs.likelihood, rs.impact, rs.risk_rating, rs.risk_level, rs.color_code
+		FROM risk r
+		LEFT JOIN risk_team st ON st.id = r.source_register_id
+		LEFT JOIN risk_team at ON at.id = r.assignment_team_id
+		LEFT JOIN `+"`user`"+` owner ON owner.id = r.owner_id
+		LEFT JOIN `+"`user`"+` asgn  ON asgn.id  = r.assigner_id
+		LEFT JOIN `+"`user`"+` ibu   ON ibu.id   = r.identified_by_user_id
+		LEFT JOIN `+"`user`"+` ca    ON ca.id    = r.compliance_approval_by
+		LEFT JOIN risk_score rs ON rs.id = r.gross_score_id
+		WHERE r.id = ?`, id,
+	).Scan(
+		&d.ID, &d.RiskCode, &d.RiskYear, &d.RiskQuarter,
+		&d.RiskTitle, &d.RiskDescription, &d.RiskIdentifiedDate,
+		&d.IdentifiedByType, &d.IdentifiedByUserID, &d.IdentifiedByName,
+		&d.AssignerID, &d.OwnerID,
+		&d.ImpactDescription, &d.TreatmentStrategy,
+		&d.AssignmentTeamID,
+		&d.Progress, &d.ImplementationDate, &d.ReassessmentDate,
+		&d.GitIssueURL, &d.EmailSubject, &d.Remarks,
+		&d.WorkflowStatus, &d.RiskType, &d.RejectionComment, &d.RejectionStage, &ownerFirstApprovedAt, &complianceApprovalDate,
+		&createdAt, &updatedAt,
+		&d.SourceRegisterName, &d.AssignmentTeamName,
+		&d.OwnerName, &d.AssignerName,
+		&d.IdentifiedByUserName, &d.ComplianceApproverName,
+		&scoreID, &scoreLikelihood, &scoreImpact, &scoreRating, &scoreLevel, &scoreColor,
+	)
+	if err == sql.ErrNoRows {
+		return nil, &apierror.Error{StatusCode: http.StatusNotFound, Body: fmt.Sprintf("risk %d not found", id)}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get risk by id: %w", err)
+	}
+
+	d.CreatedAt = string(createdAt)
+	d.UpdatedAt = string(updatedAt)
+	if ownerFirstApprovedAt != nil {
+		s := string(ownerFirstApprovedAt)
+		d.OwnerFirstApprovedAt = &s
+	}
+	if complianceApprovalDate != nil {
+		s := string(complianceApprovalDate)
+		d.ComplianceApprovalDate = &s
+	}
+
+	if scoreID.Valid {
+		d.GrossScore = &model.RiskScore{
+			ID:         int(scoreID.Int64),
+			Likelihood: int(scoreLikelihood.Int64),
+			Impact:     int(scoreImpact.Int64),
+			RiskRating: int(scoreRating.Int64),
+			RiskLevel:  scoreLevel.String,
+			ColorCode:  scoreColor.String,
+		}
+	}
+
+	// Compliance references
+	refRows, err := r.db.QueryContext(ctx, `
+		SELECT scr.id, scr.name, scr.description
+		FROM risk_compliance_reference rcr
+		JOIN risk_security_compliance_reference scr ON scr.id = rcr.reference_id
+		WHERE rcr.risk_id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("fetch compliance refs: %w", err)
+	}
+	defer refRows.Close()
+	for refRows.Next() {
+		var ref model.ComplianceReference
+		if err := refRows.Scan(&ref.ID, &ref.Name, &ref.Description); err != nil {
+			return nil, fmt.Errorf("scan compliance ref: %w", err)
+		}
+		d.ComplianceReferences = append(d.ComplianceReferences, ref)
+	}
+	if d.ComplianceReferences == nil {
+		d.ComplianceReferences = []model.ComplianceReference{}
+	}
+
+	// Action plan + steps
+	var ap model.ActionPlanDetail
+	apErr := r.db.QueryRowContext(ctx,
+		"SELECT id, action_owner_id, description, status, plan_type FROM risk_action_plan WHERE risk_id = ? AND plan_type = 'STANDARD' LIMIT 1", id,
+	).Scan(&ap.ID, &ap.ActionOwnerID, &ap.Description, &ap.Status, &ap.PlanType)
+	if apErr == nil {
+		stepRows, err := r.db.QueryContext(ctx,
+			"SELECT id, plan_id, step_no, description, status, completed_date FROM risk_action_step WHERE plan_id = ? ORDER BY step_no", ap.ID)
+		if err != nil {
+			return nil, fmt.Errorf("fetch action steps: %w", err)
+		}
+		defer stepRows.Close()
+		for stepRows.Next() {
+			var step model.ActionPlanStep
+			if err := stepRows.Scan(&step.ID, &step.PlanID, &step.StepNo, &step.Description, &step.Status, &step.CompletedDate); err != nil {
+				return nil, fmt.Errorf("scan action step: %w", err)
+			}
+			ap.Steps = append(ap.Steps, step)
+		}
+		if ap.Steps == nil {
+			ap.Steps = []model.ActionPlanStep{}
+		}
+		d.ActionPlan = &ap
+	}
+
+	// Assessments (most recent first)
+	assRows, err := r.db.QueryContext(ctx, `
+		SELECT ra.id, ra.risk_id, ra.score_id, ra.progress, ra.reassessment_date,
+		       ra.assessed_by, ra.created_at,
+		       rs.likelihood, rs.impact, rs.risk_rating, rs.risk_level, rs.color_code
+		FROM risk_assessment ra
+		JOIN risk_score rs ON rs.id = ra.score_id
+		WHERE ra.risk_id = ?
+		ORDER BY ra.created_at DESC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("fetch assessments: %w", err)
+	}
+	defer assRows.Close()
+	for assRows.Next() {
+		a, err := scanAssessment(assRows)
+		if err != nil {
+			return nil, err
+		}
+		d.Assessments = append(d.Assessments, *a)
+	}
+	if d.Assessments == nil {
+		d.Assessments = []model.RiskAssessment{}
+	}
+
+	return &d, nil
 }
 
-func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRiskRequest, updatedBy string) error {
-	// TODO: UPDATE risk SET ... WHERE id = ?
-	return errNotImplemented
+// GetWorkflowStatus fetches only workflow_status, for callers that just need to
+// guard a status transition without paying for GetByID's full join + related-entity queries.
+func (r *riskRepository) GetWorkflowStatus(ctx context.Context, id int) (string, error) {
+	var status string
+	err := r.db.QueryRowContext(ctx, "SELECT workflow_status FROM risk WHERE id = ?", id).Scan(&status)
+	if err == sql.ErrNoRows {
+		return "", &apierror.Error{StatusCode: http.StatusNotFound, Body: fmt.Sprintf("risk %d not found", id)}
+	}
+	if err != nil {
+		return "", fmt.Errorf("get workflow status: %w", err)
+	}
+	return status, nil
+}
+
+func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRiskRequest, updatedBy string) (bool, error) {
+	// Only implementation_date, email_subject, and action_steps require re-approval when changed on an IN_REMEDIATION risk.
+	var curImplDate, curEmailSubject sql.NullString
+	err := r.db.QueryRowContext(ctx,
+		"SELECT implementation_date, email_subject FROM risk WHERE id = ?", id,
+	).Scan(&curImplDate, &curEmailSubject)
+	if err != nil {
+		return false, fmt.Errorf("fetch current risk for update: %w", err)
+	}
+
+	restrictedChanged := false
+	var changelogArgs []any
+
+	checkAndLog := func(field, oldVal, newVal string) {
+		if oldVal != newVal && newVal != "" {
+			restrictedChanged = true
+			oldJSON, _ := json.Marshal(oldVal)
+			newJSON, _ := json.Marshal(newVal)
+			changelogArgs = append(changelogArgs, id, updatedBy, field, string(oldJSON), string(newJSON))
+		}
+	}
+	checkAndLog("implementation_date", curImplDate.String, req.ImplementationDate)
+	checkAndLog("email_subject", curEmailSubject.String, req.EmailSubject)
+	if len(req.ActionSteps) > 0 {
+		restrictedChanged = true
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin update tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Update the risk row.
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE risk SET
+			risk_title = ?, risk_description = ?,
+			risk_identified_date = COALESCE(NULLIF(?,''), risk_identified_date),
+			identified_by_type = COALESCE(NULLIF(?,''), identified_by_type),
+			identified_by_user_id = COALESCE(?, identified_by_user_id),
+			identified_by_name = COALESCE(?, identified_by_name),
+			assigner_id = COALESCE(?, assigner_id),
+			owner_id = COALESCE(?, owner_id),
+			impact_description = ?,
+			progress = COALESCE(NULLIF(?,''), progress),
+			git_issue_url = COALESCE(NULLIF(?,''), git_issue_url),
+			email_subject = ?,
+			remarks = COALESCE(NULLIF(?,''), remarks),
+			implementation_date = COALESCE(NULLIF(?,''), implementation_date),
+			reassessment_date = COALESCE(NULLIF(?,''), reassessment_date),
+			treatment_strategy = COALESCE(NULLIF(?,''), treatment_strategy),
+			assignment_team_id = COALESCE(?, assignment_team_id),
+			gross_score_id = COALESCE(?, gross_score_id),
+			updated_by = ?, updated_at = NOW()
+		WHERE id = ?`,
+		req.RiskTitle, req.RiskDescription,
+		req.RiskIdentifiedDate, req.IdentifiedByType,
+		req.IdentifiedByUserID, req.IdentifiedByName,
+		req.AssignerID, req.OwnerID,
+		req.ImpactDescription,
+		req.Progress, req.GitIssueURL, req.EmailSubject, req.Remarks,
+		req.ImplementationDate, req.ReassessmentDate, req.TreatmentStrategy, req.AssignmentTeamID,
+		req.GrossScoreID,
+		updatedBy, id,
+	); err != nil {
+		return false, fmt.Errorf("update risk: %w", err)
+	}
+
+	// Update compliance references if provided.
+	if req.ComplianceReferenceIDs != nil {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM risk_compliance_reference WHERE risk_id = ?", id); err != nil {
+			return false, fmt.Errorf("clear compliance refs: %w", err)
+		}
+		for _, refID := range req.ComplianceReferenceIDs {
+			if _, err = tx.ExecContext(ctx,
+				"INSERT INTO risk_compliance_reference (risk_id, reference_id) VALUES (?, ?)", id, refID,
+			); err != nil {
+				return false, fmt.Errorf("insert compliance ref %d: %w", refID, err)
+			}
+		}
+	}
+
+	// Update action plan description + owner if provided.
+	if req.ActionPlanDescription != "" || req.ActionOwnerID != nil {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE risk_action_plan SET
+				description = COALESCE(NULLIF(?,''), description),
+				action_owner_id = COALESCE(?, action_owner_id),
+				updated_by = ?, updated_at = NOW()
+			WHERE risk_id = ? AND plan_type = 'STANDARD'`,
+			req.ActionPlanDescription, req.ActionOwnerID, updatedBy, id,
+		); err != nil {
+			return false, fmt.Errorf("update action plan: %w", err)
+		}
+	}
+
+	// Replace action steps if provided.
+	if len(req.ActionSteps) > 0 {
+		var planID int
+		if err = tx.QueryRowContext(ctx,
+			"SELECT id FROM risk_action_plan WHERE risk_id = ? AND plan_type = 'STANDARD' LIMIT 1", id,
+		).Scan(&planID); err != nil {
+			return false, fmt.Errorf("find action plan for step update: %w", err)
+		}
+		if _, err = tx.ExecContext(ctx, "DELETE FROM risk_action_step WHERE plan_id = ?", planID); err != nil {
+			return false, fmt.Errorf("clear action steps: %w", err)
+		}
+		for i, step := range req.ActionSteps {
+			if _, err = tx.ExecContext(ctx, `
+				INSERT INTO risk_action_step (plan_id, step_no, description, status, created_by, updated_by)
+				VALUES (?, ?, ?, 'PENDING', ?, ?)`,
+				planID, i+1, step.Description, updatedBy, updatedBy,
+			); err != nil {
+				return false, fmt.Errorf("insert updated step %d: %w", i+1, err)
+			}
+		}
+	}
+
+	// Write changelog entries for changed restricted fields.
+	for i := 0; i < len(changelogArgs); i += 5 {
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO risk_change_log (risk_id, created_by, action, field_changed, old_value, new_value)
+			VALUES (?, ?, 'UPDATE', ?, ?, ?)`,
+			changelogArgs[i], changelogArgs[i+1], changelogArgs[i+2],
+			changelogArgs[i+3], changelogArgs[i+4],
+		); err != nil {
+			return false, fmt.Errorf("insert changelog: %w", err)
+		}
+	}
+	if len(req.ActionSteps) > 0 {
+		if _, err = tx.ExecContext(ctx,
+			"INSERT INTO risk_change_log (risk_id, created_by, action, field_changed) VALUES (?, ?, 'UPDATE', 'action_steps')",
+			id, updatedBy,
+		); err != nil {
+			return false, fmt.Errorf("insert action_steps changelog: %w", err)
+		}
+	}
+
+	return restrictedChanged, tx.Commit()
 }
 
 func (r *riskRepository) UpdateStatus(ctx context.Context, id int, status, updatedBy string) error {
-	// TODO: UPDATE risk SET workflow_status = ?, updated_by = ? WHERE id = ?
-	return errNotImplemented
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE risk SET workflow_status = ?, updated_by = ?, updated_at = NOW() WHERE id = ?",
+		status, updatedBy, id,
+	)
+	return err
 }
 
-// nullableString converts an empty string to nil so the DB stores NULL
-// rather than an empty string for optional text columns.
+func (r *riskRepository) SetRejection(ctx context.Context, id int, comment, stage, updatedBy string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE risk SET rejection_comment = ?, rejection_stage = ?, updated_by = ?, updated_at = NOW() WHERE id = ?",
+		comment, stage, updatedBy, id,
+	)
+	return err
+}
+
+func (r *riskRepository) ClearRejection(ctx context.Context, id int, updatedBy string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE risk SET rejection_comment = NULL, rejection_stage = NULL, updated_by = ?, updated_at = NOW() WHERE id = ?",
+		updatedBy, id,
+	)
+	return err
+}
+
+func (r *riskRepository) SetRiskType(ctx context.Context, id int, riskType, updatedBy string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE risk SET risk_type = ?, updated_by = ?, updated_at = NOW() WHERE id = ?",
+		riskType, updatedBy, id,
+	)
+	return err
+}
+
+func (r *riskRepository) SetOwnerFirstApprovedAt(ctx context.Context, id int, updatedBy string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE risk SET owner_first_approved_at = NOW(), updated_by = ?, updated_at = NOW() WHERE id = ? AND owner_first_approved_at IS NULL",
+		updatedBy, id,
+	)
+	return err
+}
+
+func (r *riskRepository) Cancel(ctx context.Context, id int, updatedBy string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE risk SET workflow_status = 'CANCELLED', updated_by = ?, updated_at = NOW() WHERE id = ?",
+		updatedBy, id,
+	)
+	return err
+}
+
 func nullableString(s string) *string {
 	if s == "" {
 		return nil

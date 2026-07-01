@@ -29,18 +29,20 @@ import (
 // MySQL repositories → services → handler Deps struct.
 // file is the shared Azure Blob service used by evidence uploads.
 func buildRiskDeps(db *sql.DB, fileSvc *file.Service) riskhandler.Deps {
-	riskRepo       := riskmysql.NewRiskRepository(db)
-	teamRepo       := riskmysql.NewTeamRepository(db)
-	scoreRepo      := riskmysql.NewRiskScoreRepository(db)
+	riskRepo := riskmysql.NewRiskRepository(db)
+	assessmentRepo := riskmysql.NewAssessmentRepository(db)
+	teamRepo := riskmysql.NewTeamRepository(db)
+	scoreRepo := riskmysql.NewRiskScoreRepository(db)
 	actionPlanRepo := riskmysql.NewActionPlanRepository(db)
-	evidenceRepo   := riskmysql.NewRiskEvidenceRepository(db)
+	evidenceRepo := riskmysql.NewRiskEvidenceRepository(db)
 	escalationRepo := riskmysql.NewEscalationRepository(db)
-	notifRepo      := riskmysql.NewNotificationRepository(db)
+	notifRepo := riskmysql.NewNotificationRepository(db)
 	complianceRepo := riskmysql.NewComplianceReferenceRepository(db)
-	analyticsRepo  := riskmysql.NewAnalyticsRepository(db)
+	analyticsRepo := riskmysql.NewAnalyticsRepository(db)
 
 	return riskhandler.Deps{
 		Risk:         riskservice.NewRiskService(riskRepo),
+		Assessment:   riskservice.NewRiskAssessmentService(assessmentRepo),
 		Team:         riskservice.NewTeamService(teamRepo),
 		Score:        riskservice.NewRiskScoreService(scoreRepo),
 		ActionPlan:   riskservice.NewActionPlanService(actionPlanRepo),

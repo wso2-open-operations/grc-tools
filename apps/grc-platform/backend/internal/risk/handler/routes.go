@@ -27,6 +27,7 @@ import (
 // Deps holds all service dependencies for Risk Hub handlers.
 type Deps struct {
 	Risk         riskservice.RiskService
+	Assessment   riskservice.RiskAssessmentService
 	Team         riskservice.TeamService
 	Score        riskservice.RiskScoreService
 	ActionPlan   riskservice.ActionPlanService
@@ -50,27 +51,33 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	// Compliance references
 	mux.HandleFunc("GET /api/v1/compliance-references", d.handleListComplianceReferences)
 
+	// Current user
+	mux.HandleFunc("GET /api/v1/me/privileges", d.handleGetMyPrivileges)
+
 	// Risks
 	mux.HandleFunc("GET /api/v1/risks/next-sequence-id", d.handleNextSequenceID)
+	mux.HandleFunc("GET /api/v1/risks", d.handleListRisks)
 	mux.HandleFunc("POST /api/v1/risks", d.handleCreateRisk)
+	mux.HandleFunc("GET /api/v1/risks/{id}", d.handleGetRisk)
+	mux.HandleFunc("PUT /api/v1/risks/{id}", d.handleUpdateRisk)
 
-	// TODO: remaining risk routes
-	// GET    /api/v1/risks
-	// GET    /api/v1/risks/{id}
-	// PUT    /api/v1/risks/{id}
-	// POST   /api/v1/risks/{id}/submit
-	// POST   /api/v1/risks/{id}/approve
-	// POST   /api/v1/risks/{id}/reject
-	// POST   /api/v1/risks/{id}/complete
-	// POST   /api/v1/risks/{id}/owner-approve
-	// POST   /api/v1/risks/{id}/close
-	// POST   /api/v1/risks/{id}/escalate
-	// POST   /api/v1/risks/{id}/assess
+	// Workflow transitions
+	mux.HandleFunc("POST /api/v1/risks/{id}/owner-approve", d.handleOwnerApproveRisk)
+	mux.HandleFunc("POST /api/v1/risks/{id}/management-approve", d.handleManagementApproveRisk)
+	mux.HandleFunc("POST /api/v1/risks/{id}/approve", d.handleApproveRisk)
+	mux.HandleFunc("POST /api/v1/risks/{id}/reject", d.handleRejectRisk)
+	mux.HandleFunc("POST /api/v1/risks/{id}/complete", d.handleCompleteRisk)
+	mux.HandleFunc("POST /api/v1/risks/{id}/resubmit", d.handleResubmitRisk)
+	mux.HandleFunc("POST /api/v1/risks/{id}/close", d.handleCloseRisk)
+	mux.HandleFunc("POST /api/v1/risks/{id}/cancel", d.handleCancelRisk)
+
+	// Assessment
+	mux.HandleFunc("POST /api/v1/risks/{id}/assess", d.handleAssessRisk)
+
+	// TODO: remaining routes
+	// POST   /api/v1/risks/{id}/escalate  ← MEDIUM/HIGH past implementation_date escalation (deferred)
 	// GET    /api/v1/risks/{id}/changelog
-	// GET    /api/v1/risks/{id}/action-plans + POST
-	// GET    /api/v1/risks/{id}/action-plans/{planId} + PUT
-	// GET/POST/PUT /api/v1/risks/{id}/action-plans/{planId}/steps/{stepId}
-	// GET/POST/DELETE /api/v1/risks/{id}/evidence  ← needed for frontend evidence attachments (risk_evidence table, Azure Blob upload)
+	// GET/POST/DELETE /api/v1/risks/{id}/evidence
 	// GET    /api/v1/risks/{id}/escalations
 	// GET/PATCH /api/v1/notifications
 	// GET    /api/v1/analytics/summary

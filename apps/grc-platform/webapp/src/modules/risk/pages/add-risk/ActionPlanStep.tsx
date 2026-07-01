@@ -15,6 +15,7 @@
 // under the License.
 
 import { Controller, useFieldArray, useFormContext, useWatch } from "react-hook-form";
+import type { FieldPath } from "react-hook-form";
 import {
   Autocomplete,
   Box,
@@ -260,7 +261,7 @@ export default function ActionPlanStep({ assignmentTeams, users }: ActionPlanSte
                         placeholder={`Describe action step ${index + 1}…`}
                         onChange={(e) => {
                           field.onChange(e);
-                          if (e.target.value) clearErrors(`actionSteps.${index}.description` as any);
+                          if (e.target.value) clearErrors(`actionSteps.${index}.description` as FieldPath<AddRiskFormValues>);
                         }}
                         error={!!fieldState.error}
                         helperText={fieldState.error?.message}
