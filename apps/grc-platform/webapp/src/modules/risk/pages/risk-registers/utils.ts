@@ -38,7 +38,7 @@ export const STATUS_CONFIG: Record<string, StatusCfg> = {
 };
 
 // Parses a date string as local time when it is a bare YYYY-MM-DD value.
-// new Date("YYYY-MM-DD") is UTC midnight and drifts one day in UTC− zones;
+// new Date("YYYY-MM-DD") is UTC midnight and drifts one day in UTC- zones;
 // new Date(y, m-1, d) is always local midnight.
 function parseDateStr(s: string): Date {
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
