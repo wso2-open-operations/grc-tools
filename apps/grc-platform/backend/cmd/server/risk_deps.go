@@ -39,6 +39,7 @@ func buildRiskDeps(db *sql.DB, fileSvc *file.Service) riskhandler.Deps {
 	notifRepo := riskmysql.NewNotificationRepository(db)
 	complianceRepo := riskmysql.NewComplianceReferenceRepository(db)
 	analyticsRepo := riskmysql.NewAnalyticsRepository(db)
+	dashboardRepo := riskmysql.NewDashboardRepository(db)
 
 	return riskhandler.Deps{
 		Risk:         riskservice.NewRiskService(riskRepo),
@@ -51,5 +52,6 @@ func buildRiskDeps(db *sql.DB, fileSvc *file.Service) riskhandler.Deps {
 		Notification: riskservice.NewNotificationService(notifRepo),
 		Compliance:   riskservice.NewComplianceReferenceService(complianceRepo),
 		Analytics:    riskservice.NewAnalyticsService(analyticsRepo),
+		Dashboard:    riskservice.NewDashboardService(dashboardRepo),
 	}
 }

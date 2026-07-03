@@ -211,6 +211,90 @@ export interface CreateAssessmentPayload {
   reassessment_date: string;
 }
 
+// ── Dashboard types (mirror model/dashboard.go) ────────────────────────────────
+
+export interface RiskStatusSummary {
+  total: number;
+  open: number;
+  closed: number;
+}
+
+export interface RegisterTreatmentCount {
+  register_name: string;
+  treatment_strategy: string;
+  count: number;
+}
+
+export interface RiskLevelCount {
+  risk_level: string;
+  color_code: string;
+  count: number;
+}
+
+export interface HeatmapCell {
+  likelihood: number;
+  impact: number;
+  risk_level: string;
+  color_code: string;
+  count: number;
+}
+
+export interface RegisterCertShare {
+  register_name: string;
+  cert_name: string;
+  count: number;
+  percentage: number;
+}
+
+export interface RegisterLevelTreatmentCount {
+  risk_level: string;
+  treatment_strategy: string;
+  count: number;
+}
+
+export interface RegisterAnalytics {
+  register_id: number;
+  register_name: string;
+  open_count: number;
+  heatmap: HeatmapCell[];
+  level_counts: RiskLevelCount[];
+  level_treatments: RegisterLevelTreatmentCount[];
+}
+
+export interface RepeatedRiskOccurrence {
+  register_name: string;
+  status: "OPEN" | "CLOSED";
+  risk_level: string;
+  color_code: string;
+}
+
+export interface RepeatedComplianceRisk {
+  risk_title: string;
+  occurrences: RepeatedRiskOccurrence[];
+}
+
+export interface HighRiskItem {
+  id: number;
+  risk_code: string;
+  risk_description: string;
+  register_name: string;
+  owner_name: string;
+  identified_date: string | null;
+  treatment_strategy: string | null;
+  implementation_date: string | null;
+}
+
+export interface DashboardSummary {
+  summary: RiskStatusSummary;
+  treatment_by_register: RegisterTreatmentCount[];
+  level_counts: RiskLevelCount[];
+  org_heatmap: HeatmapCell[];
+  cert_distribution: RegisterCertShare[];
+  registers: RegisterAnalytics[];
+  repeated_compliance_risks: RepeatedComplianceRisk[];
+  high_risks: HighRiskItem[];
+}
+
 // ── API functions ──────────────────────────────────────────────────────────────
 
 type AuthFetch = (input: RequestInfo | URL, options?: RequestInit) => Promise<Response>;
@@ -397,6 +481,11 @@ export async function cancelRisk(authFetch: AuthFetch, id: number): Promise<void
 export async function resubmitRisk(authFetch: AuthFetch, id: number): Promise<void> {
   const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/${id}/resubmit`, { method: "POST" });
   return handleResponse<void>(res);
+}
+
+export async function fetchDashboard(authFetch: AuthFetch): Promise<DashboardSummary> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/dashboard`);
+  return handleResponse<DashboardSummary>(res);
 }
 
 export async function createAssessment(

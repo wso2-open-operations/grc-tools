@@ -14,18 +14,146 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Typography } from "@wso2/oxygen-ui";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  PageContent,
+  PageTitle,
+  Stack,
+} from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import { useAuthApiClient } from "@hooks/useAuthApiClient";
+import {
+  fetchDashboard,
+  fetchRiskScores,
+  type DashboardSummary,
+  type RiskScore,
+} from "../api/riskApi";
+import ChartCard from "./dashboard/ChartCard";
+import SummaryCards from "./dashboard/SummaryCards";
+import StatusPieChart from "./dashboard/StatusPieChart";
+import TreatmentByRegisterChart from "./dashboard/TreatmentByRegisterChart";
+import LevelCountChart from "./dashboard/LevelCountChart";
+import RiskHeatmap from "./dashboard/RiskHeatmap";
+import CertDistributionChart from "./dashboard/CertDistributionChart";
+import RegisterSection from "./dashboard/RegisterSection";
+import RepeatedRisksTable from "./dashboard/RepeatedRisksTable";
+import HighRisksTable from "./dashboard/HighRisksTable";
 
+// Risk dashboard: current organisational risk posture built from a single
+// GET /api/v1/dashboard payload, plus the 3×3 risk_score matrix that colors
+// heatmap cells holding no risks.
 export default function RiskDashboard(): JSX.Element {
+  const authFetch = useAuthApiClient();
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
+  const [scores, setScores] = useState<RiskScore[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [summary, scoreMatrix] = await Promise.all([
+        fetchDashboard(authFetch),
+        fetchRiskScores(authFetch).catch(() => [] as RiskScore[]),
+      ]);
+      setDashboard(summary);
+      setScores(scoreMatrix);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load the dashboard.");
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Risk Hub
-      </Typography>
-      <Typography variant="body1" color="text.secondary">
-        Risk dashboard coming soon.
-      </Typography>
-    </Box>
+    <PageContent>
+      <PageTitle>
+        <PageTitle.Header>Risk Dashboard</PageTitle.Header>
+      </PageTitle>
+
+      {loading && (
+        <Box sx={{ display: "flex", justifyContent: "center", py: 10 }}>
+          <CircularProgress />
+        </Box>
+      )}
+
+      {!loading && error && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={() => void load()}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
+      {!loading && !error && dashboard && (
+        <Stack spacing={3}>
+          <SummaryCards summary={dashboard.summary} />
+
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "5fr 7fr" },
+              gap: 3,
+            }}
+          >
+            <ChartCard title="Overall Risk Status Distribution">
+              <StatusPieChart summary={dashboard.summary} />
+            </ChartCard>
+            <ChartCard title="Risk Treatment Strategy on Open Risks">
+              <TreatmentByRegisterChart data={dashboard.treatment_by_register} />
+            </ChartCard>
+          </Box>
+
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+              gap: 3,
+            }}
+          >
+            <ChartCard title="Count vs. Risk Level">
+              <LevelCountChart data={dashboard.level_counts} />
+            </ChartCard>
+            <ChartCard title="WSO2 Overall Risk Posture Based on Open Risks">
+              <RiskHeatmap cells={dashboard.org_heatmap} scores={scores} />
+            </ChartCard>
+          </Box>
+
+          <ChartCard title="Number of Open Risks against Compliance Certifications">
+            <CertDistributionChart data={dashboard.cert_distribution} />
+          </ChartCard>
+
+          {dashboard.registers.map((register) => (
+            <RegisterSection
+              key={register.register_id}
+              register={register}
+              scores={scores}
+            />
+          ))}
+
+          <ChartCard title="Repeated Risks Potentially Impacting Compliance Certs">
+            <RepeatedRisksTable data={dashboard.repeated_compliance_risks} />
+          </ChartCard>
+
+          <ChartCard title="High Risk Detailed View">
+            <HighRisksTable data={dashboard.high_risks} />
+          </ChartCard>
+        </Stack>
+      )}
+    </PageContent>
   );
 }

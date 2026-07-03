@@ -107,5 +107,23 @@ type ComplianceReferenceRepository interface {
 
 // AnalyticsRepository provides aggregated read queries for the analytics summary endpoint.
 type AnalyticsRepository interface {
-	// TODO: add Summary / count-by-status / count-by-level methods
+	// TODO: add time-series trend queries for the Analytics page
+}
+
+// DashboardRepository provides the aggregated read queries behind GET /api/v1/dashboard.
+// All methods exclude CANCELLED risks; "open" means any status other than CLOSED.
+type DashboardRepository interface {
+	// StatusCounts returns total / open / closed risk counts.
+	StatusCounts(ctx context.Context) (*model.RiskStatusSummary, error)
+	// OpenRiskFacts returns open risks grouped by register × effective residual
+	// score cell × treatment strategy; the service derives all open-risk charts from it.
+	OpenRiskFacts(ctx context.Context) ([]model.OpenRiskFact, error)
+	// CertTagCounts returns open cert-tag occurrences per register × certification.
+	CertTagCounts(ctx context.Context) ([]model.RegisterCertCount, error)
+	// RepeatedComplianceRisks returns per-register occurrences of cert-tagged risk
+	// titles that appear in two or more source registers.
+	RepeatedComplianceRisks(ctx context.Context) ([]model.RepeatedRiskRow, error)
+	// HighRisks returns open risks whose effective residual level is HIGH,
+	// oldest identified first.
+	HighRisks(ctx context.Context) ([]model.HighRiskItem, error)
 }

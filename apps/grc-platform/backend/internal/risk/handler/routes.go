@@ -36,6 +36,7 @@ type Deps struct {
 	Notification riskservice.NotificationService
 	Compliance   riskservice.ComplianceReferenceService
 	Analytics    riskservice.AnalyticsService
+	Dashboard    riskservice.DashboardService
 }
 
 // RegisterRoutes mounts all Risk Hub routes onto mux under /api/v1.
@@ -73,6 +74,9 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 
 	// Assessment
 	mux.HandleFunc("POST /api/v1/risks/{id}/assess", d.handleAssessRisk)
+
+	// Dashboard
+	mux.HandleFunc("GET /api/v1/dashboard", d.handleDashboard)
 
 	// TODO: remaining routes
 	// POST   /api/v1/risks/{id}/escalate  ← MEDIUM/HIGH past implementation_date escalation (deferred)
