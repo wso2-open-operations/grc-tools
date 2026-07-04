@@ -23,9 +23,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/middleware"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/middleware"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 // UserInfo re-exports the middleware type so handlers don't need to import middleware directly.

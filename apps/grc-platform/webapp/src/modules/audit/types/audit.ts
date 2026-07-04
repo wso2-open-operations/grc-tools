@@ -132,6 +132,10 @@ export interface PopulationDetails {
   referenceNumber?: number | null;
   dueDate?: string | null;
   comments?: string | null;
+  /** Population-phase process owner (may differ from the control's process owner). */
+  ownerId?: number | null;
+  /** Population-phase team (may differ from the control's team). */
+  teamId?: number | null;
 }
 
 export interface AddControlRequest {

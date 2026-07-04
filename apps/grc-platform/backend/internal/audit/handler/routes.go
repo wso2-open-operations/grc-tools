@@ -20,7 +20,7 @@ package handler
 import (
 	"net/http"
 
-	auditservice "github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
+	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 )
 
 // Deps holds all service dependencies for Audit Hub handlers.
@@ -35,7 +35,6 @@ type Deps struct {
 	Evidence     auditservice.EvidenceService
 	Population   auditservice.PopulationService
 	Comment      auditservice.CommentService
-	Review       auditservice.ReviewService
 	Notification auditservice.NotificationService
 	Assignment   auditservice.AssignmentService
 	Trail        auditservice.TrailService
@@ -49,6 +48,7 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	uh := &userHandler{svc: deps.User}
 	th := &teamHandler{svc: deps.Team}
 	dh := &dashboardHandler{svc: deps.Dashboard}
+	eh := &evidenceHandler{svc: deps.Evidence, controlSvc: deps.Control}
 
 	// Dashboard.
 	mux.HandleFunc("GET /api/v1/audit/dashboard", dh.getDashboard)
@@ -77,4 +77,13 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("PUT /api/v1/audits/{id}/controls/{controlId}", ch.updateControl)
 	mux.HandleFunc("DELETE /api/v1/audits/{id}/controls/{controlId}", ch.deleteControl)
 	mux.HandleFunc("PATCH /api/v1/audits/{id}/controls/{controlId}/status", ch.updateControlStatus)
+
+	// Evidence submission (SAS-based agent upload flow).
+	// Note: /upload-link and /submit must be registered before the plain /evidence
+	// list route so the router matches their literal suffixes first.
+	mux.HandleFunc("GET /api/v1/evidence-app/controls", eh.getAssignedControls)
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence/upload-link", eh.getUploadLink)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/file-url", eh.getFileUploadURL)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/submit", eh.submitEvidence)
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence", eh.listEvidence)
 }

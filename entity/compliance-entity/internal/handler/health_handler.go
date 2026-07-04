@@ -10,17 +10,19 @@
 // Unless required by applicable law or agreed to in writing,
 // software distributed under the License is distributed on an
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
+// KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations
 // under the License.
 
-// Package model defines the domain types for the Audit Hub module.
-package model
+package handler
 
-// AuditItemReview represents an auditor review decision on evidence.
-// TODO: add fields based on `audit_item_review` in audit_schema.sql
-type AuditItemReview struct{}
+import (
+	"encoding/json"
+	"net/http"
+)
 
-// ReviewRequest is the payload for POST .../evidence/{evidenceId}/review.
-// TODO: define fields (decision: APPROVED|REJECTED|RESUBMIT_REQUESTED, comment)
-type ReviewRequest struct{}
+// HealthCheck handles GET /health.
+func HealthCheck(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}

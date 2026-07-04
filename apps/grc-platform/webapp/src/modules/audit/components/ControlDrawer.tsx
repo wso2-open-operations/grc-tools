@@ -848,17 +848,10 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
                 </Button>
                 <Button
                   variant="outlined"
-                  startIcon={<XCircle size={15} />}
-                  sx={{ textTransform: "none", fontWeight: 600, color: "#dc2626", borderColor: "#dc2626", "&:hover": { borderColor: "#b91c1c", bgcolor: "rgba(220,38,38,0.04)" } }}
-                >
-                  Reject
-                </Button>
-                <Button
-                  variant="outlined"
                   startIcon={<RotateCcw size={15} />}
                   sx={{ textTransform: "none", fontWeight: 600 }}
                 >
-                  Request Clarification
+                  Request Resubmission
                 </Button>
               </Box>
             </SectionCard>

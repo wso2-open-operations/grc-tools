@@ -19,7 +19,7 @@ package service
 import (
 	"context"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 )
 
 // AnalyticsService defines business operations for risk analytics and reporting.

@@ -1,0 +1,1129 @@
+openapi: "3.0.3"
+info:
+  title: GRC Platform – Compliance Entity Service
+  description: |
+    Internal read-only entity service that exposes users, audit entities (teams,
+    frameworks, products, audits, controls) and risk entities (teams, scores,
+    compliance references, risks) from the GRC Platform MySQL database.
+
+    Authentication is handled by the Choreo API Gateway. This service is only
+    reachable by other Choreo components within the same organisation.
+  version: "1.0.0"
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Health
+  - name: Users
+  - name: Audit Teams
+  - name: Audit Frameworks
+  - name: Audit Products
+  - name: Audits
+  - name: Controls
+  - name: Risk Teams
+  - name: Risk Scores
+  - name: Risk Compliance References
+  - name: Risks
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+
+  # ── Health ────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  # ── Users ─────────────────────────────────────────────────────────────────
+  /users/search:
+    post:
+      tags: [Users]
+      summary: Search users
+      operationId: searchUsers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchUsersRequest"
+      responses:
+        "200":
+          description: Matching users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchUsersResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a user by ID
+      operationId: getUserById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: User found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Audit Teams ───────────────────────────────────────────────────────────
+  /audit/teams/search:
+    post:
+      tags: [Audit Teams]
+      summary: Search audit teams
+      operationId: searchAuditTeams
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchAuditTeamsRequest"
+      responses:
+        "200":
+          description: Matching audit teams
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchAuditTeamsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /audit/teams/{id}:
+    get:
+      tags: [Audit Teams]
+      summary: Get an audit team by ID
+      operationId: getAuditTeamById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: Audit team found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditTeam"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Audit Frameworks ──────────────────────────────────────────────────────
+  /audit/frameworks/search:
+    post:
+      tags: [Audit Frameworks]
+      summary: Search audit frameworks
+      operationId: searchAuditFrameworks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchAuditFrameworksRequest"
+      responses:
+        "200":
+          description: Matching audit frameworks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchAuditFrameworksResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /audit/frameworks/{id}:
+    get:
+      tags: [Audit Frameworks]
+      summary: Get an audit framework by ID
+      operationId: getAuditFrameworkById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: Audit framework found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditFramework"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Audit Products ────────────────────────────────────────────────────────
+  /audit/products/search:
+    post:
+      tags: [Audit Products]
+      summary: Search audit products
+      operationId: searchAuditProducts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchAuditProductsRequest"
+      responses:
+        "200":
+          description: Matching audit products
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchAuditProductsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /audit/products/{id}:
+    get:
+      tags: [Audit Products]
+      summary: Get an audit product by ID
+      operationId: getAuditProductById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: Audit product found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditProduct"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Audits ────────────────────────────────────────────────────────────────
+  /audits/search:
+    post:
+      tags: [Audits]
+      summary: Search audits
+      operationId: searchAudits
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchAuditsRequest"
+      responses:
+        "200":
+          description: Matching audits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchAuditsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /audits/{id}:
+    get:
+      tags: [Audits]
+      summary: Get an audit by ID
+      operationId: getAuditById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: Audit found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Audit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Controls ──────────────────────────────────────────────────────────────
+  /audits/{auditId}/controls/search:
+    post:
+      tags: [Controls]
+      summary: Search controls within an audit
+      operationId: searchControls
+      parameters:
+        - name: auditId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchControlsRequest"
+      responses:
+        "200":
+          description: Matching controls
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchControlsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /audits/{auditId}/controls/{controlId}:
+    get:
+      tags: [Controls]
+      summary: Get a control by ID within an audit
+      operationId: getControlById
+      parameters:
+        - name: auditId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: controlId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Control found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditControl"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Risk Teams ────────────────────────────────────────────────────────────
+  /risk/teams/search:
+    post:
+      tags: [Risk Teams]
+      summary: Search risk teams
+      operationId: searchRiskTeams
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRiskTeamsRequest"
+      responses:
+        "200":
+          description: Matching risk teams
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchRiskTeamsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /risk/teams/{id}:
+    get:
+      tags: [Risk Teams]
+      summary: Get a risk team by ID
+      operationId: getRiskTeamById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: Risk team found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskTeam"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Risk Scores ───────────────────────────────────────────────────────────
+  /risk/scores:
+    get:
+      tags: [Risk Scores]
+      summary: List all risk scores (likelihood × impact matrix)
+      operationId: listRiskScores
+      responses:
+        "200":
+          description: Full risk score matrix
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRiskScoresResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Risk Compliance References ────────────────────────────────────────────
+  /risk/compliance-references/search:
+    post:
+      tags: [Risk Compliance References]
+      summary: Search risk compliance references
+      operationId: searchRiskReferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRiskReferencesRequest"
+      responses:
+        "200":
+          description: Matching compliance references
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchRiskReferencesResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /risk/compliance-references/{id}:
+    get:
+      tags: [Risk Compliance References]
+      summary: Get a risk compliance reference by ID
+      operationId: getRiskReferenceById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: Reference found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskComplianceReference"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # ── Risks ─────────────────────────────────────────────────────────────────
+  /risks/search:
+    post:
+      tags: [Risks]
+      summary: Search risks
+      operationId: searchRisks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRisksRequest"
+      responses:
+        "200":
+          description: Matching risks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchRisksResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /risks/{id}:
+    get:
+      tags: [Risks]
+      summary: Get a risk by ID
+      operationId: getRiskById
+      parameters:
+        - $ref: "#/components/parameters/IntId"
+      responses:
+        "200":
+          description: Risk found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Risk"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+components:
+
+  parameters:
+    IntId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+    Pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+          default: 20
+          maximum: 100
+        offset:
+          type: integer
+          default: 0
+
+    # ── User ────────────────────────────────────────────────────────────────
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        displayName:
+          type: string
+        auditTeamId:
+          type: integer
+          nullable: true
+        riskTeamId:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, REMOVED]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchUsersRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Matches email or displayName (case-insensitive substring)
+        statusKey:
+          type: string
+          enum: [ACTIVE, INACTIVE, REMOVED]
+          description: Empty string or omitted returns all statuses
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchUsersResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Audit Team ──────────────────────────────────────────────────────────
+    AuditTeam:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchAuditTeamsRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+        statusKey:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchAuditTeamsResponse:
+      type: object
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditTeam"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Audit Framework ─────────────────────────────────────────────────────
+    AuditFramework:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        version:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchAuditFrameworksRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+        statusKey:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchAuditFrameworksResponse:
+      type: object
+      properties:
+        frameworks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditFramework"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Audit Product ───────────────────────────────────────────────────────
+    AuditProduct:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchAuditProductsRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+        statusKey:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchAuditProductsResponse:
+      type: object
+      properties:
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditProduct"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Audit ───────────────────────────────────────────────────────────────
+    Audit:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        frameworkId:
+          type: integer
+        frameworkName:
+          type: string
+        frameworkVersion:
+          type: string
+          nullable: true
+        productId:
+          type: integer
+        productName:
+          type: string
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [ACTIVE, COMPLETED, ARCHIVED, REMOVED]
+        scopeDescription:
+          type: string
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchAuditsRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+        statusKeys:
+          type: array
+          items:
+            type: string
+            enum: [ACTIVE, COMPLETED, ARCHIVED, REMOVED]
+        frameworkIds:
+          type: array
+          items:
+            type: integer
+        productIds:
+          type: array
+          items:
+            type: integer
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchAuditsResponse:
+      type: object
+      properties:
+        audits:
+          type: array
+          items:
+            $ref: "#/components/schemas/Audit"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Audit Control ───────────────────────────────────────────────────────
+    AuditControl:
+      type: object
+      properties:
+        id:
+          type: integer
+        auditId:
+          type: integer
+        controlNumber:
+          type: string
+        description:
+          type: string
+        evidenceRequirement:
+          type: string
+          nullable: true
+        requirementType:
+          type: string
+          enum: [DESIGN, OE]
+        controlType:
+          type: string
+        scope:
+          type: string
+        ownerId:
+          type: integer
+          nullable: true
+        ownerName:
+          type: string
+          nullable: true
+        teamId:
+          type: integer
+          nullable: true
+        teamName:
+          type: string
+          nullable: true
+        auditorId:
+          type: integer
+          nullable: true
+        auditorName:
+          type: string
+          nullable: true
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+        isManuallyAdded:
+          type: boolean
+        isOverdue:
+          type: boolean
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchControlsRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Matches controlNumber or description
+        statusKeys:
+          type: array
+          items:
+            type: string
+        requirementTypes:
+          type: array
+          items:
+            type: string
+            enum: [DESIGN, OE]
+        teamIds:
+          type: array
+          items:
+            type: integer
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchControlsResponse:
+      type: object
+      properties:
+        controls:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditControl"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Risk Team ───────────────────────────────────────────────────────────
+    RiskTeam:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        code:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        teamType:
+          type: string
+          enum: [SOURCE_REGISTER, ASSIGNMENT, BOTH]
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, REMOVED]
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchRiskTeamsRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+        teamTypeKeys:
+          type: array
+          items:
+            type: string
+            enum: [SOURCE_REGISTER, ASSIGNMENT, BOTH]
+        statusKey:
+          type: string
+          enum: [ACTIVE, INACTIVE, REMOVED]
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchRiskTeamsResponse:
+      type: object
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: "#/components/schemas/RiskTeam"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Risk Score ──────────────────────────────────────────────────────────
+    RiskScore:
+      type: object
+      properties:
+        id:
+          type: integer
+        likelihood:
+          type: integer
+          minimum: 1
+          maximum: 3
+        impact:
+          type: integer
+          minimum: 1
+          maximum: 3
+        riskRating:
+          type: integer
+        riskLevel:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        colorCode:
+          type: string
+          description: Hex color code (e.g. #FF0000)
+
+    ListRiskScoresResponse:
+      type: object
+      properties:
+        scores:
+          type: array
+          items:
+            $ref: "#/components/schemas/RiskScore"
+
+    # ── Risk Compliance Reference ───────────────────────────────────────────
+    RiskComplianceReference:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchRiskReferencesRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchRiskReferencesResponse:
+      type: object
+      properties:
+        references:
+          type: array
+          items:
+            $ref: "#/components/schemas/RiskComplianceReference"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ── Risk ────────────────────────────────────────────────────────────────
+    Risk:
+      type: object
+      properties:
+        id:
+          type: integer
+        riskCode:
+          type: string
+        riskYear:
+          type: integer
+        riskQuarter:
+          type: string
+          enum: [Q1, Q2, Q3, Q4]
+        riskTitle:
+          type: string
+        riskDescription:
+          type: string
+          nullable: true
+        sourceRegisterId:
+          type: integer
+        sourceRegisterName:
+          type: string
+        assignmentTeamId:
+          type: integer
+        assignmentTeamName:
+          type: string
+        assignerId:
+          type: integer
+        assignerName:
+          type: string
+        ownerId:
+          type: integer
+        ownerName:
+          type: string
+        workflowStatus:
+          type: string
+          enum: [OPEN, IN_TREATMENT, UNDER_REVIEW, ESCALATED, CLOSED, ACCEPTED]
+        treatmentStrategy:
+          type: string
+          nullable: true
+        grossScoreId:
+          type: integer
+          nullable: true
+        grossRiskLevel:
+          type: string
+          nullable: true
+        implementationDate:
+          type: string
+          format: date
+          nullable: true
+        reassessmentDate:
+          type: string
+          format: date
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+
+    SearchRisksRequest:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          description: Matches riskCode or riskTitle
+        workflowStatusKeys:
+          type: array
+          items:
+            type: string
+            enum: [OPEN, IN_TREATMENT, UNDER_REVIEW, ESCALATED, CLOSED, ACCEPTED]
+        sourceRegisterIds:
+          type: array
+          items:
+            type: integer
+        assignmentTeamIds:
+          type: array
+          items:
+            type: integer
+        riskYears:
+          type: array
+          items:
+            type: integer
+        riskQuarterKeys:
+          type: array
+          items:
+            type: string
+            enum: [Q1, Q2, Q3, Q4]
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    SearchRisksResponse:
+      type: object
+      properties:
+        risks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Risk"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer

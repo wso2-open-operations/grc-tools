@@ -1,0 +1,15 @@
+schemaVersion: 1.2
+
+endpoints:
+  - name: compliance-entity-api
+    displayName: Compliance Entity API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+    # Organization visibility is the department standard (matches the entity-service
+    # template) and is verified in Choreo. Access is gated by the X-Entity-Secret
+    # shared-secret middleware, so org-level reachability does not grant data access.
+    networkVisibilities:
+      - Organization
+    schemaFilePath: openapi.yaml

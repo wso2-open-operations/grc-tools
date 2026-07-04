@@ -19,10 +19,10 @@ package handler
 import (
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	auditservice "github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
 type dashboardHandler struct {

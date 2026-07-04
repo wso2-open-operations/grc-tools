@@ -66,7 +66,7 @@ function actionLabel(status: string, role: AuditRole): string {
     case "EVIDENCE_INTERNAL_REVIEW":
     case "POPULATION_INTERNAL_REVIEW":
       return role === "compliance_admin" ? "Review & approve" : "Pending review";
-    case "EVIDENCE_UNDER_VALIDATION":     return "Approve / reject evidence";
+    case "EVIDENCE_UNDER_VALIDATION":     return "Approve / request resubmission";
     case "POPULATION_UNDER_VALIDATION":   return "Approve / reject population";
     case "POPULATION_COMPLETE":           return "Submit sample";
     case "AWAITING_SAMPLE":               return "Submit sample";

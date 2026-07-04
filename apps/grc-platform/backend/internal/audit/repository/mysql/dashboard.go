@@ -21,8 +21,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type dashboardRepository struct{ db *sql.DB }
@@ -268,14 +268,17 @@ func (r *dashboardRepository) queryActionItems(
 	}
 
 	extraArgs := append([]any{}, scopeArgs...)
-	q := fmt.Sprintf(`
+	const actionItemsTmpl = `
 		SELECT c.id, c.audit_id, a.name, c.control_number, c.description, c.status,
 		       COALESCE(DATE_FORMAT(c.due_date, '%%Y-%%m-%%d'), '') AS due_date
 		FROM audit_control c
 		JOIN audit a ON a.id = c.audit_id
 		%s AND %s
 		ORDER BY c.due_date ASC, c.id ASC
-		LIMIT 20`, baseWhere, statusFilter)
+		LIMIT 20`
+	// baseWhere and statusFilter are internal constant fragments with ? placeholders;
+	// all values are bound via extraArgs, so no user input is formatted into the SQL.
+	q := fmt.Sprintf(actionItemsTmpl, baseWhere, statusFilter) // #nosec G201
 
 	rows, err := r.db.QueryContext(ctx, q, extraArgs...)
 	if err != nil {
@@ -303,7 +306,7 @@ func (r *dashboardRepository) queryOverdueControls(
 	scopeArgs []any,
 ) ([]model.OverdueControl, error) {
 	extraArgs := append([]any{}, scopeArgs...)
-	q := fmt.Sprintf(`
+	const overdueTmpl = `
 		SELECT c.id, c.audit_id, a.name, c.control_number, c.description, c.status,
 		       DATE_FORMAT(c.due_date, '%%Y-%%m-%%d') AS due_date
 		FROM audit_control c
@@ -311,7 +314,9 @@ func (r *dashboardRepository) queryOverdueControls(
 		%s
 		AND c.due_date IS NOT NULL AND c.due_date < CURDATE() AND c.status != 'COMPLETE'
 		ORDER BY c.due_date ASC
-		LIMIT 20`, baseWhere)
+		LIMIT 20`
+	// baseWhere is an internal constant fragment with ? placeholders; values are bound via extraArgs.
+	q := fmt.Sprintf(overdueTmpl, baseWhere) // #nosec G201
 
 	rows, err := r.db.QueryContext(ctx, q, extraArgs...)
 	if err != nil {

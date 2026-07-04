@@ -25,7 +25,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
 )
 
 const maxRequestBodyBytes = 1 << 20 // 1 MiB

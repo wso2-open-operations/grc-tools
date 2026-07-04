@@ -19,18 +19,14 @@ package main
 import (
 	"database/sql"
 
-	audithandler "github.com/wso2-open-operations/grc-platform/backend/internal/audit/handler"
-	auditmysql "github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository/mysql"
-	auditservice "github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/file"
+	audithandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/handler"
+	auditmysql "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository/mysql"
+	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
 )
 
-// buildAuditDeps wires the currently implemented Audit Hub dependencies:
-// audit, control, framework, user. Evidence, Population, Comment, Review,
-// Assignment, Trail, and Notification are added here as they are implemented.
+// buildAuditDeps wires Audit Hub dependencies.
 func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
-	_ = fileSvc // reserved for evidence/population file upload (future)
-
 	// ── Repositories ──────────────────────────────────────────────────────────
 	auditRepo     := auditmysql.NewAuditRepository(db)
 	controlRepo   := auditmysql.NewControlRepository(db)
@@ -39,6 +35,7 @@ func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
 	userRepo      := auditmysql.NewUserRepository(db)
 	teamRepo      := auditmysql.NewTeamRepository(db)
 	dashboardRepo := auditmysql.NewDashboardRepository(db)
+	evidenceRepo  := auditmysql.NewEvidenceRepository(db)
 
 	// ── Services ──────────────────────────────────────────────────────────────
 	auditSvc     := auditservice.NewAuditService(auditRepo, frameworkRepo, productRepo)
@@ -47,6 +44,7 @@ func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
 	userSvc      := auditservice.NewUserService(userRepo)
 	teamSvc      := auditservice.NewTeamService(teamRepo)
 	dashboardSvc := auditservice.NewDashboardService(dashboardRepo)
+	evidenceSvc  := auditservice.NewEvidenceService(evidenceRepo, fileSvc)
 
 	return audithandler.Deps{
 		Audit:     auditSvc,
@@ -55,7 +53,8 @@ func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
 		User:      userSvc,
 		Team:      teamSvc,
 		Dashboard: dashboardSvc,
-		// Evidence, Population, Comment, Review, Assignment, Trail, Notification
+		Evidence:  evidenceSvc,
+		// Population, Comment, Review, Assignment, Trail, Notification
 		// are wired here as their implementations are added.
 	}
 }

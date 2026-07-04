@@ -10,23 +10,25 @@
 // Unless required by applicable law or agreed to in writing,
 // software distributed under the License is distributed on an
 // "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
+// KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations
 // under the License.
 
-package mysql
+package middleware
 
 import (
-	"database/sql"
-
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"context"
+	"net/http"
+	"time"
 )
 
-type reviewRepository struct{ db *sql.DB }
-
-// NewReviewRepository creates a MySQL-backed repository.ReviewRepository.
-func NewReviewRepository(db *sql.DB) repository.ReviewRepository {
-	return &reviewRepository{db: db}
+// Timeout returns middleware that cancels the request context after duration d.
+func Timeout(d time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), d)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
-
-// TODO: implement audit_item_review CRUD

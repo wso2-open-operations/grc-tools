@@ -41,6 +41,7 @@ import AuditStatusChip from "@modules/audit/components/AuditStatusChip";
 import ControlsTable from "@modules/audit/components/ControlsTable";
 import ControlDrawer from "@modules/audit/components/ControlDrawer";
 import ControlSettingsPanel from "@modules/audit/components/ControlSettingsPanel";
+import { useAuditRole } from "@modules/audit/hooks/useAuditRole";
 import { useGetAudit } from "@modules/audit/api/useGetAudit";
 import { useGetControls } from "@modules/audit/api/useGetControls";
 import { formatDateRange } from "@modules/audit/utils/format";
@@ -175,6 +176,8 @@ export default function AuditDetailPage(): JSX.Element {
   const [activeQuickFilter, setActiveQuickFilter] = useState<QuickFilter | null>(null);
   const [selectedControl, setSelectedControl] = useState<AuditControl | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const auditRole = useAuditRole();
+  const canManageControls = auditRole === "compliance_admin" || auditRole === "compliance_team";
 
   const controls = controlsData?.items ?? [];
 
@@ -280,20 +283,22 @@ export default function AuditDetailPage(): JSX.Element {
                 </Box>
               </Stack>
             </Box>
-            <Tooltip title="Manage controls">
-              <IconButton
-                onClick={() => setSettingsOpen(true)}
-                sx={{
-                  border: "1px solid",
-                  borderColor: "divider",
-                  borderRadius: 1.5,
-                  p: 1,
-                  flexShrink: 0,
-                }}
-              >
-                <Settings size={20} />
-              </IconButton>
-            </Tooltip>
+            {canManageControls && (
+              <Tooltip title="Manage controls">
+                <IconButton
+                  onClick={() => setSettingsOpen(true)}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 1.5,
+                    p: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  <Settings size={20} />
+                </IconButton>
+              </Tooltip>
+            )}
           </Box>
         )
       )}

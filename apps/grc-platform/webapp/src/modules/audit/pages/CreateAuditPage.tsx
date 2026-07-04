@@ -91,10 +91,14 @@ interface PopulationDraft {
   description: string;
   dueDate: string;
   comments: string;
+  /** Population-phase process owner — may differ from the control's process owner. */
+  ownerId: number | null;
+  /** Population-phase team — may differ from the control's team. */
+  teamId: number | null;
 }
 
 function blankPopulation(): PopulationDraft {
-  return { description: "", dueDate: "", comments: "" };
+  return { description: "", dueDate: "", comments: "", ownerId: null, teamId: null };
 }
 
 interface DraftControl {
@@ -153,6 +157,8 @@ function draftToRequest(d: DraftControl): AddControlRequest {
       description: d.population.description.trim(),
       dueDate: d.population.dueDate || null,
       comments: d.population.comments.trim() || null,
+      ownerId: d.population.ownerId,
+      teamId: d.population.teamId,
     };
   }
   return {
@@ -221,6 +227,8 @@ function parseCSV(text: string): DraftControl[] | string {
           description: has("population_description") ? (cells[idx("population_description")] ?? "") : "",
           dueDate:     has("population_due_date")     ? (cells[idx("population_due_date")]    ?? "") : "",
           comments:    has("population_comments")     ? (cells[idx("population_comments")]    ?? "") : "",
+          ownerId:     null,
+          teamId:      null,
         }
       : null;
 
@@ -251,13 +259,13 @@ interface PopulationDialogProps {
   controlDraft: DraftControl;
   onClose: () => void;
   onChangePopulation: (p: PopulationDraft) => void;
-  onChangeAssignment: (field: "ownerId" | "teamId" | "auditorId", val: number | null) => void;
+  onChangeAuditor: (val: number | null) => void;
   users: AuditUser[];
   teams: AuditTeam[];
 }
 
 function PopulationDialog({
-  open, controlDraft, onClose, onChangePopulation, onChangeAssignment, users, teams,
+  open, controlDraft, onClose, onChangePopulation, onChangeAuditor, users, teams,
 }: PopulationDialogProps): JSX.Element {
   const pop = controlDraft.population ?? blankPopulation();
   const paperProps = { sx: { backdropFilter: "none", backgroundColor: "background.paper" } };
@@ -265,16 +273,14 @@ function PopulationDialog({
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>
-        Population Details — {controlDraft.controlNumber || "New Control"}
+        Population Details - {controlDraft.controlNumber || "New Control"}
       </DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: "16px !important" }}>
-        <Alert severity="info" sx={{ py: 0.5 }}>
-          OE controls require a population to be defined. The auditor will draw a sample from this population.
-        </Alert>
+        
 
         {/* Population description */}
         <TextField
-          label="Population"
+          label="Population Requirement"
           required
           multiline
           rows={3}
@@ -288,6 +294,7 @@ function PopulationDialog({
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
           <TextField
             label="Population Due Date"
+            required
             type="date"
             fullWidth
             value={pop.dueDate}
@@ -306,35 +313,42 @@ function PopulationDialog({
 
         <Divider />
 
-        {/* Assignments — default from control, editable here */}
+        {/* Assignments — population phase */}
         <Typography variant="subtitle2" fontWeight={600}>Assignments</Typography>
+        <Alert severity="info" sx={{ py: 0.5 }}>
+          Process Owner and Team here are for the population phase and may differ from the evidence phase.
+          Auditor POC is shared across both phases.
+        </Alert>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {/* Process Owner — stored on population; also auto-fills the control's owner */}
           <Autocomplete
             options={users}
             getOptionLabel={(u) => u.displayName}
             isOptionEqualToValue={(a, b) => a.id === b.id}
-            value={users.find((u) => u.id === controlDraft.ownerId) ?? null}
-            onChange={(_e, val) => onChangeAssignment("ownerId", val?.id ?? null)}
+            value={users.find((u) => u.id === pop.ownerId) ?? null}
+            onChange={(_e, val) => onChangePopulation({ ...pop, ownerId: val?.id ?? null })}
             slotProps={{ paper: paperProps }}
-            renderInput={(params) => <TextField {...params} label="Process Owner" />}
+            renderInput={(params) => <TextField {...params} label="Process Owner (Population)" />}
           />
+          {/* Auditor POC — shared with control */}
           <Autocomplete
             options={users}
             getOptionLabel={(u) => u.displayName}
             isOptionEqualToValue={(a, b) => a.id === b.id}
             value={users.find((u) => u.id === controlDraft.auditorId) ?? null}
-            onChange={(_e, val) => onChangeAssignment("auditorId", val?.id ?? null)}
+            onChange={(_e, val) => onChangeAuditor(val?.id ?? null)}
             slotProps={{ paper: paperProps }}
             renderInput={(params) => <TextField {...params} label="Auditor POC" />}
           />
+          {/* Team — stored on population; also auto-fills the control's team */}
           <FormControl fullWidth>
-            <InputLabel>Team</InputLabel>
+            <InputLabel>Team (Population)</InputLabel>
             <Select
-              label="Team"
-              value={controlDraft.teamId !== null ? String(controlDraft.teamId) : ""}
+              label="Team (Population)"
+              value={pop.teamId !== null ? String(pop.teamId) : ""}
               onChange={(e) => {
                 const v = e.target.value as string;
-                onChangeAssignment("teamId", v === "" ? null : Number(v));
+                onChangePopulation({ ...pop, teamId: v === "" ? null : Number(v) });
               }}
             >
               <MenuItem value=""><em>None</em></MenuItem>
@@ -396,7 +410,7 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
       <Table size="small" stickyHeader sx={{ minWidth: 1550 }}>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ fontWeight: 600, minWidth: 90 }}>Control #</TableCell>
+            <TableCell sx={{ fontWeight: 600, minWidth: 90 }}>Control No</TableCell>
             <TableCell sx={{ fontWeight: 600, minWidth: 180 }}>Description</TableCell>
             <TableCell sx={{ fontWeight: 600, minWidth: 150 }}>Evidence Requirement</TableCell>
             <TableCell sx={{ fontWeight: 600, minWidth: 95 }}>Req. Type</TableCell>
@@ -452,7 +466,7 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
                   onChange={(e) => update(d.localId, "evidenceRequirement", e.target.value)}
                   size="small"
                   variant="standard"
-                  placeholder="Evidence needed"
+                  placeholder="Requirement"
                   fullWidth
                   inputProps={{ style: FS }}
                 />
@@ -616,13 +630,22 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
         controlDraft={dialogDraft}
         onClose={() => setPopulationDialogId(null)}
         onChangePopulation={(p) => {
-          onChange(drafts.map((d) =>
-            d.localId === populationDialogId ? { ...d, population: p } : d,
-          ));
+          // Auto-fill the control's owner/team from the population as a default.
+          // They remain independently editable in the main table row.
+          onChange(drafts.map((d) => {
+            if (d.localId !== populationDialogId) return d;
+            return {
+              ...d,
+              population: p,
+              ownerId: p.ownerId ?? d.ownerId,
+              teamId: p.teamId ?? d.teamId,
+            };
+          }));
         }}
-        onChangeAssignment={(field, val) => {
+        onChangeAuditor={(val) => {
+          // Auditor POC is shared — updating it here updates the control directly.
           onChange(drafts.map((d) =>
-            d.localId === populationDialogId ? { ...d, [field]: val } : d,
+            d.localId === populationDialogId ? { ...d, auditorId: val } : d,
           ));
         }}
         users={users}
@@ -1379,6 +1402,7 @@ export default function CreateAuditPage(): JSX.Element {
 
   // Submit state
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [step2Attempted, setStep2Attempted] = useState(false);
   // Holds the audit id after a successful createAudit call so that retrying
   // after a bulkAdd failure skips re-creation and avoids duplicate audits.
   const createdAuditIdRef = useRef<number | null>(null);
@@ -1392,6 +1416,23 @@ export default function CreateAuditPage(): JSX.Element {
     product !== null &&
     periodStart.length > 0 &&
     periodEnd.length > 0;
+
+  // Step 2 → 3: every draft row must be complete (blank rows are not allowed).
+  const draftErrors: string[] = drafts
+    .flatMap((d) => {
+      const errs: string[] = [];
+      const label = d.controlNumber.trim() || "(unnamed)";
+      if (!d.controlNumber.trim())       errs.push(`${label}: Control Number is required`);
+      if (!d.description.trim())         errs.push(`${label}: Description is required`);
+      if (!d.evidenceRequirement.trim()) errs.push(`${label}: Evidence Requirement is required`);
+      if (!d.dueDate)                    errs.push(`${label}: Due Date is required`);
+      if (d.requirementType === "OE") {
+        if (!d.population?.description.trim()) errs.push(`${label}: Population Requirement is required`);
+        if (!d.population?.dueDate)            errs.push(`${label}: Population Due Date is required`);
+      }
+      return errs;
+    });
+  const step2Valid = draftErrors.length === 0;
 
   async function handleSubmit() {
     if (!framework || !product) return;
@@ -1514,12 +1555,26 @@ export default function CreateAuditPage(): JSX.Element {
         </Alert>
       )}
 
+      {/* Step 2 validation errors */}
+      {step === 1 && step2Attempted && draftErrors.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <strong>Fix the following before proceeding:</strong>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+            {draftErrors.map((e) => <li key={e}>{e}</li>)}
+          </ul>
+        </Alert>
+      )}
+
       {/* Navigation */}
       <Divider sx={{ mb: 2 }} />
       <Box sx={{ display: "flex", justifyContent: "space-between" }}>
         <Button
           variant="outlined"
-          onClick={() => (step === 0 ? void navigate("/audit/audits") : setStep(step - 1))}
+          onClick={() => {
+            if (step === 0) { void navigate("/audit/audits"); return; }
+            setStep2Attempted(false);
+            setStep(step - 1);
+          }}
           disabled={isSubmitting}
           sx={{ textTransform: "none" }}
         >
@@ -1529,7 +1584,13 @@ export default function CreateAuditPage(): JSX.Element {
         {step < 2 ? (
           <Button
             variant="contained"
-            onClick={() => setStep(step + 1)}
+            onClick={() => {
+              if (step === 1) {
+                setStep2Attempted(true);
+                if (!step2Valid) return;
+              }
+              setStep(step + 1);
+            }}
             disabled={step === 0 && !step1Valid}
             sx={{ textTransform: "none" }}
           >

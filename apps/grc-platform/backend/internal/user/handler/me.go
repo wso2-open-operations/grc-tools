@@ -19,8 +19,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type permissionsResponse struct {

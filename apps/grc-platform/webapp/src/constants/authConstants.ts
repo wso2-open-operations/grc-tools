@@ -15,7 +15,7 @@
 // under the License.
 
 // Idle timeout in ms (default 15 minutes).
-export const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+export const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
 // Show "Are you still there?" this many ms before idle timeout (60s warning window).
 export const IDLE_PROMPT_BEFORE_MS = 60_000;

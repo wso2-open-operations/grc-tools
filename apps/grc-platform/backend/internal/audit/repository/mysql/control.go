@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type controlRepository struct{ db *sql.DB }
@@ -121,19 +121,23 @@ func (r *controlRepository) createInTx(ctx context.Context, tx *sql.Tx, auditID 
 
 	if req.RequirementType == "OE" {
 		var desc string
-		var refNum *int
+		var refNum, ownerID, teamID *int
 		var dueDate, comments *string
 		if req.Population != nil {
 			desc = req.Population.Description
 			refNum = req.Population.ReferenceNumber
 			dueDate = req.Population.DueDate
 			comments = req.Population.Comments
+			ownerID = req.Population.OwnerID
+			teamID = req.Population.TeamID
 		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO audit_population
-			  (audit_id, control_id, description, reference_number, due_date, comments, created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			  (audit_id, control_id, owner_id, team_id,
+			   description, reference_number, due_date, comments, created_by, updated_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			auditID, id64,
+			intPtrVal(ownerID), intPtrVal(teamID),
 			desc,
 			intPtrVal(refNum),
 			stringPtrVal(dueDate),
@@ -241,7 +245,7 @@ func (r *controlRepository) Update(ctx context.Context, auditID, controlID int, 
 
 	args = append(args, auditID, controlID)
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE audit_control SET "+strings.Join(setParts, ", ")+" WHERE audit_id = ? AND id = ?",
+		"UPDATE audit_control SET "+strings.Join(setParts, ", ")+" WHERE audit_id = ? AND id = ?", // #nosec G202
 		args...)
 	if err != nil {
 		return fmt.Errorf("control.Update(%d,%d): %w", auditID, controlID, err)
@@ -341,4 +345,45 @@ func scanControl(s scanner) (*model.AuditControl, error) {
 		CreatedAt:           createdAt,
 		UpdatedAt:           updatedAt,
 	}, nil
+}
+
+// ListAssignedForEvidence returns all controls that require evidence action from
+// the team the given user belongs to, across all active audits.
+func (r *controlRepository) ListAssignedForEvidence(ctx context.Context, userEmail string) ([]*model.AssignedControlForEvidence, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+		  a.id,   a.name,
+		  c.id,   c.control_number, c.description, c.status
+		FROM audit_control c
+		JOIN audit      a ON a.id = c.audit_id
+		JOIN audit_team t ON t.id = c.team_id
+		JOIN `+"`user`"+` u ON u.audit_team_id = t.id
+		WHERE u.email = ?
+		  AND a.status = 'ACTIVE'
+		  AND c.status IN (
+		        'EVIDENCE_PENDING',
+		        'EVIDENCE_NEED_CLARIFICATION',
+		        'SUBMITTED_SAMPLE'
+		      )
+		ORDER BY a.id, c.control_number`,
+		userEmail,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*model.AssignedControlForEvidence
+	for rows.Next() {
+		ac := &model.AssignedControlForEvidence{}
+		if err := rows.Scan(
+			&ac.AuditID, &ac.AuditName,
+			&ac.ControlID, &ac.ControlNumber, &ac.Description, &ac.Status,
+		); err != nil {
+			return nil, err
+		}
+		ac.BaseFolderPath = fmt.Sprintf("audits/%d/controls/%d/evidence/", ac.AuditID, ac.ControlID)
+		result = append(result, ac)
+	}
+	return result, rows.Err()
 }

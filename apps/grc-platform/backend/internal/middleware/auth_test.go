@@ -24,7 +24,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/middleware"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/middleware"
 )
 
 // devToken builds an unsigned JWT accepted by Auth when TokenValidatorEnabled=false.

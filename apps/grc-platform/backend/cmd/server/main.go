@@ -27,15 +27,15 @@ import (
 	"syscall"
 	"time"
 
-	audithandler "github.com/wso2-open-operations/grc-platform/backend/internal/audit/handler"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/config"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/db"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/middleware"
-	riskhandler "github.com/wso2-open-operations/grc-platform/backend/internal/risk/handler"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/file"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
-	userhandler "github.com/wso2-open-operations/grc-platform/backend/internal/user/handler"
-	usermysql "github.com/wso2-open-operations/grc-platform/backend/internal/user/mysql"
+	audithandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/handler"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/config"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/db"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/middleware"
+	riskhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/handler"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
+	userhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/handler"
+	usermysql "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/mysql"
 )
 
 func main() {

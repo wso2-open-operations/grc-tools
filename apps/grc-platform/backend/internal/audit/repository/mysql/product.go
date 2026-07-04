@@ -25,9 +25,9 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type productRepository struct{ db *sql.DB }

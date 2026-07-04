@@ -20,10 +20,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
 type auditHandler struct {

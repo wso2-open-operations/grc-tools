@@ -19,8 +19,8 @@ package service
 import (
 	"context"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // UserService exposes the user list for owner/auditor dropdowns in the UI.

@@ -55,11 +55,16 @@ type ControlListResponse struct {
 
 // PopulationDetails is included in AddControlRequest for OE-type controls.
 // It maps to a row in audit_population.
+// OwnerID and TeamID represent the population-phase process owner and team,
+// which may differ from the control's owner and team (evidence phase).
+// AuditorID is shared with the control and is not stored separately here.
 type PopulationDetails struct {
 	Description     string  `json:"description"`
 	ReferenceNumber *int    `json:"referenceNumber"`
 	DueDate         *string `json:"dueDate"`
 	Comments        *string `json:"comments"`
+	OwnerID         *int    `json:"ownerId"`
+	TeamID          *int    `json:"teamId"`
 }
 
 // AddControlRequest is the payload for POST /api/v1/audits/{id}/controls.

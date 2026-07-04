@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type auditRepository struct{ db *sql.DB }
@@ -137,7 +137,7 @@ func (r *auditRepository) Update(ctx context.Context, id int, req model.UpdateAu
 
 	args = append(args, id)
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE audit SET "+strings.Join(setParts, ", ")+" WHERE id = ? AND status != 'REMOVED'",
+		"UPDATE audit SET "+strings.Join(setParts, ", ")+" WHERE id = ? AND status != 'REMOVED'", // #nosec G202
 		args...)
 	if err != nil {
 		return fmt.Errorf("audit.Update(%d): %w", id, err)

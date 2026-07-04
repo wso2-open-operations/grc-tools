@@ -20,9 +20,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // FrameworkService defines business operations for audit frameworks and products.
