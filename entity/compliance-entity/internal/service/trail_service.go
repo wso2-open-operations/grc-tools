@@ -18,12 +18,27 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/repository"
 )
+
+// validJSONField returns a ValidationError when v is non-nil, non-empty, and not
+// valid JSON. The target columns (audit_trail.details, risk_change_log.old_value /
+// new_value) are MySQL JSON types, so invalid JSON would otherwise fail at insert
+// with a 500 instead of a clean 400.
+func validJSONField(name string, v *string) error {
+	if v == nil || *v == "" {
+		return nil
+	}
+	if !json.Valid([]byte(*v)) {
+		return &apierror.ValidationError{Msg: name + " must be valid JSON"}
+	}
+	return nil
+}
 
 type trailService struct{ repo repository.TrailRepository }
 
@@ -44,6 +59,9 @@ func (s *trailService) CreateTrail(ctx context.Context, auditID int, req domain.
 	}
 	if !validTrailActions[strings.ToUpper(req.Action)] {
 		return domain.AuditTrail{}, &apierror.ValidationError{Msg: "invalid action: " + req.Action}
+	}
+	if err := validJSONField("details", req.Details); err != nil {
+		return domain.AuditTrail{}, err
 	}
 	e, err := s.repo.CreateTrail(ctx, auditID, req)
 	if err != nil {

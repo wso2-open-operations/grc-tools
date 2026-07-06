@@ -62,6 +62,47 @@ var validRequirementTypes = map[string]bool{"DESIGN": true, "OE": true}
 var validControlTypes = map[string]bool{"CONFIG": true, "NON_CONFIG": true}
 var validScopes = map[string]bool{"COMMON": true, "PRODUCT_SPECIFIC": true}
 
+// allowedControlTransitions defines the legal next statuses for each audit_control
+// status, mirroring the audit (Design) and OE (population→sample→evidence) workflow.
+// A status update whose target is not in the current status's allowed set is
+// rejected, so the workflow order cannot be skipped (e.g. EVIDENCE_PENDING ->
+// COMPLETE bypassing internal review and auditor validation).
+var allowedControlTransitions = map[string][]string{
+	// OE — population phase
+	"POPULATION_PENDING":            {"POPULATION_INTERNAL_REVIEW"},
+	"POPULATION_INTERNAL_REVIEW":    {"POPULATION_UNDER_VALIDATION", "POPULATION_PENDING"},
+	"POPULATION_UNDER_VALIDATION":   {"POPULATION_COMPLETE", "POPULATION_NEED_CLARIFICATION"},
+	"POPULATION_NEED_CLARIFICATION": {"POPULATION_INTERNAL_REVIEW"},
+	// OE — sample handoff (auditor submits the sample or asks for more time)
+	"POPULATION_COMPLETE": {"AWAITING_SAMPLE", "SUBMITTED_SAMPLE", "EVIDENCE_PENDING"},
+	"AWAITING_SAMPLE":     {"SUBMITTED_SAMPLE", "EVIDENCE_PENDING"},
+	"SUBMITTED_SAMPLE":    {"EVIDENCE_PENDING", "EVIDENCE_INTERNAL_REVIEW"},
+	// Evidence phase (Design default; OE after sample)
+	"EVIDENCE_PENDING":            {"EVIDENCE_INTERNAL_REVIEW"},
+	"EVIDENCE_INTERNAL_REVIEW":    {"EVIDENCE_UNDER_VALIDATION", "EVIDENCE_PENDING"},
+	"EVIDENCE_UNDER_VALIDATION":   {"COMPLETE", "EVIDENCE_NEED_CLARIFICATION"},
+	"EVIDENCE_NEED_CLARIFICATION": {"EVIDENCE_INTERNAL_REVIEW"},
+	// Terminal
+	"COMPLETE": {},
+}
+
+// isValidControlTransition reports whether moving from -> to is a legal workflow
+// step. A no-op (from == to) is always allowed. An empty current status (newly
+// created / not yet set) is allowed to move to any valid status.
+func isValidControlTransition(from, to string) bool {
+	from = strings.ToUpper(from)
+	to = strings.ToUpper(to)
+	if from == to || from == "" {
+		return true
+	}
+	for _, next := range allowedControlTransitions[from] {
+		if next == to {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *controlService) SearchControls(ctx context.Context, auditID int, req domain.SearchControlsRequest) (domain.SearchControlsResponse, error) {
 	if auditID <= 0 {
 		return domain.SearchControlsResponse{}, &apierror.ValidationError{Msg: "auditId must be a positive integer"}
@@ -203,8 +244,21 @@ func (s *controlService) UpdateControl(ctx context.Context, auditID, controlID i
 	if req.UpdatedBy == "" {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "updatedBy is required"}
 	}
-	if req.Status != nil && !validControlStatuses[strings.ToUpper(*req.Status)] {
-		return domain.AuditControl{}, &apierror.ValidationError{Msg: "invalid status: " + *req.Status}
+	if req.Status != nil {
+		if !validControlStatuses[strings.ToUpper(*req.Status)] {
+			return domain.AuditControl{}, &apierror.ValidationError{Msg: "invalid status: " + *req.Status}
+		}
+		// Enforce workflow order: the target status must be reachable from the
+		// control's current status. Prevents skipping review/validation stages.
+		current, err := s.repo.GetControlByID(ctx, auditID, controlID)
+		if err != nil {
+			return domain.AuditControl{}, err
+		}
+		if !isValidControlTransition(current.Status, *req.Status) {
+			return domain.AuditControl{}, &apierror.ValidationError{
+				Msg: fmt.Sprintf("invalid status transition: %s -> %s", current.Status, *req.Status),
+			}
+		}
 	}
 	c, err := s.repo.UpdateControl(ctx, auditID, controlID, req)
 	if err != nil {

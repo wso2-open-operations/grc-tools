@@ -49,11 +49,14 @@ import {
   X,
   XCircle,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import UserAvatar from "@modules/audit/components/UserAvatar";
 import { formatAuditDate } from "@modules/audit/utils/format";
 import { useUpdateControlStatus } from "@modules/audit/api/useUpdateControlStatus";
+import EvidenceUploadBox from "@modules/audit/components/EvidenceUploadBox";
+import SubmittedEvidenceList from "@modules/audit/components/SubmittedEvidenceList";
+import CommentsSection from "@modules/audit/components/CommentsSection";
 import type { AuditControl, ControlStatus } from "@modules/audit/types/audit";
 
 interface ControlDrawerProps {
@@ -232,23 +235,13 @@ function DesignEvidenceSection({
           )}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
             <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Evidence Submission" flexContent>
-              <Box sx={(theme) => ({ flex: 1, border: "2px dashed", borderColor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.15)" : "#d1d5db", borderRadius: 2, p: 3, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, cursor: "pointer", textAlign: "center", mb: 1.5, "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } })}>
-                <Box sx={{ width: 44, height: 44, borderRadius: "50%", bgcolor: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", color: "#16a34a" }}>
-                  <Upload size={20} />
-                </Box>
-                <Typography variant="body2" fontWeight={600}>Drop files here</Typography>
-                <Typography variant="caption" color="text.secondary">PDF, XLSX, PNG up to 50 MB</Typography>
-              </Box>
-              <Button
-                variant="contained"
-                fullWidth
-                disableElevation
-                startIcon={<FileUp size={15} />}
-                sx={{ textTransform: "none", fontWeight: 600 }}
-                onClick={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
-              >
-                Submit Evidence
-              </Button>
+              <EvidenceUploadBox
+                auditId={control.auditId}
+                controlId={control.id}
+                hint="PDF, XLSX, PNG up to 50 MB"
+                buttonLabel="Submit Evidence"
+                onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
+              />
             </SectionCard>
             <SectionCard icon={<Sparkles size={16} />} iconBg="#faf5ff" iconColor="#7c3aed" title="AI Validation">
               <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 2, py: 0.5 }}>
@@ -511,10 +504,13 @@ function OEEvidenceSection({
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
               Upload evidence covering all selected samples listed above.
             </Typography>
-            <UploadDropzone label="Drop evidence files here" hint="PDF, XLSX, PNG up to 50 MB" />
-            <Button variant="contained" fullWidth disableElevation startIcon={<FileUp size={15} />} sx={{ textTransform: "none", fontWeight: 600 }} onClick={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}>
-              Submit Evidence
-            </Button>
+            <EvidenceUploadBox
+              auditId={control.auditId}
+              controlId={control.id}
+              hint="PDF, XLSX, PNG up to 50 MB"
+              buttonLabel="Submit Evidence"
+              onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
+            />
           </SectionCard>
         </>
       )}
@@ -532,10 +528,13 @@ function OEEvidenceSection({
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
               Upload updated evidence addressing the rejection reason above.
             </Typography>
-            <UploadDropzone label="Drop updated evidence files here" hint="PDF, XLSX, PNG up to 50 MB" />
-            <Button variant="contained" fullWidth disableElevation startIcon={<FileUp size={15} />} sx={{ textTransform: "none", fontWeight: 600 }} onClick={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}>
-              Resubmit Evidence
-            </Button>
+            <EvidenceUploadBox
+              auditId={control.auditId}
+              controlId={control.id}
+              hint="PDF, XLSX, PNG up to 50 MB"
+              buttonLabel="Resubmit Evidence"
+              onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
+            />
           </SectionCard>
         </>
       )}
@@ -578,9 +577,13 @@ function OEEvidenceSection({
 
 export default function ControlDrawer({ control, open, onClose }: ControlDrawerProps): JSX.Element {
   const [tab, setTab] = useState(0);
-  const [commentText, setCommentText] = useState("");
-  const [addedComments, setAddedComments] = useState<string[]>([]);
   const [localStatus, setLocalStatus] = useState<{ id: number; status: ControlStatus } | null>(null);
+
+  // Reset to the Overview tab whenever a different control is opened, so the
+  // drawer doesn't retain the previous control's active tab.
+  useEffect(() => {
+    setTab(0);
+  }, [control?.id]);
   const updateStatus = useUpdateControlStatus();
 
   // Use local override only when it belongs to the currently open control
@@ -597,13 +600,6 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
       { auditId: c.auditId, controlId: c.id, status: newStatus },
       { onError: () => setLocalStatus(null) },
     );
-  }
-
-  function handleAddComment() {
-    const trimmed = commentText.trim();
-    if (!trimmed) return;
-    setAddedComments((prev) => [...prev, trimmed]);
-    setCommentText("");
   }
 
   return (
@@ -798,6 +794,16 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               />
             )}
 
+            {/* Submitted evidence — reviewers open/download the files here */}
+            <SectionCard
+              icon={<FileText size={16} />}
+              iconBg="#f1f5f9"
+              iconColor="#475569"
+              title="Submitted Evidence"
+            >
+              <SubmittedEvidenceList auditId={control.auditId} controlId={control.id} />
+            </SectionCard>
+
             {/* Internal Review */}
             <SectionCard
               icon={<ClipboardCheck size={16} />}
@@ -806,13 +812,14 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               title="Internal Review"
             >
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.7 }}>
-                Review the submitted population or evidence internally before passing to the auditor.
+                Review the submitted evidence internally before passing it to the auditor.
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
                 <Button
                   variant="contained"
                   disableElevation
                   startIcon={<CheckCircle2 size={15} />}
+                  onClick={() => handleStatusChange(control, "EVIDENCE_UNDER_VALIDATION")}
                   sx={{ textTransform: "none", fontWeight: 600, bgcolor: "#b45309", "&:hover": { bgcolor: "#92400e" } }}
                 >
                   Approve
@@ -820,6 +827,7 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
                 <Button
                   variant="outlined"
                   startIcon={<XCircle size={15} />}
+                  onClick={() => handleStatusChange(control, "EVIDENCE_PENDING")}
                   sx={{ textTransform: "none", fontWeight: 600, color: "#dc2626", borderColor: "#dc2626", "&:hover": { borderColor: "#b91c1c", bgcolor: "rgba(220,38,38,0.04)" } }}
                 >
                   Reject
@@ -842,6 +850,7 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
                   variant="contained"
                   disableElevation
                   startIcon={<CheckCircle2 size={15} />}
+                  onClick={() => handleStatusChange(control, "COMPLETE")}
                   sx={{ textTransform: "none", fontWeight: 600, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}
                 >
                   Approve
@@ -849,6 +858,7 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
                 <Button
                   variant="outlined"
                   startIcon={<RotateCcw size={15} />}
+                  onClick={() => handleStatusChange(control, "EVIDENCE_NEED_CLARIFICATION")}
                   sx={{ textTransform: "none", fontWeight: 600 }}
                 >
                   Request Resubmission
@@ -863,84 +873,7 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               iconColor="#ea580c"
               title="Comments"
             >
-              {/* Original control comment from backend */}
-              {control.comments && (
-                <Box
-                  sx={(theme) => ({
-                    borderLeft: "3px solid",
-                    borderColor: theme.palette.mode === "dark" ? "#4b5563" : "#d1d5db",
-                    pl: 2, py: 0.75, mb: 2,
-                    borderRadius: "0 4px 4px 0",
-                    bgcolor: "action.hover",
-                  })}
-                >
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 600 }}>
-                    Auditor note
-                  </Typography>
-                  <Typography variant="body2" sx={{ lineHeight: 1.7 }}>
-                    {control.comments}
-                  </Typography>
-                </Box>
-              )}
-
-              {/* Locally added comments */}
-              {addedComments.length > 0 && (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: 2 }}>
-                  {addedComments.map((c, i) => (
-                    <Box
-                      key={i}
-                      sx={(theme) => ({
-                        borderLeft: "3px solid",
-                        borderColor: theme.palette.mode === "dark" ? "#1d4ed8" : "#93c5fd",
-                        pl: 2, py: 0.75,
-                        borderRadius: "0 4px 4px 0",
-                        bgcolor: theme.palette.mode === "dark" ? "rgba(29,78,216,0.08)" : "#eff6ff",
-                      })}
-                    >
-                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5, fontWeight: 600 }}>
-                        You · just now
-                      </Typography>
-                      <Typography variant="body2" sx={{ lineHeight: 1.7 }}>
-                        {c}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Box>
-              )}
-
-              {/* Empty state */}
-              {!control.comments && addedComments.length === 0 && (
-                <Box sx={{ py: 2, textAlign: "center", mb: 1 }}>
-                  <MessageSquare size={24} style={{ opacity: 0.2, margin: "0 auto 6px", display: "block" }} />
-                  <Typography variant="caption" color="text.secondary">
-                    No comments yet
-                  </Typography>
-                </Box>
-              )}
-
-              <Divider sx={{ mb: 2 }} />
-
-              {/* Add comment */}
-              <TextField
-                fullWidth
-                multiline
-                minRows={3}
-                placeholder="Add a comment or note for the auditor…"
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                size="small"
-                sx={{ mb: 1.5 }}
-              />
-              <Button
-                variant="contained"
-                disableElevation
-                disabled={commentText.trim().length === 0}
-                startIcon={<MessageSquare size={15} />}
-                onClick={handleAddComment}
-                sx={{ textTransform: "none", fontWeight: 600 }}
-              >
-                Add Comment
-              </Button>
+              <CommentsSection auditId={control.auditId} controlId={control.id} />
             </SectionCard>
 
           </TabPanel>

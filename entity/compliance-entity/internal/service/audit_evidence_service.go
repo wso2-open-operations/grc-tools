@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
@@ -39,6 +40,33 @@ var validEvidenceStatuses = map[string]bool{
 	"COMPLIANCE_REJECTED": true,
 	"APPROVED":            true,
 	"AUDITOR_REJECTED":    true,
+}
+
+// allowedEvidenceTransitions defines the legal next statuses for an evidence
+// record: submit → compliance review → auditor validation, with rejections
+// looping back to a resubmit. Prevents skipping straight to APPROVED.
+var allowedEvidenceTransitions = map[string][]string{
+	"SUBMITTED":           {"COMPLIANCE_APPROVED", "COMPLIANCE_REJECTED"},
+	"COMPLIANCE_REJECTED": {"SUBMITTED"},
+	"COMPLIANCE_APPROVED": {"APPROVED", "AUDITOR_REJECTED"},
+	"AUDITOR_REJECTED":    {"SUBMITTED"},
+	"APPROVED":            {},
+}
+
+// isValidEvidenceTransition reports whether moving from -> to is a legal step.
+// A no-op (from == to) and an empty current status are always allowed.
+func isValidEvidenceTransition(from, to string) bool {
+	from = strings.ToUpper(from)
+	to = strings.ToUpper(to)
+	if from == to || from == "" {
+		return true
+	}
+	for _, next := range allowedEvidenceTransitions[from] {
+		if next == to {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *evidenceService) CreateEvidence(ctx context.Context, controlID int, req domain.CreateEvidenceRequest) (domain.AuditEvidence, error) {
@@ -95,6 +123,17 @@ func (s *evidenceService) UpdateEvidence(ctx context.Context, evidenceID int, re
 	}
 	if req.UpdatedBy == "" {
 		return domain.AuditEvidence{}, &apierror.ValidationError{Msg: "updatedBy is required"}
+	}
+	// Enforce workflow order: the target status must be reachable from the
+	// evidence record's current status.
+	current, err := s.repo.GetEvidenceByID(ctx, evidenceID)
+	if err != nil {
+		return domain.AuditEvidence{}, err
+	}
+	if !isValidEvidenceTransition(current.Status, req.Status) {
+		return domain.AuditEvidence{}, &apierror.ValidationError{
+			Msg: fmt.Sprintf("invalid status transition: %s -> %s", current.Status, req.Status),
+		}
 	}
 	e, err := s.repo.UpdateEvidence(ctx, evidenceID, req)
 	if err != nil {

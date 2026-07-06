@@ -123,6 +123,15 @@ func (s *controlService) UpdateStatus(ctx context.Context, auditID, controlID in
 	if c == nil {
 		return &apierror.Error{StatusCode: http.StatusNotFound, Body: "control not found"}
 	}
+	// TODO(status-workflow): enforce the control status TRANSITION rules here.
+	// Above only checks that req.Status is a valid enum value — a caller can still
+	// jump straight to any status (e.g. EVIDENCE_PENDING -> COMPLETE) and skip
+	// internal review + auditor validation. The current status is already loaded in
+	// `c.Status`, so add: if the move c.Status -> req.Status is not allowed, return
+	// 422 "invalid status transition". Reuse the same transition map implemented in
+	// compliance-entity/internal/service/audit_control_service.go (allowedControlTransitions
+	// / isValidControlTransition) so both layers agree. (This is the live enforcement
+	// point until the backend is migrated to call the compliance entity.)
 	return s.repo.UpdateStatus(ctx, auditID, controlID, req.Status, req.Comment, updatedBy)
 }
 

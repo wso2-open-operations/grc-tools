@@ -47,13 +47,21 @@ const controlSelectCols = `
   c.sample_reference, c.sample_file_url, c.sample_file_name,
   c.comments, c.is_manually_added,
   (c.due_date IS NOT NULL AND c.due_date < CURDATE() AND c.status != 'COMPLETE') AS is_overdue,
-  c.created_at, c.updated_at`
+  c.created_at, c.updated_at,
+  DATE_FORMAT(p.due_date, '%Y-%m-%d') AS population_due_date,
+  u_pop.display_name AS population_owner_name,
+  t_pop.name         AS population_team_name`
 
+// Population is 1:1 with a control (uq_population_control), so the LEFT JOINs
+// add at most one row and its owner/team names for the population-phase columns.
 const controlFromClause = `
 FROM audit_control c
 LEFT JOIN ` + "`user`" + ` u_owner ON u_owner.id = c.owner_id
 LEFT JOIN audit_team t          ON t.id    = c.team_id
-LEFT JOIN ` + "`user`" + ` u_aud   ON u_aud.id   = c.auditor_id`
+LEFT JOIN ` + "`user`" + ` u_aud   ON u_aud.id   = c.auditor_id
+LEFT JOIN audit_population p     ON p.control_id = c.id
+LEFT JOIN ` + "`user`" + ` u_pop   ON u_pop.id   = p.owner_id
+LEFT JOIN audit_team t_pop       ON t_pop.id = p.team_id`
 
 func (r *controlRepository) List(ctx context.Context, auditID int) ([]*model.AuditControl, error) {
 	q := "SELECT" + controlSelectCols + controlFromClause + " WHERE c.audit_id = ? ORDER BY c.control_number"
@@ -303,6 +311,9 @@ func scanControl(s scanner) (*model.AuditControl, error) {
 		isOverdue       bool
 		createdAt       time.Time
 		updatedAt       time.Time
+		popDueDate      sql.NullString
+		popOwnerName    sql.NullString
+		popTeamName     sql.NullString
 	)
 	err := s.Scan(
 		&id, &auditID,
@@ -315,6 +326,7 @@ func scanControl(s scanner) (*model.AuditControl, error) {
 		&sampleRef, &sampleFileURL, &sampleFileName,
 		&comments, &isManuallyAdded, &isOverdue,
 		&createdAt, &updatedAt,
+		&popDueDate, &popOwnerName, &popTeamName,
 	)
 	if err != nil {
 		return nil, err
@@ -344,6 +356,9 @@ func scanControl(s scanner) (*model.AuditControl, error) {
 		IsOverdue:           isOverdue,
 		CreatedAt:           createdAt,
 		UpdatedAt:           updatedAt,
+		PopulationDueDate:   nullStringPtr(popDueDate),
+		PopulationOwnerName: nullStringPtr(popOwnerName),
+		PopulationTeamName:  nullStringPtr(popTeamName),
 	}, nil
 }
 

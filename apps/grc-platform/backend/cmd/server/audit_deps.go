@@ -36,6 +36,7 @@ func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
 	teamRepo      := auditmysql.NewTeamRepository(db)
 	dashboardRepo := auditmysql.NewDashboardRepository(db)
 	evidenceRepo  := auditmysql.NewEvidenceRepository(db)
+	commentRepo   := auditmysql.NewCommentRepository(db)
 
 	// ── Services ──────────────────────────────────────────────────────────────
 	auditSvc     := auditservice.NewAuditService(auditRepo, frameworkRepo, productRepo)
@@ -45,6 +46,7 @@ func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
 	teamSvc      := auditservice.NewTeamService(teamRepo)
 	dashboardSvc := auditservice.NewDashboardService(dashboardRepo)
 	evidenceSvc  := auditservice.NewEvidenceService(evidenceRepo, fileSvc)
+	commentSvc   := auditservice.NewCommentService(commentRepo)
 
 	return audithandler.Deps{
 		Audit:     auditSvc,
@@ -54,7 +56,8 @@ func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
 		Team:      teamSvc,
 		Dashboard: dashboardSvc,
 		Evidence:  evidenceSvc,
-		// Population, Comment, Review, Assignment, Trail, Notification
+		Comment:   commentSvc,
+		// Population, Review, Assignment, Trail, Notification
 		// are wired here as their implementations are added.
 	}
 }

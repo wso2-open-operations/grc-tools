@@ -138,6 +138,19 @@ func (s *riskService) UpdateRisk(ctx context.Context, id int, req domain.UpdateR
 	if req.WorkflowStatus != nil && !validRiskStatuses[strings.ToUpper(*req.WorkflowStatus)] {
 		return domain.Risk{}, &apierror.ValidationError{Msg: "invalid workflowStatus: " + *req.WorkflowStatus}
 	}
+	// TODO(risk-workflow): enforce the risk workflow_status TRANSITION rules here,
+	// the same way audit_control_service.go / audit_evidence_service.go do it.
+	// Currently only enum-membership is checked above, so a caller can jump to any
+	// valid status (e.g. DRAFT -> CLOSED) and skip owner/management/compliance
+	// approval stages. To implement:
+	//   1. Add an `allowedRiskTransitions map[string][]string` mapping each of the
+	//      12 workflow_status values to its legal next states (register → owner
+	//      approval → management approval → compliance review → remediation →
+	//      completion approval → compliance closure → closed; plus amendment/
+	//      revision/escalated/cancelled paths).
+	//   2. Fetch the current risk (s.repo.GetRiskByID) and reject the update if
+	//      isValidRiskTransition(current.WorkflowStatus, *req.WorkflowStatus) is false.
+	// See isValidControlTransition for the pattern to copy.
 	if req.TreatmentStrategy != nil && !validTreatmentStrategies[strings.ToUpper(*req.TreatmentStrategy)] {
 		return domain.Risk{}, &apierror.ValidationError{Msg: "treatmentStrategy must be MITIGATE, ACCEPT, TRANSFER, or VOID"}
 	}

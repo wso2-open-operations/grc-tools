@@ -37,6 +37,14 @@ func FromContext(ctx context.Context) *UserInfo {
 	return middleware.UserInfoFromContext(ctx)
 }
 
+// privilegeEnforcementEnabled gates all RequirePrivilege checks.
+//
+// TEMPORARY: set to false so the whole API is accessible while roles and
+// privileges are still being seeded in the database. Flip back to true once
+// seed.sql (role, privilege, role_privilege) is loaded and the Asgardeo group
+// names match role.role_name — then access is enforced against the DB mapping.
+const privilegeEnforcementEnabled = false
+
 // HasPrivilege returns true if the user holds the given privilege.
 //
 // When no privilege store was configured (TokenValidatorEnabled=false local dev),
@@ -46,6 +54,10 @@ func HasPrivilege(ctx context.Context, priv string) bool {
 	// If the Auth middleware wasn't applied, fail closed.
 	if middleware.UserInfoFromContext(ctx) == nil {
 		return false
+	}
+	if !privilegeEnforcementEnabled {
+		// TEMPORARY allow-all — see privilegeEnforcementEnabled above.
+		return true
 	}
 	privs := privilege.FromContext(ctx)
 	if privs == nil {

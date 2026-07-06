@@ -28,6 +28,9 @@ type AuditEvidenceFile struct {
 	FileSize   *int64    `json:"fileSize"`
 	CreatedBy  string    `json:"createdBy"`
 	CreatedAt  time.Time `json:"createdAt"`
+	// ReadURL is a short-lived read-only SAS URL for viewing/downloading the blob.
+	// Computed at list time (not persisted); nil if storage is unconfigured.
+	ReadURL *string `json:"readUrl"`
 }
 
 // AuditEvidence represents one submission round for a control.

@@ -87,7 +87,12 @@ type EvidenceRepository interface {
 
 // These remain empty — add methods as their handlers are implemented.
 type PopulationRepository interface{}
-type CommentRepository interface{}
+
+// CommentRepository is the data-access contract for audit_comment (evidence-scoped).
+type CommentRepository interface {
+	Create(ctx context.Context, evidenceID int, content string, isInternal bool, parentCommentID *int, createdBy string) (*model.AuditComment, error)
+	ListByEvidence(ctx context.Context, evidenceID int) ([]*model.AuditComment, error)
+}
 type AssignmentRepository interface{}
 type NotificationRepository interface{}
 type AIValidationLogRepository interface{}

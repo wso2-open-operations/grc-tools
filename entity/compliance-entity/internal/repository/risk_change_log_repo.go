@@ -39,15 +39,14 @@ func NewRiskChangeLogRepository(db *sql.DB) RiskChangeLogRepository {
 
 func (r *riskChangeLogRepo) CreateRiskChangeLog(ctx context.Context, riskID int, req domain.CreateRiskChangeLogRequest) (*domain.RiskChangeLog, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO risk_change_log (risk_id, created_by, action, field_changed, old_value, new_value, updated_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO risk_change_log (risk_id, created_by, action, field_changed, old_value, new_value)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 		riskID,
 		req.CreatedBy,
 		req.Action,
 		nullableString(req.FieldChanged),
 		nullableString(req.OldValue),
 		nullableString(req.NewValue),
-		req.CreatedBy,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("risk_change_log.Create: %w", err)

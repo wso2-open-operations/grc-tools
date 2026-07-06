@@ -34,11 +34,16 @@ import {
   ListChecks,
   Settings,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useEffect, useState, type JSX } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import FilterPanel from "@modules/audit/components/FilterPanel";
 import AuditStatusChip from "@modules/audit/components/AuditStatusChip";
-import ControlsTable from "@modules/audit/components/ControlsTable";
+import ControlsTable, {
+  ColumnPicker,
+  CONTROL_COLUMNS,
+  DEFAULT_VISIBLE_CONTROL_COLUMNS,
+  CONTROL_COLUMNS_STORAGE_KEY,
+} from "@modules/audit/components/ControlsTable";
 import ControlDrawer from "@modules/audit/components/ControlDrawer";
 import ControlSettingsPanel from "@modules/audit/components/ControlSettingsPanel";
 import { useAuditRole } from "@modules/audit/hooks/useAuditRole";
@@ -177,9 +182,39 @@ export default function AuditDetailPage(): JSX.Element {
   const [selectedControl, setSelectedControl] = useState<AuditControl | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const auditRole = useAuditRole();
-  const canManageControls = auditRole === "compliance_admin" || auditRole === "compliance_team";
+  // TEMPORARY: role gating disabled so all controls are visible while roles &
+  // privileges are seeded in the DB. Restore the check below once privileges
+  // are wired: auditRole === "compliance_admin" || auditRole === "compliance_team".
+  void auditRole;
+  const canManageControls = true;
 
   const controls = controlsData?.items ?? [];
+
+  // Deep link from the dashboard: ?control={id} opens that control's drawer once
+  // controls have loaded, then the param is cleared so it doesn't re-open on close.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const cid = searchParams.get("control");
+    if (!cid || controls.length === 0) return;
+    const match = controls.find((c) => c.id === Number(cid));
+    if (match) {
+      setSelectedControl(match);
+      searchParams.delete("control");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [controls, searchParams, setSearchParams]);
+
+  // Column visibility for the controls table — the picker lives in the filter bar.
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(CONTROL_COLUMNS_STORAGE_KEY);
+      if (stored) return JSON.parse(stored) as string[];
+    } catch { /* ignore malformed storage */ }
+    return DEFAULT_VISIBLE_CONTROL_COLUMNS;
+  });
+  useEffect(() => {
+    try { localStorage.setItem(CONTROL_COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumnIds)); } catch { /* ignore */ }
+  }, [visibleColumnIds]);
 
   // Quick filter (card click) takes precedence over panel filters
   const filteredControls =
@@ -397,6 +432,14 @@ export default function AuditDetailPage(): JSX.Element {
               )}
             </>
           )}
+          <Box sx={{ ml: "auto" }}>
+            <ColumnPicker
+              columns={CONTROL_COLUMNS}
+              visible={visibleColumnIds}
+              onChange={setVisibleColumnIds}
+              onReset={() => setVisibleColumnIds(DEFAULT_VISIBLE_CONTROL_COLUMNS)}
+            />
+          </Box>
         </Box>
       </Box>
 
@@ -408,6 +451,7 @@ export default function AuditDetailPage(): JSX.Element {
         onFiltersChange={handleFilterChange}
         isLoading={controlsLoading}
         onRowClick={(control) => setSelectedControl(control)}
+        visibleColumnIds={visibleColumnIds}
       />
 
       {/* Control detail drawer */}

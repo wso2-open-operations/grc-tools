@@ -45,6 +45,10 @@ type AuditControl struct {
 	IsOverdue           bool      `json:"isOverdue"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
+	// Population-phase fields (OE controls), joined 1:1 from audit_population.
+	PopulationDueDate   *string `json:"populationDueDate"`
+	PopulationOwnerName *string `json:"populationOwnerName"`
+	PopulationTeamName  *string `json:"populationTeamName"`
 }
 
 // ControlListResponse is returned by GET /api/v1/audits/{id}/controls.

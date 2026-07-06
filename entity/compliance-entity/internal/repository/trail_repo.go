@@ -38,8 +38,8 @@ func NewTrailRepository(db *sql.DB) TrailRepository { return &trailRepo{db: db} 
 func (r *trailRepo) CreateTrail(ctx context.Context, auditID int, req domain.CreateAuditTrailRequest) (*domain.AuditTrail, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO audit_trail
-		 (audit_id, actor_id, control_id, evidence_id, action, entity_type, entity_id, details, ip_address, created_by, updated_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (audit_id, actor_id, control_id, evidence_id, action, entity_type, entity_id, details, ip_address, created_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		auditID,
 		nullableInt(req.ActorID),
 		nullableInt(req.ControlID),
@@ -49,7 +49,6 @@ func (r *trailRepo) CreateTrail(ctx context.Context, auditID int, req domain.Cre
 		nullableInt(req.EntityID),
 		nullableString(req.Details),
 		nullableString(req.IPAddress),
-		nullableString(req.CreatedBy),
 		nullableString(req.CreatedBy),
 	)
 	if err != nil {

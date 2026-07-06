@@ -19,7 +19,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,6 +40,11 @@ type EvidenceService interface {
 	// GetFileUploadURL generates a blob-scoped SAS URL for exactly one file.
 	// The returned URL is valid for 30 minutes and scoped to that single blob only.
 	GetFileUploadURL(ctx context.Context, folderPath, fileName string) (*model.FileUploadURLResponse, error)
+
+	// UploadFile stores one file into the session folder by proxying the bytes
+	// through the backend (client -> backend -> Azure). The backend authenticates
+	// to Azure with its account key; no SAS is handed to the client.
+	UploadFile(ctx context.Context, folderPath, fileName, contentType string, data []byte) error
 
 	// Submit reads all blobs at folderPath from Azure, records them in the DB as
 	// a new evidence submission, and returns the created evidence record.
@@ -79,6 +86,20 @@ func (s *evidenceService) GetFileUploadURL(_ context.Context, folderPath, fileNa
 		UploadURL: uploadURL,
 		ExpiresAt: expiresAt,
 	}, nil
+}
+
+func (s *evidenceService) UploadFile(ctx context.Context, folderPath, fileName, contentType string, data []byte) error {
+	if folderPath == "" {
+		return &apierror.Error{StatusCode: http.StatusBadRequest, Body: "folderPath is required"}
+	}
+	if strings.ContainsAny(fileName, "/\\") {
+		return &apierror.Error{StatusCode: http.StatusBadRequest, Body: "fileName must not contain path separators"}
+	}
+	if len(data) == 0 {
+		return &apierror.Error{StatusCode: http.StatusBadRequest, Body: "file is empty"}
+	}
+	blobName := folderPath + fileName
+	return s.storage.UploadBlob(ctx, blobName, contentType, data)
 }
 
 func (s *evidenceService) Submit(ctx context.Context, controlID int, folderPath, submittedBy string) (*model.AuditEvidence, error) {
@@ -131,5 +152,30 @@ func (s *evidenceService) Submit(ctx context.Context, controlID int, folderPath,
 }
 
 func (s *evidenceService) List(ctx context.Context, controlID int) ([]*model.AuditEvidence, error) {
-	return s.repo.ListByControl(ctx, controlID)
+	evidence, err := s.repo.ListByControl(ctx, controlID)
+	if err != nil {
+		return nil, err
+	}
+	// Attach a short-lived read-only SAS URL to each file so the reviewer's
+	// browser can view/download it from the private container. Best-effort:
+	// if storage is unconfigured or signing fails, ReadURL stays nil.
+	for _, e := range evidence {
+		for _, f := range e.Files {
+			if f.FilePath == "" {
+				continue
+			}
+			blobName := s.storage.BlobName(f.FilePath)
+			// Prefer the MIME type from the filename extension so the browser can
+			// display the blob inline (blobs were stored as octet-stream); fall back
+			// to the recorded file type.
+			contentType := mime.TypeByExtension(filepath.Ext(f.FileName))
+			if contentType == "" && f.FileType != nil {
+				contentType = *f.FileType
+			}
+			if readURL, _, err := s.storage.GenerateReadSASURL(blobName, contentType, 30*time.Minute); err == nil {
+				f.ReadURL = &readURL
+			}
+		}
+	}
+	return evidence, nil
 }

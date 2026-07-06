@@ -46,6 +46,12 @@ func (s *riskChangeLogService) CreateRiskChangeLog(ctx context.Context, riskID i
 	if !validChangeLogActions[strings.ToUpper(req.Action)] {
 		return domain.RiskChangeLog{}, &apierror.ValidationError{Msg: "invalid action: " + req.Action}
 	}
+	if err := validJSONField("oldValue", req.OldValue); err != nil {
+		return domain.RiskChangeLog{}, err
+	}
+	if err := validJSONField("newValue", req.NewValue); err != nil {
+		return domain.RiskChangeLog{}, err
+	}
 	e, err := s.repo.CreateRiskChangeLog(ctx, riskID, req)
 	if err != nil {
 		return domain.RiskChangeLog{}, err

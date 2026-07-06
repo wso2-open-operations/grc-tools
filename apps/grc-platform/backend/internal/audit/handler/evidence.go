@@ -17,7 +17,9 @@
 package handler
 
 import (
+	"io"
 	"net/http"
+	"path/filepath"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
@@ -25,6 +27,10 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
+
+// maxEvidenceUploadBytes caps a single proxied evidence upload (bytes travel
+// through the backend, so bound them to protect memory and the gateway).
+const maxEvidenceUploadBytes = 25 << 20 // 25 MiB
 
 type evidenceHandler struct {
 	svc        service.EvidenceService
@@ -78,29 +84,62 @@ func (h *evidenceHandler) getUploadLink(w http.ResponseWriter, r *http.Request) 
 	response.WriteJSONValue(w, http.StatusOK, link)
 }
 
-// getFileUploadURL handles POST /api/v1/audits/{id}/controls/{controlId}/evidence/file-url.
+// uploadEvidence handles POST /api/v1/audits/{id}/controls/{controlId}/evidence/upload.
 //
-// Returns a blob-scoped SAS URL valid for 30 minutes, scoped to exactly the
-// one blob named {folderPath}{fileName}. The agent PUTs the file directly to
-// that URL with header x-ms-blob-type: BlockBlob.
-func (h *evidenceHandler) getFileUploadURL(w http.ResponseWriter, r *http.Request) {
+// The client sends the file as multipart/form-data (fields: folderPath, file).
+// The backend validates size/type and proxies the bytes to Azure using its own
+// account key — no SAS is ever handed to the client, so the byte transfer stays
+// client -> backend (Untrust -> Trust) then backend -> Azure (Trust -> Untrust).
+func (h *evidenceHandler) uploadEvidence(w http.ResponseWriter, r *http.Request) {
 	if !auth.RequirePrivilege(r.Context(), w, privilege.SubmitEvidence) {
 		return
 	}
-	var req model.FileUploadURLRequest
-	if err := response.DecodeJSON(w, r, &req); err != nil {
+
+	// Bound the request body before parsing to protect memory and the gateway.
+	r.Body = http.MaxBytesReader(w, r.Body, maxEvidenceUploadBytes)
+	if err := r.ParseMultipartForm(maxEvidenceUploadBytes); err != nil {
+		response.WriteError(w, http.StatusRequestEntityTooLarge, "file too large or malformed upload (max 25 MB)")
 		return
 	}
-	if req.FileName == "" || req.FolderPath == "" {
-		response.WriteError(w, http.StatusBadRequest, "fileName and folderPath are required")
+
+	folderPath := r.FormValue("folderPath")
+	if folderPath == "" {
+		response.WriteError(w, http.StatusBadRequest, "folderPath is required")
 		return
 	}
-	result, err := h.svc.GetFileUploadURL(r.Context(), req.FolderPath, req.FileName)
+
+	f, header, err := r.FormFile("file")
 	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, "file is required")
+		return
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, "could not read uploaded file")
+		return
+	}
+
+	// Resolve content type from the part header, sniffing the bytes as a fallback
+	// rather than blindly trusting the client-declared type.
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+
+	// Strip any client-supplied path; keep only the base file name.
+	fileName := filepath.Base(header.Filename)
+
+	if err := h.svc.UploadFile(r.Context(), folderPath, fileName, contentType, data); err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
-	response.WriteJSONValue(w, http.StatusOK, result)
+
+	response.WriteJSONValue(w, http.StatusCreated, map[string]any{
+		"fileName": fileName,
+		"size":     len(data),
+	})
 }
 
 // submitEvidence handles POST /api/v1/audits/{id}/controls/{controlId}/evidence/submit.

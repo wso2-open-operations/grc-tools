@@ -49,6 +49,7 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	th := &teamHandler{svc: deps.Team}
 	dh := &dashboardHandler{svc: deps.Dashboard}
 	eh := &evidenceHandler{svc: deps.Evidence, controlSvc: deps.Control}
+	cmh := &commentHandler{svc: deps.Comment}
 
 	// Dashboard.
 	mux.HandleFunc("GET /api/v1/audit/dashboard", dh.getDashboard)
@@ -78,12 +79,18 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("DELETE /api/v1/audits/{id}/controls/{controlId}", ch.deleteControl)
 	mux.HandleFunc("PATCH /api/v1/audits/{id}/controls/{controlId}/status", ch.updateControlStatus)
 
-	// Evidence submission (SAS-based agent upload flow).
-	// Note: /upload-link and /submit must be registered before the plain /evidence
-	// list route so the router matches their literal suffixes first.
+	// Evidence submission (backend-proxied upload flow).
+	// Note: /upload-link, /upload and /submit must be registered before the plain
+	// /evidence list route so the router matches their literal suffixes first.
+	// File bytes are proxied through the backend (POST /upload, multipart) — no
+	// write SAS is handed to the client.
 	mux.HandleFunc("GET /api/v1/evidence-app/controls", eh.getAssignedControls)
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence/upload-link", eh.getUploadLink)
-	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/file-url", eh.getFileUploadURL)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/upload", eh.uploadEvidence)
 	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/submit", eh.submitEvidence)
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence", eh.listEvidence)
+
+	// Evidence comments (evidence-scoped; is_internal hides from external auditors)
+	mux.HandleFunc("GET /api/v1/evidence/{evidenceId}/comments", cmh.listComments)
+	mux.HandleFunc("POST /api/v1/evidence/{evidenceId}/comments", cmh.addComment)
 }

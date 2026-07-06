@@ -108,7 +108,8 @@ func (r *evidenceRepository) listFiles(ctx context.Context, evidenceID int) ([]*
 	}
 	defer rows.Close()
 
-	var files []*model.AuditEvidenceFile
+	// Non-nil so the JSON response is always [] (never null) for a fileless round.
+	files := []*model.AuditEvidenceFile{}
 	for rows.Next() {
 		f := &model.AuditEvidenceFile{}
 		var fileType sql.NullString

@@ -24,6 +24,7 @@
 package file
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -78,11 +79,12 @@ func (s *Service) BlobURL(blobName string) string {
 	return s.ContainerURL() + "/" + blobName
 }
 
-// GenerateBlobSASURL creates a blob-level Service SAS token scoped to exactly
-// one blob (blobName) with create+write permissions, expiring after ttl.
-// Returns the full PUT-ready URL (https://account.blob.core.windows.net/container/blobName?sas).
-// The agent cannot access any other blob in the container with this token.
-func (s *Service) GenerateBlobSASURL(blobName string, ttl time.Duration) (uploadURL string, expiresAt time.Time, err error) {
+// blobSAS signs a blob-scoped Service SAS with the given permissions ("cw" for
+// create+write uploads, "r" for read-only views) and returns the full signed URL.
+// respContentType, when non-empty, overrides the Content-Type Azure returns on a
+// read (the rsct response header), so browsers display the blob inline instead of
+// downloading an application/octet-stream. Ignored for uploads.
+func (s *Service) blobSAS(blobName, perms, respContentType string, ttl time.Duration) (signedURL string, expiresAt time.Time, err error) {
 	keyBytes, err := base64.StdEncoding.DecodeString(s.cfg.AccountKey)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("file: decode account key: %w", err)
@@ -93,8 +95,7 @@ func (s *Service) GenerateBlobSASURL(blobName string, ttl time.Duration) (upload
 	expiry := now.Add(ttl)
 
 	const sv = "2020-02-10"
-	const sp = "cw" // create + write
-	const sr = "b"  // blob resource (scoped to one blob)
+	const sr = "b" // blob resource (scoped to one blob)
 	const spr = "https"
 
 	const azureFmt = "2006-01-02T15:04:05Z"
@@ -104,9 +105,9 @@ func (s *Service) GenerateBlobSASURL(blobName string, ttl time.Duration) (upload
 	// Blob-level canonical resource includes the full blob name path.
 	canonicalizedResource := "/blob/" + s.cfg.AccountName + "/" + s.cfg.ContainerName + "/" + blobName
 
-	// Service SAS string-to-sign (sv 2020-02-10, 15 fields).
+	// Service SAS string-to-sign (sv 2020-02-10, 15 fields). rsct is the last field.
 	stringToSign := strings.Join([]string{
-		sp,                    // signedPermissions
+		perms,                 // signedPermissions
 		st,                    // signedStart
 		se,                    // signedExpiry
 		canonicalizedResource, // canonicalizedResource
@@ -120,7 +121,7 @@ func (s *Service) GenerateBlobSASURL(blobName string, ttl time.Duration) (upload
 		"",                    // rscd
 		"",                    // rsce
 		"",                    // rscl
-		"",                    // rsct
+		respContentType,       // rsct (response Content-Type override)
 	}, "\n")
 
 	mac := hmac.New(sha256.New, keyBytes)
@@ -130,13 +131,103 @@ func (s *Service) GenerateBlobSASURL(blobName string, ttl time.Duration) (upload
 	q := url.Values{}
 	q.Set("sv", sv)
 	q.Set("sr", sr)
-	q.Set("sp", sp)
+	q.Set("sp", perms)
 	q.Set("st", st)
 	q.Set("se", se)
 	q.Set("spr", spr)
+	if respContentType != "" {
+		q.Set("rsct", respContentType)
+	}
 	q.Set("sig", sig)
 
 	return s.BlobURL(blobName) + "?" + q.Encode(), expiry, nil
+}
+
+// GenerateBlobSASURL creates a blob-scoped create+write SAS URL for uploading
+// exactly one blob. The caller cannot touch any other blob with this token.
+func (s *Service) GenerateBlobSASURL(blobName string, ttl time.Duration) (uploadURL string, expiresAt time.Time, err error) {
+	return s.blobSAS(blobName, "cw", "", ttl)
+}
+
+// GenerateReadSASURL creates a blob-scoped read-only SAS URL for viewing or
+// downloading exactly one blob. contentType (optional) is returned as the
+// Content-Type so the browser can display the blob inline.
+func (s *Service) GenerateReadSASURL(blobName, contentType string, ttl time.Duration) (readURL string, expiresAt time.Time, err error) {
+	return s.blobSAS(blobName, "r", contentType, ttl)
+}
+
+// BlobName extracts the blob path from a full blob URL produced by BlobURL.
+// Returns the input unchanged if it is not a URL under this container.
+func (s *Service) BlobName(fullURL string) string {
+	return strings.TrimPrefix(fullURL, s.ContainerURL()+"/")
+}
+
+// UploadBlob writes data to the named blob using Shared Key auth (PUT Block Blob).
+// Used for server-side proxied uploads: the file bytes travel client -> backend ->
+// Azure, so the account key never leaves the backend and no SAS is handed to the
+// client. contentType sets the stored blob's Content-Type.
+func (s *Service) UploadBlob(ctx context.Context, blobName, contentType string, data []byte) error {
+	keyBytes, err := base64.StdEncoding.DecodeString(s.cfg.AccountKey)
+	if err != nil {
+		return fmt.Errorf("file: decode account key: %w", err)
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	const version = "2020-02-10"
+	date := time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")
+	blobURL := s.BlobURL(blobName)
+	contentLength := fmt.Sprintf("%d", len(data))
+
+	// Canonicalized headers must be sorted alphabetically by header name.
+	canonHeaders := "x-ms-blob-type:BlockBlob\n" +
+		"x-ms-date:" + date + "\n" +
+		"x-ms-version:" + version + "\n"
+
+	canonResource := fmt.Sprintf("/%s/%s/%s", s.cfg.AccountName, s.cfg.ContainerName, blobName)
+
+	stringToSign := "PUT\n" +
+		"\n" + // Content-Encoding
+		"\n" + // Content-Language
+		contentLength + "\n" + // Content-Length
+		"\n" + // Content-MD5
+		contentType + "\n" + // Content-Type
+		"\n" + // Date (empty — x-ms-date used instead)
+		"\n" + // If-Modified-Since
+		"\n" + // If-Match
+		"\n" + // If-None-Match
+		"\n" + // If-Unmodified-Since
+		"\n" + // Range
+		canonHeaders +
+		canonResource
+
+	mac := hmac.New(sha256.New, keyBytes)
+	mac.Write([]byte(stringToSign))
+	sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, blobURL, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("file: upload blob: build request: %w", err)
+	}
+	req.ContentLength = int64(len(data))
+	req.Header.Set("x-ms-date", date)
+	req.Header.Set("x-ms-version", version)
+	req.Header.Set("x-ms-blob-type", "BlockBlob")
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", fmt.Sprintf("SharedKey %s:%s", s.cfg.AccountName, sig))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("file: upload blob: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("file: upload blob: azure returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }
 
 // ListBlobs returns all blobs whose names start with prefix, using Shared Key auth.

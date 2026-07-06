@@ -16,4 +16,70 @@
 
 package handler
 
-// TODO: implement audit comment CRUD and threading handlers
+import (
+	"net/http"
+	"strings"
+
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+)
+
+type commentHandler struct {
+	svc service.CommentService
+}
+
+// externalAuditorGroups are the Asgardeo group strings that map to an external
+// auditor. Internal-only comments are hidden from these viewers.
+var externalAuditorGroups = map[string]bool{
+	"external_auditor":       true,
+	"Audit External Auditor": true,
+}
+
+func isExternalAuditor(groups []string) bool {
+	for _, g := range groups {
+		if externalAuditorGroups[strings.TrimSpace(g)] {
+			return true
+		}
+	}
+	return false
+}
+
+// listComments handles GET /api/v1/evidence/{evidenceId}/comments.
+func (h *commentHandler) listComments(w http.ResponseWriter, r *http.Request) {
+	evidenceID, ok := parseIntParam(w, r, "evidenceId")
+	if !ok {
+		return
+	}
+	// External auditors do not receive internal comments.
+	includeInternal := !isExternalAuditor(auth.FromContext(r.Context()).Groups)
+	comments, err := h.svc.List(r.Context(), evidenceID, includeInternal)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	if comments == nil {
+		comments = []*model.AuditComment{}
+	}
+	response.WriteJSONValue(w, http.StatusOK, &model.CommentListResponse{Items: comments})
+}
+
+// addComment handles POST /api/v1/evidence/{evidenceId}/comments.
+func (h *commentHandler) addComment(w http.ResponseWriter, r *http.Request) {
+	evidenceID, ok := parseIntParam(w, r, "evidenceId")
+	if !ok {
+		return
+	}
+	var req model.AddCommentRequest
+	if err := response.DecodeJSON(w, r, &req); err != nil {
+		return
+	}
+	actor := auth.FromContext(r.Context()).Email
+	c, err := h.svc.Add(r.Context(), evidenceID, req, actor)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	response.WriteJSONValue(w, http.StatusCreated, c)
+}

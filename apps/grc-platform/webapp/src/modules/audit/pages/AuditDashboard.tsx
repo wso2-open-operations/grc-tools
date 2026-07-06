@@ -31,6 +31,7 @@ import {
   Typography,
 } from "@mui/material";
 import {
+  AlertTriangle,
   CheckCircle,
   ClipboardList,
   FolderOpen,
@@ -52,6 +53,27 @@ function statusColor(s: string): string {
 }
 function statusLabel(s: string): string {
   return CONTROL_STATUS_LABELS[s as ControlStatus] ?? s;
+}
+
+const DUE_OVERDUE = "#E53935";
+const DUE_SOON = "#FB8C00";
+
+// dueInfo derives a color, a relative label, and a sort key from a YYYY-MM-DD date.
+function dueInfo(dueDate: string | null): { color: string; label: string; sortKey: number } {
+  if (!dueDate) return { color: "text.disabled", label: "—", sortKey: Number.POSITIVE_INFINITY };
+  const due = new Date(`${dueDate}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+
+  let color = "text.primary";
+  let rel = "";
+  if (days < 0) { color = DUE_OVERDUE; rel = `${-days}d overdue`; }
+  else if (days === 0) { color = DUE_SOON; rel = "due today"; }
+  else if (days <= 3) { color = DUE_SOON; rel = `in ${days}d`; }
+  else { rel = `in ${days}d`; }
+
+  return { color, label: `${dueDate} · ${rel}`, sortKey: days };
 }
 
 // ── Action label per role/status ─────────────────────────────────────────────
@@ -263,15 +285,15 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
       {/* ── Audits panel ───────────────────────────────────────────────────── */}
       <Box sx={{ flex: 1, p: 3, display: "flex", flexDirection: "column", gap: 2 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ width: 28, height: 28, borderRadius: 1, bgcolor: "#1E88E518", display: "flex", alignItems: "center", justifyContent: "center", color: "#1E88E5" }}>
-            <FolderOpen size={16} />
+          <Box sx={{ width: 34, height: 34, borderRadius: 1.5, bgcolor: "#1E88E518", display: "flex", alignItems: "center", justifyContent: "center", color: "#1E88E5" }}>
+            <FolderOpen size={18} />
           </Box>
-          <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1 }}>Audits</Typography>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ lineHeight: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Audits</Typography>
         </Box>
 
         {/* Primary number: Active */}
         <Box sx={{ display: "flex", alignItems: "baseline", gap: 1.5 }}>
-          <Typography variant="h3" fontWeight={700} color="#1E88E5" lineHeight={1}>
+          <Typography variant="h2" fontWeight={700} color="#1E88E5" lineHeight={1}>
             {activeAudits}
           </Typography>
           <Typography variant="body1" color="text.secondary">Active</Typography>
@@ -280,17 +302,17 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
         {/* Secondary breakdown */}
         <Box sx={{ display: "flex", gap: 0, alignItems: "stretch" }}>
           <Box sx={{ textAlign: "center", px: 2, pl: 0 }}>
-            <Typography variant="h5" fontWeight={700}>{totalAudits}</Typography>
+            <Typography variant="h4" fontWeight={700}>{totalAudits}</Typography>
             <Typography variant="body2" color="text.secondary">Total</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
           <Box sx={{ textAlign: "center", px: 2 }}>
-            <Typography variant="h5" fontWeight={700} color="#43A047">{completedAudits}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#43A047">{completedAudits}</Typography>
             <Typography variant="body2" color="text.secondary">Completed</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
           <Box sx={{ textAlign: "center", px: 2 }}>
-            <Typography variant="h5" fontWeight={700} color="#78909C">{archivedAudits}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#78909C">{archivedAudits}</Typography>
             <Typography variant="body2" color="text.secondary">Archived</Typography>
           </Box>
         </Box>
@@ -301,16 +323,16 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
       {/* ── Controls panel ─────────────────────────────────────────────────── */}
       <Box sx={{ flex: 1.4, p: 3, display: "flex", flexDirection: "column", gap: 2 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ width: 28, height: 28, borderRadius: 1, bgcolor: "#43A04718", display: "flex", alignItems: "center", justifyContent: "center", color: "#43A047" }}>
-            <ClipboardList size={16} />
+          <Box sx={{ width: 34, height: 34, borderRadius: 1.5, bgcolor: "#43A04718", display: "flex", alignItems: "center", justifyContent: "center", color: "#43A047" }}>
+            <ClipboardList size={18} />
           </Box>
-          <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1 }}>Controls</Typography>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ lineHeight: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Controls</Typography>
         </Box>
 
         {/* Total + progress bar */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 3 }}>
           <Box sx={{ flexShrink: 0 }}>
-            <Typography variant="h3" fontWeight={700} lineHeight={1}>{totalControls}</Typography>
+            <Typography variant="h2" fontWeight={700} lineHeight={1}>{totalControls}</Typography>
             <Typography variant="body2" color="text.secondary">Total</Typography>
           </Box>
           <Box sx={{ flex: 1 }}>
@@ -331,7 +353,7 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
         {/* 3 key metrics */}
         <Box sx={{ display: "flex", gap: 0, alignItems: "stretch" }}>
           <Box sx={{ textAlign: "center", px: 2, pl: 0 }}>
-            <Typography variant="h5" fontWeight={700} color="#43A047">{completedControls}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#43A047">{completedControls}</Typography>
             <Typography variant="body2" color="text.secondary">Completed</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
@@ -343,7 +365,7 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
               "&:hover": { bgcolor: "#FB8C0012" },
             }}
           >
-            <Typography variant="h5" fontWeight={700} color="#FB8C00">{evidenceRequiredControls}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#FB8C00">{evidenceRequiredControls}</Typography>
             <Typography variant="body2" color="text.secondary">Evidence Required</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
@@ -355,7 +377,7 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
               "&:hover": { bgcolor: overdueControls > 0 ? "#E5393512" : "#78909C12" },
             }}
           >
-            <Typography variant="h5" fontWeight={700} color={overdueControls > 0 ? "#E53935" : "#78909C"}>
+            <Typography variant="h4" fontWeight={700} color={overdueControls > 0 ? "#E53935" : "#78909C"}>
               {overdueControls}
             </Typography>
             <Typography variant="body2" color="text.secondary">Overdue</Typography>
@@ -408,32 +430,37 @@ function ActionItemsList({ items, role }: { items: ActionItem[]; role: AuditRole
           </TableRow>
         </TableHead>
         <TableBody>
-          {items.map((item) => (
-            <TableRow
-              key={item.controlId}
-              hover
-              sx={{ cursor: "pointer" }}
-              onClick={() => void navigate(`/audit/audits/${item.auditId}`)}
-            >
-              <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
-              <TableCell sx={{ maxWidth: 200 }}>
-                <Typography variant="body2" noWrap title={item.auditName}>{item.auditName}</Typography>
-              </TableCell>
-              <TableCell>
-                <Typography variant="body2" color="primary.main">{actionLabel(item.status, role)}</Typography>
-              </TableCell>
-              <TableCell>
-                <Chip
-                  label={statusLabel(item.status)}
-                  size="small"
-                  sx={{ bgcolor: `${statusColor(item.status)}18`, color: statusColor(item.status), fontWeight: 600, fontSize: "0.7rem" }}
-                />
-              </TableCell>
-              <TableCell sx={{ whiteSpace: "nowrap", color: item.dueDate ? "text.primary" : "text.disabled" }}>
-                {item.dueDate || "—"}
-              </TableCell>
-            </TableRow>
-          ))}
+          {[...items].sort((a, b) => dueInfo(a.dueDate).sortKey - dueInfo(b.dueDate).sortKey).map((item) => {
+            const due = dueInfo(item.dueDate);
+            return (
+              <TableRow
+                key={item.controlId}
+                hover
+                sx={{ cursor: "pointer" }}
+                onClick={() => void navigate(`/audit/audits/${item.auditId}?control=${item.controlId}`)}
+              >
+                <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
+                <TableCell sx={{ maxWidth: 200 }}>
+                  <Typography variant="body2" noWrap title={item.auditName}>{item.auditName}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" color="primary.main">{actionLabel(item.status, role)}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    label={statusLabel(item.status)}
+                    size="small"
+                    sx={{ bgcolor: `${statusColor(item.status)}18`, color: statusColor(item.status), fontWeight: 600, fontSize: "0.7rem" }}
+                  />
+                </TableCell>
+                <TableCell sx={{ whiteSpace: "nowrap" }}>
+                  <Typography variant="body2" sx={{ color: due.color, fontWeight: due.sortKey <= 3 ? 600 : 400 }}>
+                    {due.label}
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </TableContainer>
@@ -474,7 +501,7 @@ function OverdueList({ items }: { items: OverdueControl[] }): JSX.Element {
               key={item.controlId}
               hover
               sx={{ cursor: "pointer" }}
-              onClick={() => void navigate(`/audit/audits/${item.auditId}`)}
+              onClick={() => void navigate(`/audit/audits/${item.auditId}?control=${item.controlId}`)}
             >
               <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
               <TableCell sx={{ maxWidth: 260 }}>
@@ -572,6 +599,45 @@ export default function AuditDashboard(): JSX.Element {
           />
         )}
       </Box>
+
+      {/* Attention banner — surfaces what needs action right now */}
+      {(overdueControls.length > 0 || (role !== "management" && actionItems.length > 0)) && (
+        <Paper
+          variant="outlined"
+          sx={{
+            borderRadius: 2,
+            px: 2,
+            py: 1.25,
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            flexWrap: "wrap",
+            borderColor: overdueControls.length > 0 ? DUE_OVERDUE : DUE_SOON,
+            bgcolor: overdueControls.length > 0 ? "rgba(229,57,53,0.05)" : "rgba(251,140,0,0.05)",
+          }}
+        >
+          <AlertTriangle size={18} color={overdueControls.length > 0 ? DUE_OVERDUE : DUE_SOON} />
+          <Typography variant="body2" fontWeight={700}>Needs attention</Typography>
+          {overdueControls.length > 0 && (
+            <Chip
+              clickable
+              size="small"
+              label={`${overdueControls.length} overdue`}
+              onClick={() => scrollAndHighlight(overdueRef, setOverdueHighlight)}
+              sx={{ color: DUE_OVERDUE, bgcolor: "rgba(229,57,53,0.12)", fontWeight: 600 }}
+            />
+          )}
+          {role !== "management" && actionItems.length > 0 && (
+            <Chip
+              clickable
+              size="small"
+              label={`${actionItems.length} awaiting you`}
+              onClick={() => scrollAndHighlight(actionItemsRef, setActionHighlight)}
+              sx={{ color: DUE_SOON, bgcolor: "rgba(251,140,0,0.12)", fontWeight: 600 }}
+            />
+          )}
+        </Paper>
+      )}
 
       {/* Overview banner — Audits + Controls in one panel */}
       <OverviewBanner
