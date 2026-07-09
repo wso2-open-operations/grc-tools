@@ -32,7 +32,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type contextKey string

@@ -19,7 +19,7 @@ package service
 import (
 	"context"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // TrailService defines business operations for the audit trail (append-only log).

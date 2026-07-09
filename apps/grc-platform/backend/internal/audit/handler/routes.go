@@ -20,7 +20,7 @@ package handler
 import (
 	"net/http"
 
-	auditservice "github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
+	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 )
 
 // Deps holds all service dependencies for Audit Hub handlers.
@@ -35,7 +35,6 @@ type Deps struct {
 	Evidence     auditservice.EvidenceService
 	Population   auditservice.PopulationService
 	Comment      auditservice.CommentService
-	Review       auditservice.ReviewService
 	Notification auditservice.NotificationService
 	Assignment   auditservice.AssignmentService
 	Trail        auditservice.TrailService
@@ -49,6 +48,8 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	uh := &userHandler{svc: deps.User}
 	th := &teamHandler{svc: deps.Team}
 	dh := &dashboardHandler{svc: deps.Dashboard}
+	eh := &evidenceHandler{svc: deps.Evidence, controlSvc: deps.Control}
+	cmh := &commentHandler{svc: deps.Comment}
 
 	// Dashboard.
 	mux.HandleFunc("GET /api/v1/audit/dashboard", dh.getDashboard)
@@ -56,6 +57,7 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	// Lookup data for Create Audit form dropdowns.
 	mux.HandleFunc("GET /api/v1/audit/frameworks", fh.listFrameworks)
 	mux.HandleFunc("POST /api/v1/audit/frameworks", fh.createFramework)
+	mux.HandleFunc("GET /api/v1/audit/frameworks/{id}/controls", fh.listFrameworkControls)
 	mux.HandleFunc("GET /api/v1/audit/products", fh.listProducts)
 	mux.HandleFunc("POST /api/v1/audit/products", fh.createProduct)
 	mux.HandleFunc("GET /api/v1/audit/users", uh.listUsers)
@@ -77,4 +79,21 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("PUT /api/v1/audits/{id}/controls/{controlId}", ch.updateControl)
 	mux.HandleFunc("DELETE /api/v1/audits/{id}/controls/{controlId}", ch.deleteControl)
 	mux.HandleFunc("PATCH /api/v1/audits/{id}/controls/{controlId}/status", ch.updateControlStatus)
+
+	// Evidence submission (backend-proxied upload flow).
+	// Note: /upload-link, /upload and /submit must be registered before the plain
+	// /evidence list route so the router matches their literal suffixes first.
+	// File bytes are proxied through the backend (POST /upload, multipart) — no
+	// write SAS is handed to the client.
+	mux.HandleFunc("GET /api/v1/evidence-app/controls", eh.getAssignedControls)
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence/upload-link", eh.getUploadLink)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/upload", eh.uploadEvidence)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/submit", eh.submitEvidence)
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence", eh.listEvidence)
+	// Proxied file download by file ID (bytes streamed via the Compliance Entity).
+	mux.HandleFunc("GET /api/v1/evidence/files/{fileId}/download", eh.downloadEvidenceFile)
+
+	// Evidence comments (evidence-scoped; is_internal hides from external auditors)
+	mux.HandleFunc("GET /api/v1/evidence/{evidenceId}/comments", cmh.listComments)
+	mux.HandleFunc("POST /api/v1/evidence/{evidenceId}/comments", cmh.addComment)
 }

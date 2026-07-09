@@ -36,7 +36,7 @@ func Connect(dsn string) (*sql.DB, error) {
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("db: ping: %w", err)
 	}
 	return db, nil

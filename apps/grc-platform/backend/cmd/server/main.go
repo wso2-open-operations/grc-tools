@@ -27,15 +27,16 @@ import (
 	"syscall"
 	"time"
 
-	audithandler "github.com/wso2-open-operations/grc-platform/backend/internal/audit/handler"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/config"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/db"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/middleware"
-	riskhandler "github.com/wso2-open-operations/grc-platform/backend/internal/risk/handler"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/file"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
-	userhandler "github.com/wso2-open-operations/grc-platform/backend/internal/user/handler"
-	usermysql "github.com/wso2-open-operations/grc-platform/backend/internal/user/mysql"
+	audithandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/handler"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/config"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/db"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/middleware"
+	riskhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/handler"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/entityclient"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
+	userhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/handler"
+	usermysql "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/mysql"
 )
 
 func main() {
@@ -69,11 +70,13 @@ func main() {
 		slog.Info("privilege store loaded")
 	}
 
-	fileSvc := file.NewService(file.StorageConfig{
-		AccountName:   cfg.Azure.StorageAccountName,
-		AccountKey:    cfg.Azure.StorageAccountKey,
-		ContainerName: cfg.Azure.ContainerName,
-	})
+	// File operations go through the Compliance Entity (which holds the Azure key);
+	// the backend never talks to Azure directly.
+	fileSvc := file.NewService(cfg.ComplianceEntityBaseURL)
+
+	// Typed HTTP client to the Compliance Entity for audit data access (migrating
+	// the audit module off direct MySQL, stage by stage).
+	entityCli := entityclient.New(cfg.ComplianceEntityBaseURL)
 
 	userDeps := userhandler.Deps{
 		Users: usermysql.NewRepository(sqlDB),
@@ -87,7 +90,7 @@ func main() {
 
 	userhandler.RegisterRoutes(mux, userDeps)
 	riskhandler.RegisterRoutes(mux, buildRiskDeps(sqlDB, fileSvc))
-	audithandler.RegisterRoutes(mux, buildAuditDeps(sqlDB, fileSvc))
+	audithandler.RegisterRoutes(mux, buildAuditDeps(fileSvc, entityCli))
 
 	handler := middleware.CORS(cfg.CORSAllowedOrigin)(
 		middleware.CorrelationID(

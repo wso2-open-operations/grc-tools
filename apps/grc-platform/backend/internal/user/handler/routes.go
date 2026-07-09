@@ -20,7 +20,7 @@ package handler
 import (
 	"net/http"
 
-	userentity "github.com/wso2-open-operations/grc-platform/backend/internal/user"
+	userentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user"
 )
 
 // Deps holds dependencies for shared user handlers.

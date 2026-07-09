@@ -19,10 +19,10 @@ package main
 import (
 	"database/sql"
 
-	riskhandler "github.com/wso2-open-operations/grc-platform/backend/internal/risk/handler"
-	riskmysql "github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository/mysql"
-	riskservice "github.com/wso2-open-operations/grc-platform/backend/internal/risk/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/file"
+	riskhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/handler"
+	riskmysql "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository/mysql"
+	riskservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
 )
 
 // buildRiskDeps wires the full Risk Hub dependency graph:

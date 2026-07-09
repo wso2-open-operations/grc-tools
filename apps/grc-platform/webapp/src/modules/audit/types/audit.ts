@@ -16,6 +16,8 @@
 
 export type AuditStatus = "ACTIVE" | "COMPLETED" | "ARCHIVED" | "REMOVED";
 
+export type ControlSource = "MANUAL" | "COPIED" | "CSV";
+
 export type ControlStatus =
   // ── OE population phase ───────────────────────────────────────────────────
   | "POPULATION_PENDING"           // OE default — team must submit population
@@ -39,7 +41,25 @@ export type ControlScope = "COMMON" | "PRODUCT_SPECIFIC";
 export interface AuditFramework {
   id: number;
   name: string;
-  version: string | null;
+  status?: string;
+}
+
+export interface AuditFrameworkControl {
+  id: number;
+  frameworkId: number;
+  controlNumber: string;
+  description: string;
+  evidenceRequirement: string | null;
+  requirementType: RequirementType;
+  controlType: ControlType;
+  scope: ControlScope;
+  version: number;
+  isCurrent: boolean;
+}
+
+export interface FrameworkControlListResponse {
+  controls: AuditFrameworkControl[];
+  total: number;
 }
 
 export interface AuditProduct {
@@ -95,15 +115,20 @@ export interface AuditControl {
   scope: ControlScope;
   dueDate: string | null;
   status: ControlStatus;
+  frameworkControlId: number | null;
+  templateVersion: number | null;
+  controlSource: ControlSource;
   sampleReference: string | null;
-  sampleFileUrl: string | null;
-  sampleFileName: string | null;
   comments: string | null;
-  isManuallyAdded: boolean;
   isOverdue: boolean;
   createdAt: string;
   updatedAt: string;
   samples?: PopulationSample[];
+  // Population-phase fields (OE controls). Optional — populated by the backend
+  // control query via a LEFT JOIN on audit_population; absent controls render "—".
+  populationDueDate?: string | null;
+  populationOwnerName?: string | null;
+  populationTeamName?: string | null;
 }
 
 export interface AuditListResponse {
@@ -132,6 +157,10 @@ export interface PopulationDetails {
   referenceNumber?: number | null;
   dueDate?: string | null;
   comments?: string | null;
+  /** Population-phase process owner (may differ from the control's process owner). */
+  ownerId?: number | null;
+  /** Population-phase team (may differ from the control's team). */
+  teamId?: number | null;
 }
 
 export interface AddControlRequest {
@@ -145,7 +174,8 @@ export interface AddControlRequest {
   ownerId?: number | null;
   teamId?: number | null;
   auditorId?: number | null;
-  isManuallyAdded: boolean;
+  frameworkControlId?: number | null;
+  controlSource?: ControlSource;
   population?: PopulationDetails | null;
 }
 

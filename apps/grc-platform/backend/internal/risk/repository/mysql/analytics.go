@@ -19,7 +19,7 @@ package mysql
 import (
 	"database/sql"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 )
 
 type analyticsRepository struct{ db *sql.DB }

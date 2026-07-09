@@ -23,6 +23,8 @@ import "time"
 type AuditControl struct {
 	ID                  int       `json:"id"`
 	AuditID             int       `json:"auditId"`
+	FrameworkControlID  *int      `json:"frameworkControlId"` // non-nil when sourced from template
+	TemplateVersion     *int      `json:"templateVersion"`    // version of the template row used
 	OwnerID             *int      `json:"ownerId"`
 	OwnerName           *string   `json:"ownerName"`
 	TeamID              *int      `json:"teamId"`
@@ -38,13 +40,15 @@ type AuditControl struct {
 	DueDate             *string   `json:"dueDate"`
 	Status              string    `json:"status"`
 	SampleReference     *string   `json:"sampleReference"`
-	SampleFileURL       *string   `json:"sampleFileUrl"`
-	SampleFileName      *string   `json:"sampleFileName"`
 	Comments            *string   `json:"comments"`
-	IsManuallyAdded     bool      `json:"isManuallyAdded"`
+	ControlSource       string    `json:"controlSource"` // MANUAL | COPIED | CSV
 	IsOverdue           bool      `json:"isOverdue"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
+	// Population-phase fields (OE controls), joined 1:1 from audit_population.
+	PopulationDueDate   *string `json:"populationDueDate"`
+	PopulationOwnerName *string `json:"populationOwnerName"`
+	PopulationTeamName  *string `json:"populationTeamName"`
 }
 
 // ControlListResponse is returned by GET /api/v1/audits/{id}/controls.
@@ -55,15 +59,22 @@ type ControlListResponse struct {
 
 // PopulationDetails is included in AddControlRequest for OE-type controls.
 // It maps to a row in audit_population.
+// OwnerID and TeamID represent the population-phase process owner and team,
+// which may differ from the control's owner and team (evidence phase).
+// AuditorID is shared with the control and is not stored separately here.
 type PopulationDetails struct {
 	Description     string  `json:"description"`
 	ReferenceNumber *int    `json:"referenceNumber"`
 	DueDate         *string `json:"dueDate"`
 	Comments        *string `json:"comments"`
+	OwnerID         *int    `json:"ownerId"`
+	TeamID          *int    `json:"teamId"`
 }
 
 // AddControlRequest is the payload for POST /api/v1/audits/{id}/controls.
 type AddControlRequest struct {
+	FrameworkControlID  *int               `json:"frameworkControlId"` // set when adding from framework template
+	ControlSource       string             `json:"controlSource"`      // MANUAL | COPIED | CSV; defaults to MANUAL
 	ControlNumber       string             `json:"controlNumber"`
 	Description         string             `json:"description"`
 	EvidenceRequirement *string            `json:"evidenceRequirement"`
@@ -74,7 +85,6 @@ type AddControlRequest struct {
 	TeamID              *int               `json:"teamId"`
 	AuditorID           *int               `json:"auditorId"`
 	DueDate             *string            `json:"dueDate"`
-	IsManuallyAdded     bool               `json:"isManuallyAdded"`
 	Population          *PopulationDetails `json:"population"` // OE controls only
 }
 

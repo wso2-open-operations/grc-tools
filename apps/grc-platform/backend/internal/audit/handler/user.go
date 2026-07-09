@@ -19,9 +19,11 @@ package handler
 import (
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type userHandler struct {
@@ -32,6 +34,9 @@ type userHandler struct {
 // Returns all active users for owner/auditor assignment dropdowns.
 // When Asgardeo SCIM2 is integrated, this endpoint will proxy to Asgardeo instead of MySQL.
 func (h *userHandler) listUsers(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	users, err := h.svc.List(r.Context())
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)

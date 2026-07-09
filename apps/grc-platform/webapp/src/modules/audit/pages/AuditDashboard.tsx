@@ -29,20 +29,21 @@ import {
   TableHead,
   TableRow,
   Typography,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import {
+  AlertTriangle,
   CheckCircle,
   ClipboardList,
   FolderOpen,
 } from "@wso2/oxygen-ui-icons-react";
-import { PieChart, BarChart, Pie, Cell } from "@wso2/oxygen-ui-charts-react";
+import { PieChart, Pie, Cell } from "@wso2/oxygen-ui-charts-react";
 import { Sector } from "recharts";
 import type { JSX } from "react";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useGetDashboard } from "@modules/audit/api/useGetDashboard";
-import { useAuditRole } from "@modules/audit/hooks/useAuditRole";
-import type { AuditRole } from "@modules/audit/hooks/useAuditRole";
+import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
+import { AuditPrivilege } from "@modules/audit/privileges";
 import { CONTROL_STATUS_COLORS, CONTROL_STATUS_LABELS } from "@modules/audit/utils/controlStatus";
 import type { ControlStatus } from "@modules/audit/types/audit";
 import type { ActionItem, OverdueControl, StatusCount, TeamCompletion } from "@modules/audit/types/dashboard";
@@ -54,9 +55,30 @@ function statusLabel(s: string): string {
   return CONTROL_STATUS_LABELS[s as ControlStatus] ?? s;
 }
 
+const DUE_OVERDUE = "#E53935";
+const DUE_SOON = "#FB8C00";
+
+// dueInfo derives a color, a relative label, and a sort key from a YYYY-MM-DD date.
+function dueInfo(dueDate: string | null): { color: string; label: string; sortKey: number } {
+  if (!dueDate) return { color: "text.disabled", label: "—", sortKey: Number.POSITIVE_INFINITY };
+  const due = new Date(`${dueDate}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+
+  let color = "text.primary";
+  let rel = "";
+  if (days < 0) { color = DUE_OVERDUE; rel = `${-days}d overdue`; }
+  else if (days === 0) { color = DUE_SOON; rel = "due today"; }
+  else if (days <= 3) { color = DUE_SOON; rel = `in ${days}d`; }
+  else { rel = `in ${days}d`; }
+
+  return { color, label: `${dueDate} · ${rel}`, sortKey: days };
+}
+
 // ── Action label per role/status ─────────────────────────────────────────────
 
-function actionLabel(status: string, role: AuditRole): string {
+function actionLabel(status: string, canApprove: boolean): string {
   switch (status) {
     case "EVIDENCE_PENDING":               return "Submit evidence";
     case "SUBMITTED_SAMPLE":              return "Submit evidence for sample";
@@ -65,25 +87,14 @@ function actionLabel(status: string, role: AuditRole): string {
     case "POPULATION_NEED_CLARIFICATION": return "Resubmit population";
     case "EVIDENCE_INTERNAL_REVIEW":
     case "POPULATION_INTERNAL_REVIEW":
-      return role === "compliance_admin" ? "Review & approve" : "Pending review";
-    case "EVIDENCE_UNDER_VALIDATION":     return "Approve / reject evidence";
+      return canApprove ? "Review & approve" : "Pending review";
+    case "EVIDENCE_UNDER_VALIDATION":     return "Approve / request resubmission";
     case "POPULATION_UNDER_VALIDATION":   return "Approve / reject population";
     case "POPULATION_COMPLETE":           return "Submit sample";
     case "AWAITING_SAMPLE":               return "Submit sample";
     default:                              return "Action required";
   }
 }
-
-// ── Role label ────────────────────────────────────────────────────────────────
-
-const ROLE_LABELS: Record<AuditRole, string> = {
-  compliance_admin: "Compliance Admin",
-  compliance_team:  "Compliance Team",
-  internal_team:    "Internal Team",
-  external_auditor: "External Auditor",
-  management:       "Management",
-  unknown:          "",
-};
 
 // ── Active shape that doesn't expand (fixes the triangle/spike on hover) ─────
 
@@ -140,9 +151,9 @@ function StatusDonut({ data }: { data: StatusCount[] }): JSX.Element {
             outerRadius="80%"
             paddingAngle={2}
             strokeWidth={0}
-            activeShape={StillSector as unknown as React.FC}
+            activeShape={StillSector as unknown as (props: unknown) => JSX.Element}
           >
-            {pieData.map((entry, i) => (
+            {pieData.map((entry) => (
               <Cell key={entry.status} fill={entry.color} />
             ))}
           </Pie>
@@ -190,7 +201,6 @@ function TeamDonut({ data }: { data: TeamCompletion[] }): JSX.Element {
     completed: d.completed,
     total: d.total,
   }));
-  const totalControls = data.reduce((s, d) => s + d.total, 0);
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -212,7 +222,7 @@ function TeamDonut({ data }: { data: TeamCompletion[] }): JSX.Element {
             outerRadius="75%"
             paddingAngle={2}
             strokeWidth={0}
-            activeShape={StillSector as unknown as React.FC}
+            activeShape={StillSector}
           >
             {pieData.map((entry) => (
               <Cell key={entry.name} fill={entry.color} />
@@ -233,6 +243,7 @@ function TeamDonut({ data }: { data: TeamCompletion[] }): JSX.Element {
               variant="determinate"
               value={entry.total > 0 ? (entry.completed / entry.total) * 100 : 0}
               sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: "#E0E0E0",
+                "[data-color-scheme='dark'] &": { bgcolor: "rgba(255,255,255,0.12)" },
                 "& .MuiLinearProgress-bar": { bgcolor: entry.color } }}
             />
             <Typography variant="body2" color="text.secondary" sx={{ width: 44, textAlign: "right", flexShrink: 0 }}>
@@ -263,15 +274,15 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
       {/* ── Audits panel ───────────────────────────────────────────────────── */}
       <Box sx={{ flex: 1, p: 3, display: "flex", flexDirection: "column", gap: 2 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ width: 28, height: 28, borderRadius: 1, bgcolor: "#1E88E518", display: "flex", alignItems: "center", justifyContent: "center", color: "#1E88E5" }}>
-            <FolderOpen size={16} />
+          <Box sx={{ width: 34, height: 34, borderRadius: 1.5, bgcolor: "#1E88E518", "[data-color-scheme='dark'] &": { bgcolor: "rgba(30,136,229,0.2)" }, display: "flex", alignItems: "center", justifyContent: "center", color: "#1E88E5" }}>
+            <FolderOpen size={18} />
           </Box>
-          <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1 }}>Audits</Typography>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ lineHeight: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Audits</Typography>
         </Box>
 
         {/* Primary number: Active */}
         <Box sx={{ display: "flex", alignItems: "baseline", gap: 1.5 }}>
-          <Typography variant="h3" fontWeight={700} color="#1E88E5" lineHeight={1}>
+          <Typography variant="h2" fontWeight={700} color="#1E88E5" lineHeight={1}>
             {activeAudits}
           </Typography>
           <Typography variant="body1" color="text.secondary">Active</Typography>
@@ -280,17 +291,17 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
         {/* Secondary breakdown */}
         <Box sx={{ display: "flex", gap: 0, alignItems: "stretch" }}>
           <Box sx={{ textAlign: "center", px: 2, pl: 0 }}>
-            <Typography variant="h5" fontWeight={700}>{totalAudits}</Typography>
+            <Typography variant="h4" fontWeight={700}>{totalAudits}</Typography>
             <Typography variant="body2" color="text.secondary">Total</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
           <Box sx={{ textAlign: "center", px: 2 }}>
-            <Typography variant="h5" fontWeight={700} color="#43A047">{completedAudits}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#43A047">{completedAudits}</Typography>
             <Typography variant="body2" color="text.secondary">Completed</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
           <Box sx={{ textAlign: "center", px: 2 }}>
-            <Typography variant="h5" fontWeight={700} color="#78909C">{archivedAudits}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#78909C">{archivedAudits}</Typography>
             <Typography variant="body2" color="text.secondary">Archived</Typography>
           </Box>
         </Box>
@@ -301,16 +312,16 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
       {/* ── Controls panel ─────────────────────────────────────────────────── */}
       <Box sx={{ flex: 1.4, p: 3, display: "flex", flexDirection: "column", gap: 2 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ width: 28, height: 28, borderRadius: 1, bgcolor: "#43A04718", display: "flex", alignItems: "center", justifyContent: "center", color: "#43A047" }}>
-            <ClipboardList size={16} />
+          <Box sx={{ width: 34, height: 34, borderRadius: 1.5, bgcolor: "#43A04718", "[data-color-scheme='dark'] &": { bgcolor: "rgba(67,160,71,0.2)" }, display: "flex", alignItems: "center", justifyContent: "center", color: "#43A047" }}>
+            <ClipboardList size={18} />
           </Box>
-          <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1 }}>Controls</Typography>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ lineHeight: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Controls</Typography>
         </Box>
 
         {/* Total + progress bar */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 3 }}>
           <Box sx={{ flexShrink: 0 }}>
-            <Typography variant="h3" fontWeight={700} lineHeight={1}>{totalControls}</Typography>
+            <Typography variant="h2" fontWeight={700} lineHeight={1}>{totalControls}</Typography>
             <Typography variant="body2" color="text.secondary">Total</Typography>
           </Box>
           <Box sx={{ flex: 1 }}>
@@ -331,7 +342,7 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
         {/* 3 key metrics */}
         <Box sx={{ display: "flex", gap: 0, alignItems: "stretch" }}>
           <Box sx={{ textAlign: "center", px: 2, pl: 0 }}>
-            <Typography variant="h5" fontWeight={700} color="#43A047">{completedControls}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#43A047">{completedControls}</Typography>
             <Typography variant="body2" color="text.secondary">Completed</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
@@ -343,7 +354,7 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
               "&:hover": { bgcolor: "#FB8C0012" },
             }}
           >
-            <Typography variant="h5" fontWeight={700} color="#FB8C00">{evidenceRequiredControls}</Typography>
+            <Typography variant="h4" fontWeight={700} color="#FB8C00">{evidenceRequiredControls}</Typography>
             <Typography variant="body2" color="text.secondary">Evidence Required</Typography>
           </Box>
           <Divider orientation="vertical" flexItem />
@@ -355,7 +366,7 @@ function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: 
               "&:hover": { bgcolor: overdueControls > 0 ? "#E5393512" : "#78909C12" },
             }}
           >
-            <Typography variant="h5" fontWeight={700} color={overdueControls > 0 ? "#E53935" : "#78909C"}>
+            <Typography variant="h4" fontWeight={700} color={overdueControls > 0 ? "#E53935" : "#78909C"}>
               {overdueControls}
             </Typography>
             <Typography variant="body2" color="text.secondary">Overdue</Typography>
@@ -381,7 +392,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 
 // ── Action items list ─────────────────────────────────────────────────────────
 
-function ActionItemsList({ items, role }: { items: ActionItem[]; role: AuditRole }): JSX.Element {
+function ActionItemsList({ items, canApprove }: { items: ActionItem[]; canApprove: boolean }): JSX.Element {
   const navigate = useNavigate();
 
   if (items.length === 0) {
@@ -389,7 +400,7 @@ function ActionItemsList({ items, role }: { items: ActionItem[]; role: AuditRole
       <Box sx={{ py: 3, textAlign: "center" }}>
         <CheckCircle size={32} color="#43A047" />
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          No pending actions — you're all caught up!
+          No pending actions - you're all caught up!
         </Typography>
       </Box>
     );
@@ -408,32 +419,37 @@ function ActionItemsList({ items, role }: { items: ActionItem[]; role: AuditRole
           </TableRow>
         </TableHead>
         <TableBody>
-          {items.map((item) => (
-            <TableRow
-              key={item.controlId}
-              hover
-              sx={{ cursor: "pointer" }}
-              onClick={() => void navigate(`/audit/audits/${item.auditId}`)}
-            >
-              <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
-              <TableCell sx={{ maxWidth: 200 }}>
-                <Typography variant="body2" noWrap title={item.auditName}>{item.auditName}</Typography>
-              </TableCell>
-              <TableCell>
-                <Typography variant="body2" color="primary.main">{actionLabel(item.status, role)}</Typography>
-              </TableCell>
-              <TableCell>
-                <Chip
-                  label={statusLabel(item.status)}
-                  size="small"
-                  sx={{ bgcolor: `${statusColor(item.status)}18`, color: statusColor(item.status), fontWeight: 600, fontSize: "0.7rem" }}
-                />
-              </TableCell>
-              <TableCell sx={{ whiteSpace: "nowrap", color: item.dueDate ? "text.primary" : "text.disabled" }}>
-                {item.dueDate || "—"}
-              </TableCell>
-            </TableRow>
-          ))}
+          {[...items].sort((a, b) => dueInfo(a.dueDate).sortKey - dueInfo(b.dueDate).sortKey).map((item) => {
+            const due = dueInfo(item.dueDate);
+            return (
+              <TableRow
+                key={item.controlId}
+                hover
+                sx={{ cursor: "pointer" }}
+                onClick={() => void navigate(`/audit/audits/${item.auditId}?control=${item.controlId}`)}
+              >
+                <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
+                <TableCell sx={{ maxWidth: 200 }}>
+                  <Typography variant="body2" noWrap title={item.auditName}>{item.auditName}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" color="primary.main">{actionLabel(item.status, canApprove)}</Typography>
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    label={statusLabel(item.status)}
+                    size="small"
+                    sx={{ bgcolor: `${statusColor(item.status)}18`, "[data-color-scheme='dark'] &": { bgcolor: `${statusColor(item.status)}40` }, color: statusColor(item.status), fontWeight: 600, fontSize: "0.7rem" }}
+                  />
+                </TableCell>
+                <TableCell sx={{ whiteSpace: "nowrap" }}>
+                  <Typography variant="body2" sx={{ color: due.color, fontWeight: due.sortKey <= 3 ? 600 : 400 }}>
+                    {due.label}
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </TableContainer>
@@ -474,7 +490,7 @@ function OverdueList({ items }: { items: OverdueControl[] }): JSX.Element {
               key={item.controlId}
               hover
               sx={{ cursor: "pointer" }}
-              onClick={() => void navigate(`/audit/audits/${item.auditId}`)}
+              onClick={() => void navigate(`/audit/audits/${item.auditId}?control=${item.controlId}`)}
             >
               <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
               <TableCell sx={{ maxWidth: 260 }}>
@@ -518,7 +534,7 @@ function DashboardSkeleton(): JSX.Element {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AuditDashboard(): JSX.Element {
-  const role = useAuditRole();
+  const { can } = useAuditPrivileges();
   const { data, isLoading, isError } = useGetDashboard();
 
   const overdueRef = useRef<HTMLDivElement>(null);
@@ -551,27 +567,61 @@ export default function AuditDashboard(): JSX.Element {
   }
 
   const { auditStats, stats, statusDistribution, teamCompletion, actionItems, overdueControls } = data;
-  const roleLabel = ROLE_LABELS[role];
+  const canComment = can(AuditPrivilege.AddComment);
+  const canApprove = can(AuditPrivilege.ReviewEvidence);
 
   return (
     <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 3 }}>
 
       {/* Header */}
-      <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-        <Box>
-          <Typography variant="h4" fontWeight={700}>Dashboard</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Overview of all active audits and controls
-          </Typography>
-        </Box>
-        {roleLabel && (
-          <Chip
-            label={roleLabel}
-            size="small"
-            sx={{ bgcolor: "primary.50", color: "primary.main", fontWeight: 600 }}
-          />
-        )}
+      <Box>
+        <Typography variant="h4" fontWeight={700}>Dashboard</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          Overview of all active audits and controls
+        </Typography>
       </Box>
+
+      {/* Attention banner — surfaces what needs action right now */}
+      {(overdueControls.length > 0 || (canComment && actionItems.length > 0)) && (
+        <Paper
+          variant="outlined"
+          sx={{
+            borderRadius: 2,
+            px: 2,
+            py: 1.25,
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            flexWrap: "wrap",
+            borderColor: overdueControls.length > 0 ? DUE_OVERDUE : DUE_SOON,
+            bgcolor: overdueControls.length > 0 ? "rgba(229,57,53,0.05)" : "rgba(251,140,0,0.05)",
+            "[data-color-scheme='dark'] &": {
+              bgcolor: overdueControls.length > 0 ? "rgba(229,57,53,0.15)" : "rgba(251,140,0,0.15)",
+            },
+          }}
+        >
+          <AlertTriangle size={18} color={overdueControls.length > 0 ? DUE_OVERDUE : DUE_SOON} />
+          <Typography variant="body2" fontWeight={700}>Needs attention</Typography>
+          {overdueControls.length > 0 && (
+            <Chip
+              clickable
+              size="small"
+              label={`${overdueControls.length} overdue`}
+              onClick={() => scrollAndHighlight(overdueRef, setOverdueHighlight)}
+              sx={{ color: DUE_OVERDUE, bgcolor: "rgba(229,57,53,0.12)", "[data-color-scheme='dark'] &": { bgcolor: "rgba(229,57,53,0.25)" }, fontWeight: 600 }}
+            />
+          )}
+          {canComment && actionItems.length > 0 && (
+            <Chip
+              clickable
+              size="small"
+              label={`${actionItems.length} awaiting you`}
+              onClick={() => scrollAndHighlight(actionItemsRef, setActionHighlight)}
+              sx={{ color: DUE_SOON, bgcolor: "rgba(251,140,0,0.12)", "[data-color-scheme='dark'] &": { bgcolor: "rgba(251,140,0,0.25)" }, fontWeight: 600 }}
+            />
+          )}
+        </Paper>
+      )}
 
       {/* Overview banner — Audits + Controls in one panel */}
       <OverviewBanner
@@ -592,7 +642,7 @@ export default function AuditDashboard(): JSX.Element {
       </Box>
 
       {/* My action items */}
-      {role !== "management" && (
+      {canComment && (
         <Box
           ref={actionItemsRef}
           sx={{
@@ -602,7 +652,7 @@ export default function AuditDashboard(): JSX.Element {
           }}
         >
           <SectionCard title={`My Action Items (${actionItems.length})`}>
-            <ActionItemsList items={actionItems} role={role} />
+            <ActionItemsList items={actionItems} canApprove={canApprove} />
           </SectionCard>
         </Box>
       )}

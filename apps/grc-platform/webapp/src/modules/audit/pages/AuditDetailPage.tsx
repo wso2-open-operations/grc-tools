@@ -34,13 +34,20 @@ import {
   ListChecks,
   Settings,
 } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useEffect, useMemo, useState, type JSX } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import FilterPanel from "@modules/audit/components/FilterPanel";
 import AuditStatusChip from "@modules/audit/components/AuditStatusChip";
-import ControlsTable from "@modules/audit/components/ControlsTable";
+import ControlsTable, { ColumnPicker } from "@modules/audit/components/ControlsTable";
+import {
+  CONTROL_COLUMNS,
+  DEFAULT_VISIBLE_CONTROL_COLUMNS,
+  CONTROL_COLUMNS_STORAGE_KEY,
+} from "@modules/audit/components/controlColumns";
 import ControlDrawer from "@modules/audit/components/ControlDrawer";
 import ControlSettingsPanel from "@modules/audit/components/ControlSettingsPanel";
+import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
+import { AuditPrivilege } from "@modules/audit/privileges";
 import { useGetAudit } from "@modules/audit/api/useGetAudit";
 import { useGetControls } from "@modules/audit/api/useGetControls";
 import { formatDateRange } from "@modules/audit/utils/format";
@@ -175,8 +182,37 @@ export default function AuditDetailPage(): JSX.Element {
   const [activeQuickFilter, setActiveQuickFilter] = useState<QuickFilter | null>(null);
   const [selectedControl, setSelectedControl] = useState<AuditControl | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const { can } = useAuditPrivileges();
+  const canManageControls = can(AuditPrivilege.ManageControls);
 
-  const controls = controlsData?.items ?? [];
+  const controls = useMemo(() => controlsData?.items ?? [], [controlsData]);
+
+  // Deep link from the dashboard: ?control={id} opens that control's drawer once
+  // controls have loaded, then the param is cleared so it doesn't re-open on close.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const cid = searchParams.get("control");
+    if (!cid || controls.length === 0) return;
+    const match = controls.find((c) => c.id === Number(cid));
+    if (match) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedControl(match);
+      searchParams.delete("control");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [controls, searchParams, setSearchParams]);
+
+  // Column visibility for the controls table — the picker lives in the filter bar.
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(CONTROL_COLUMNS_STORAGE_KEY);
+      if (stored) return JSON.parse(stored) as string[];
+    } catch { /* ignore malformed storage */ }
+    return DEFAULT_VISIBLE_CONTROL_COLUMNS;
+  });
+  useEffect(() => {
+    try { localStorage.setItem(CONTROL_COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumnIds)); } catch { /* ignore */ }
+  }, [visibleColumnIds]);
 
   // Quick filter (card click) takes precedence over panel filters
   const filteredControls =
@@ -265,7 +301,6 @@ export default function AuditDetailPage(): JSX.Element {
               <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                 <Typography variant="body2" color="text.secondary">
                   {audit.framework.name}
-                  {audit.framework.version ? ` (${audit.framework.version})` : ""}
                 </Typography>
                 <Divider orientation="vertical" flexItem />
                 <Typography variant="body2" color="text.secondary">
@@ -280,20 +315,22 @@ export default function AuditDetailPage(): JSX.Element {
                 </Box>
               </Stack>
             </Box>
-            <Tooltip title="Manage controls">
-              <IconButton
-                onClick={() => setSettingsOpen(true)}
-                sx={{
-                  border: "1px solid",
-                  borderColor: "divider",
-                  borderRadius: 1.5,
-                  p: 1,
-                  flexShrink: 0,
-                }}
-              >
-                <Settings size={20} />
-              </IconButton>
-            </Tooltip>
+            {canManageControls && (
+              <Tooltip title="Manage controls">
+                <IconButton
+                  onClick={() => setSettingsOpen(true)}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 1.5,
+                    p: 1,
+                    flexShrink: 0,
+                  }}
+                >
+                  <Settings size={20} />
+                </IconButton>
+              </Tooltip>
+            )}
           </Box>
         )
       )}
@@ -392,6 +429,14 @@ export default function AuditDetailPage(): JSX.Element {
               )}
             </>
           )}
+          <Box sx={{ ml: "auto" }}>
+            <ColumnPicker
+              columns={CONTROL_COLUMNS}
+              visible={visibleColumnIds}
+              onChange={setVisibleColumnIds}
+              onReset={() => setVisibleColumnIds(DEFAULT_VISIBLE_CONTROL_COLUMNS)}
+            />
+          </Box>
         </Box>
       </Box>
 
@@ -403,6 +448,7 @@ export default function AuditDetailPage(): JSX.Element {
         onFiltersChange={handleFilterChange}
         isLoading={controlsLoading}
         onRowClick={(control) => setSelectedControl(control)}
+        visibleColumnIds={visibleColumnIds}
       />
 
       {/* Control detail drawer */}

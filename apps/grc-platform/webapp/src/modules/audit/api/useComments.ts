@@ -1,0 +1,82 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuthApiClient } from "@hooks/useAuthApiClient";
+import { BACKEND_BASE_URL } from "@config/apiConfig";
+
+export interface AuditComment {
+  id: number;
+  evidenceId: number;
+  parentCommentId: number | null;
+  content: string;
+  isInternal: boolean;
+  createdBy: string;
+  createdAt: string;
+}
+
+interface CommentListResponse {
+  items: AuditComment[];
+}
+
+export const commentsQueryKey = (evidenceId: number) => ["audit", "comments", evidenceId] as const;
+
+/** Lists comments for an evidence submission (internal ones are hidden from external auditors by the backend). */
+export function useGetComments(evidenceId: number | null) {
+  const authFetch = useAuthApiClient();
+  return useQuery({
+    queryKey: commentsQueryKey(evidenceId ?? 0),
+    enabled: evidenceId !== null,
+    queryFn: async (): Promise<AuditComment[]> => {
+      const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/evidence/${evidenceId}/comments`);
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || `Failed to load comments (${res.status})`);
+      }
+      const body = (await res.json()) as CommentListResponse;
+      return body.items ?? [];
+    },
+  });
+}
+
+interface AddCommentPayload {
+  evidenceId: number;
+  content: string;
+  isInternal: boolean;
+}
+
+/** Posts a comment on an evidence submission. */
+export function useAddComment() {
+  const authFetch = useAuthApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ evidenceId, content, isInternal }: AddCommentPayload): Promise<AuditComment> => {
+      const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/evidence/${evidenceId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, isInternal }),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || `Failed to add comment (${res.status})`);
+      }
+      return res.json() as Promise<AuditComment>;
+    },
+    onSuccess: (_data, { evidenceId }) => {
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKey(evidenceId) });
+    },
+  });
+}

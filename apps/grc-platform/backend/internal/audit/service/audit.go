@@ -23,9 +23,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // AuditService defines business operations for audit engagements.
@@ -38,7 +38,7 @@ type AuditService interface {
 }
 
 type auditService struct {
-	repo        repository.AuditRepository
+	repo          repository.AuditRepository
 	frameworkRepo repository.FrameworkRepository
 	productRepo   repository.ProductRepository
 }
@@ -76,6 +76,9 @@ func (s *auditService) Create(ctx context.Context, req model.CreateAuditRequest,
 	}
 	if req.PeriodStart == "" || req.PeriodEnd == "" {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "periodStart and periodEnd are required"}
+	}
+	if createdBy == "" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "authenticated user email is missing from token — check Asgardeo app email scope"}
 	}
 
 	// Verify framework and product exist.

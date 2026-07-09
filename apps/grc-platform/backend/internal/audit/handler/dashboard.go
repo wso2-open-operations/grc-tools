@@ -19,10 +19,11 @@ package handler
 import (
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	auditservice "github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type dashboardHandler struct {
@@ -30,6 +31,9 @@ type dashboardHandler struct {
 }
 
 func (h *dashboardHandler) getDashboard(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	user := auth.FromContext(r.Context())
 
 	f := model.DashboardFilter{}

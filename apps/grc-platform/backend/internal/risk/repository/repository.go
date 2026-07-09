@@ -20,7 +20,7 @@ package repository
 import (
 	"context"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 )
 
 // RiskRepository is the data-access contract for risk records.

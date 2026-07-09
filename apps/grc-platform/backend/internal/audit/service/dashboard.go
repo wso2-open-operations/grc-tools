@@ -19,8 +19,8 @@ package service
 import (
 	"context"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // DashboardService fetches role-scoped dashboard data.
@@ -28,7 +28,9 @@ type DashboardService interface {
 	Get(ctx context.Context, f model.DashboardFilter) (*model.DashboardData, error)
 }
 
-type dashboardService struct{ repo repository.DashboardRepository }
+type dashboardService struct {
+	repo repository.DashboardRepository
+}
 
 // NewDashboardService creates a DashboardService backed by repo.
 func NewDashboardService(repo repository.DashboardRepository) DashboardService {
