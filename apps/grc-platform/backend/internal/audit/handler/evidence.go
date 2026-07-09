@@ -97,7 +97,7 @@ func (h *evidenceHandler) uploadEvidence(w http.ResponseWriter, r *http.Request)
 
 	// Bound the request body before parsing to protect memory and the gateway.
 	r.Body = http.MaxBytesReader(w, r.Body, maxEvidenceUploadBytes)
-	if err := r.ParseMultipartForm(maxEvidenceUploadBytes); err != nil {
+	if err := r.ParseMultipartForm(maxEvidenceUploadBytes); err != nil { // #nosec G120 -- body already bounded by MaxBytesReader above
 		response.WriteError(w, http.StatusRequestEntityTooLarge, "file too large or malformed upload (max 25 MB)")
 		return
 	}
@@ -168,7 +168,7 @@ func (h *evidenceHandler) submitEvidence(w http.ResponseWriter, r *http.Request)
 
 	actor := auth.FromContext(r.Context()).Email
 
-	evidence, err := h.svc.Submit(r.Context(), controlID, req.FolderPath, actor)
+	evidence, err := h.svc.Submit(r.Context(), auditID, controlID, req.FolderPath, actor)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
@@ -184,9 +184,35 @@ func (h *evidenceHandler) submitEvidence(w http.ResponseWriter, r *http.Request)
 	response.WriteJSONValue(w, http.StatusCreated, evidence)
 }
 
+// downloadEvidenceFile handles GET /api/v1/evidence/files/{fileId}/download.
+// It proxies the file bytes from the Compliance Entity (which reads them from
+// Azure) so the browser never contacts Azure directly.
+func (h *evidenceHandler) downloadEvidenceFile(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ReviewEvidence) {
+		return
+	}
+	fileID, ok := parseIntParam(w, r, "fileId")
+	if !ok {
+		return
+	}
+	data, fileName, contentType, err := h.svc.DownloadFile(r.Context(), fileID)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+fileName+"\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data) // #nosec G705 -- file served with nosniff + attachment disposition, browser won't execute it inline
+}
+
 // listEvidence handles GET /api/v1/audits/{id}/controls/{controlId}/evidence.
 func (h *evidenceHandler) listEvidence(w http.ResponseWriter, r *http.Request) {
-	_, ok := parseIntParam(w, r, "id")
+	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
 	}
@@ -199,7 +225,7 @@ func (h *evidenceHandler) listEvidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	evidence, err := h.svc.List(r.Context(), controlID)
+	evidence, err := h.svc.List(r.Context(), auditID, controlID)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return

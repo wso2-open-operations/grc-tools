@@ -103,7 +103,6 @@ type SearchAuditTeamsResponse struct {
 type AuditFramework struct {
 	ID        int       `json:"id"`
 	Name      string    `json:"name"`
-	Version   *string   `json:"version"`
 	Status    string    `json:"status"`
 	CreatedOn time.Time `json:"createdOn"`
 	UpdatedOn time.Time `json:"updatedOn"`
@@ -122,6 +121,57 @@ type SearchAuditFrameworksResponse struct {
 	Total      int              `json:"total"`
 	Limit      int              `json:"limit"`
 	Offset     int              `json:"offset"`
+}
+
+// =============================================================================
+// Audit Framework Control (versioned control library)
+// =============================================================================
+
+// AuditFrameworkControl represents one immutable version of a control definition
+// in the `audit_framework_control` table. Rows are never updated — a new version
+// row is inserted instead. audit_control rows reference a specific version via
+// framework_control_id.
+type AuditFrameworkControl struct {
+	ID                  int       `json:"id"`
+	FrameworkID         int       `json:"frameworkId"`
+	ControlNumber       string    `json:"controlNumber"`
+	Description         string    `json:"description"`
+	EvidenceRequirement *string   `json:"evidenceRequirement"`
+	RequirementType     string    `json:"requirementType"`
+	ControlType         string    `json:"controlType"`
+	Scope               string    `json:"scope"`
+	Version             int       `json:"version"`
+	IsCurrent           bool      `json:"isCurrent"`
+	CreatedOn           time.Time `json:"createdOn"`
+	CreatedBy           *string   `json:"createdBy"`
+}
+
+// ListFrameworkControlsResponse is returned by GET /audit/frameworks/{id}/controls.
+type ListFrameworkControlsResponse struct {
+	Controls []AuditFrameworkControl `json:"controls"`
+	Total    int                     `json:"total"`
+}
+
+// CreateFrameworkControlRequest is the payload for POST /audit/frameworks/{id}/controls.
+type CreateFrameworkControlRequest struct {
+	ControlNumber       string  `json:"controlNumber"`
+	Description         string  `json:"description"`
+	EvidenceRequirement *string `json:"evidenceRequirement"`
+	RequirementType     string  `json:"requirementType"`
+	ControlType         string  `json:"controlType"`
+	Scope               string  `json:"scope"`
+	CreatedBy           string  `json:"createdBy"`
+}
+
+// UpdateFrameworkControlRequest is the payload for PUT /audit/frameworks/{id}/controls/{controlId}.
+// Creates a new version row; the previous row is marked is_current=FALSE.
+type UpdateFrameworkControlRequest struct {
+	Description         *string `json:"description"`
+	EvidenceRequirement *string `json:"evidenceRequirement"`
+	RequirementType     *string `json:"requirementType"`
+	ControlType         *string `json:"controlType"`
+	Scope               *string `json:"scope"`
+	UpdatedBy           string  `json:"updatedBy"`
 }
 
 // =============================================================================
@@ -163,13 +213,15 @@ type Audit struct {
 	Name             string    `json:"name"`
 	FrameworkID      int       `json:"frameworkId"`
 	FrameworkName    string    `json:"frameworkName"`
-	FrameworkVersion *string   `json:"frameworkVersion"`
 	ProductID        int       `json:"productId"`
 	ProductName      string    `json:"productName"`
 	PeriodStart      string    `json:"periodStart"` // YYYY-MM-DD
 	PeriodEnd        string    `json:"periodEnd"`   // YYYY-MM-DD
 	Status           string    `json:"status"`
 	ScopeDescription *string   `json:"scopeDescription"`
+	ControlsTotal    int       `json:"controlsTotal"`
+	ControlsApproved int       `json:"controlsApproved"`
+	ControlsOverdue  int       `json:"controlsOverdue"`
 	CreatedOn        time.Time `json:"createdOn"`
 	UpdatedOn        time.Time `json:"updatedOn"`
 }
@@ -196,10 +248,13 @@ type SearchAuditsResponse struct {
 // =============================================================================
 
 // AuditControl represents a control from the `audit_control` table.
+// Definition columns are resolved via COALESCE from audit_framework_control when linked.
 // Owner, team, and auditor names are joined in.
 type AuditControl struct {
 	ID                  int       `json:"id"`
 	AuditID             int       `json:"auditId"`
+	FrameworkControlID  *int      `json:"frameworkControlId"`  // non-nil when sourced from template
+	TemplateVersion     *int      `json:"templateVersion"`     // version of the template row used
 	ControlNumber       string    `json:"controlNumber"`
 	Description         string    `json:"description"`
 	EvidenceRequirement *string   `json:"evidenceRequirement"`
@@ -214,7 +269,7 @@ type AuditControl struct {
 	AuditorName         *string   `json:"auditorName"`
 	DueDate             *string   `json:"dueDate"` // YYYY-MM-DD
 	Status              string    `json:"status"`
-	IsManuallyAdded     bool      `json:"isManuallyAdded"`
+	ControlSource       string    `json:"controlSource"` // MANUAL | COPIED | CSV
 	IsOverdue           bool      `json:"isOverdue"`
 	CreatedOn           time.Time `json:"createdOn"`
 	UpdatedOn           time.Time `json:"updatedOn"`
@@ -237,6 +292,22 @@ type SearchControlsResponse struct {
 	Total    int            `json:"total"`
 	Limit    int            `json:"limit"`
 	Offset   int            `json:"offset"`
+}
+
+// AssignedControlForEvidence is a control a user's team must submit evidence for.
+type AssignedControlForEvidence struct {
+	AuditID        int    `json:"auditId"`
+	AuditName      string `json:"auditName"`
+	ControlID      int    `json:"controlId"`
+	ControlNumber  string `json:"controlNumber"`
+	Description    string `json:"description"`
+	Status         string `json:"status"`
+	BaseFolderPath string `json:"baseFolderPath"` // e.g. "audits/5/controls/12/evidence/"
+}
+
+// ListAssignedControlsResponse is returned by GET /controls/assigned-for-evidence.
+type ListAssignedControlsResponse struct {
+	Controls []AssignedControlForEvidence `json:"controls"`
 }
 
 // BulkCreateControlsRequest is the payload for POST /audits/{auditId}/controls/bulk.
@@ -423,15 +494,13 @@ type UpdateAuditTeamRequest struct {
 // =============================================================================
 
 type CreateAuditFrameworkRequest struct {
-	Name      string  `json:"name"`
-	Version   *string `json:"version"`
-	Status    string  `json:"status"`
-	CreatedBy string  `json:"createdBy"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	CreatedBy string `json:"createdBy"`
 }
 
 type UpdateAuditFrameworkRequest struct {
 	Name      *string `json:"name"`
-	Version   *string `json:"version"`
 	Status    *string `json:"status"`
 	UpdatedBy string  `json:"updatedBy"`
 }
@@ -479,18 +548,34 @@ type UpdateAuditRequest struct {
 // Write request types — Audit Control
 // =============================================================================
 
+// InlinePopulationRequest carries optional population data alongside an OE
+// control creation request. Mirrors PopulationDetails on the backend side.
+type InlinePopulationRequest struct {
+	Description     string  `json:"description"`
+	ReferenceNumber *int    `json:"referenceNumber"`
+	DueDate         *string `json:"dueDate"`
+	Comments        *string `json:"comments"`
+	OwnerID         *int    `json:"ownerId"`
+	TeamID          *int    `json:"teamId"`
+}
+
 type CreateControlRequest struct {
-	ControlNumber       string  `json:"controlNumber"`
-	Description         string  `json:"description"`
-	EvidenceRequirement *string `json:"evidenceRequirement"`
-	RequirementType     string  `json:"requirementType"` // DESIGN | OE
-	ControlType         string  `json:"controlType"`     // CONFIG | NON_CONFIG
-	Scope               string  `json:"scope"`           // COMMON | PRODUCT_SPECIFIC
-	OwnerID             *int    `json:"ownerId"`
-	TeamID              *int    `json:"teamId"`
-	AuditorID           *int    `json:"auditorId"`
-	DueDate             *string `json:"dueDate"` // YYYY-MM-DD
-	CreatedBy           string  `json:"createdBy"`
+	// When FrameworkControlID is set the definition columns below may be omitted;
+	// they will be resolved from the template via COALESCE on read.
+	FrameworkControlID  *int                     `json:"frameworkControlId"`
+	ControlSource       string                   `json:"controlSource"`       // MANUAL | COPIED | CSV; defaults to MANUAL
+	ControlNumber       string                   `json:"controlNumber"`
+	Description         string                   `json:"description"`
+	EvidenceRequirement *string                  `json:"evidenceRequirement"`
+	RequirementType     string                   `json:"requirementType"` // DESIGN | OE
+	ControlType         string                   `json:"controlType"`     // CONFIG | NON_CONFIG
+	Scope               string                   `json:"scope"`           // COMMON | PRODUCT_SPECIFIC
+	OwnerID             *int                     `json:"ownerId"`
+	TeamID              *int                     `json:"teamId"`
+	AuditorID           *int                     `json:"auditorId"`
+	DueDate             *string                  `json:"dueDate"` // YYYY-MM-DD
+	Population          *InlinePopulationRequest `json:"population"` // OE controls only
+	CreatedBy           string                   `json:"createdBy"`
 }
 
 type UpdateControlRequest struct {
@@ -501,8 +586,6 @@ type UpdateControlRequest struct {
 	Status          *string `json:"status"`
 	Comments        *string `json:"comments"`
 	SampleReference *string `json:"sampleReference"`
-	SampleFileURL   *string `json:"sampleFileUrl"`
-	SampleFileName  *string `json:"sampleFileName"`
 	UpdatedBy       string  `json:"updatedBy"`
 }
 
@@ -518,6 +601,7 @@ type AuditEvidence struct {
 	Status               string    `json:"status"`
 	FolderPath           *string   `json:"folderPath"`
 	ReusedFromEvidenceID *int      `json:"reusedFromEvidenceId"`
+	CreatedBy            *string   `json:"createdBy"`
 	CreatedOn            time.Time `json:"createdOn"`
 	UpdatedOn            time.Time `json:"updatedOn"`
 }
@@ -573,7 +657,6 @@ type ListEvidenceResponse struct {
 // AuditPopulation is the population record for an OE-type control.
 type AuditPopulation struct {
 	ID              int       `json:"id"`
-	AuditID         int       `json:"auditId"`
 	ControlID       int       `json:"controlId"`
 	OwnerID         *int      `json:"ownerId"`
 	TeamID          *int      `json:"teamId"`
@@ -807,10 +890,7 @@ type AuditTrail struct {
 	ControlID  *int      `json:"controlId"`
 	EvidenceID *int      `json:"evidenceId"`
 	Action     string    `json:"action"` // CREATED | UPLOADED | RESUBMITTED | APPROVED | REJECTED | COMMENTED | ESCALATED | AI_VALIDATED | EXPORTED
-	EntityType *string   `json:"entityType"`
-	EntityID   *int      `json:"entityId"`
 	Details    *string   `json:"details"` // raw JSON string
-	IPAddress  *string   `json:"ipAddress"`
 	CreatedBy  *string   `json:"createdBy"`
 	CreatedOn  time.Time `json:"createdOn"`
 }
@@ -820,10 +900,7 @@ type CreateAuditTrailRequest struct {
 	ControlID  *int    `json:"controlId"`
 	EvidenceID *int    `json:"evidenceId"`
 	Action     string  `json:"action"`
-	EntityType *string `json:"entityType"`
-	EntityID   *int    `json:"entityId"`
 	Details    *string `json:"details"`
-	IPAddress  *string `json:"ipAddress"`
 	CreatedBy  *string `json:"createdBy"`
 }
 

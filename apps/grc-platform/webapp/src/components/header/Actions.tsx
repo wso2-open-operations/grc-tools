@@ -22,6 +22,7 @@ import {
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import UserProfile from "./UserProfile";
+import ThemeSelect from "./ThemeSelect";
 
 interface ActionsProps {
   showUserProfile?: boolean;
@@ -38,6 +39,7 @@ export default function Actions({
         gap: { xs: 0.5, sm: 0.75, lg: 0.5, xl: 1 },
       }}
     >
+      <ThemeSelect />
       <ColorSchemeToggle />
       <Divider
         orientation="vertical"

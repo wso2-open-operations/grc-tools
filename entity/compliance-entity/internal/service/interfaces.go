@@ -40,6 +40,16 @@ type AuditTeamService interface {
 	UpdateAuditTeam(ctx context.Context, id int, req domain.UpdateAuditTeamRequest) (domain.AuditTeam, error)
 }
 
+// FrameworkControlService defines operations on the audit_framework_control table.
+// Rows are immutable once created — updates produce a new version row.
+type FrameworkControlService interface {
+	ListCurrentControls(ctx context.Context, frameworkID int) (domain.ListFrameworkControlsResponse, error)
+	ListAllVersions(ctx context.Context, frameworkID int, controlNumber string) ([]domain.AuditFrameworkControl, error)
+	GetByID(ctx context.Context, id int) (domain.AuditFrameworkControl, error)
+	Create(ctx context.Context, frameworkID int, req domain.CreateFrameworkControlRequest) (domain.AuditFrameworkControl, error)
+	NewVersion(ctx context.Context, id int, req domain.UpdateFrameworkControlRequest) (domain.AuditFrameworkControl, error)
+}
+
 // AuditFrameworkService defines operations on the audit_framework entity.
 type AuditFrameworkService interface {
 	SearchAuditFrameworks(ctx context.Context, req domain.SearchAuditFrameworksRequest) (domain.SearchAuditFrameworksResponse, error)
@@ -74,6 +84,7 @@ type ControlService interface {
 	BulkCreateControls(ctx context.Context, auditID int, req domain.BulkCreateControlsRequest) (domain.BulkCreateControlsResponse, error)
 	UpdateControl(ctx context.Context, auditID, controlID int, req domain.UpdateControlRequest) (domain.AuditControl, error)
 	DeleteControl(ctx context.Context, auditID, controlID int) error
+	ListAssignedForEvidence(ctx context.Context, userEmail string) (domain.ListAssignedControlsResponse, error)
 }
 
 // EvidenceService defines operations on audit_evidence and audit_evidence_file.
@@ -84,6 +95,7 @@ type EvidenceService interface {
 	UpdateEvidence(ctx context.Context, evidenceID int, req domain.UpdateEvidenceRequest) (domain.AuditEvidence, error)
 	AddEvidenceFile(ctx context.Context, evidenceID int, req domain.CreateEvidenceFileRequest) (domain.AuditEvidenceFile, error)
 	ListEvidenceFiles(ctx context.Context, evidenceID int) (domain.ListEvidenceFilesResponse, error)
+	GetEvidenceFileByID(ctx context.Context, fileID int) (domain.AuditEvidenceFile, error)
 	DeleteEvidenceFile(ctx context.Context, fileID int) error
 }
 

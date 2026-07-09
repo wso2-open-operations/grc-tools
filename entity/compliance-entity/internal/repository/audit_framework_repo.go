@@ -61,7 +61,7 @@ func (r *auditFrameworkRepo) SearchAuditFrameworks(ctx context.Context, req doma
 
 	dataArgs := append(append([]any{}, args...), req.Pagination.Limit, req.Pagination.Offset)
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, version, status, created_at, updated_at FROM audit_framework "+where+" ORDER BY name LIMIT ? OFFSET ?",
+		"SELECT id, name, status, created_at, updated_at FROM audit_framework "+where+" ORDER BY name LIMIT ? OFFSET ?",
 		dataArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("audit_framework.Search query: %w", err)
@@ -81,7 +81,7 @@ func (r *auditFrameworkRepo) SearchAuditFrameworks(ctx context.Context, req doma
 
 func (r *auditFrameworkRepo) GetAuditFrameworkByID(ctx context.Context, id int) (*domain.AuditFramework, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, name, version, status, created_at, updated_at FROM audit_framework WHERE id = ?", id)
+		"SELECT id, name, status, created_at, updated_at FROM audit_framework WHERE id = ?", id)
 	f, err := scanFramework(row)
 	if err == sql.ErrNoRows {
 		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("framework %d not found", id)}
@@ -98,8 +98,8 @@ func (r *auditFrameworkRepo) CreateAuditFramework(ctx context.Context, req domai
 		status = "ACTIVE"
 	}
 	res, err := r.db.ExecContext(ctx,
-		"INSERT INTO audit_framework (name, version, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
-		req.Name, nullableString(req.Version), status, req.CreatedBy, req.CreatedBy)
+		"INSERT INTO audit_framework (name, status, created_by, updated_by) VALUES (?, ?, ?, ?)",
+		req.Name, status, req.CreatedBy, req.CreatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("audit_framework.Create: %w", err)
 	}
@@ -114,10 +114,6 @@ func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, r
 	if req.Name != nil {
 		sets = append(sets, "name = ?")
 		args = append(args, *req.Name)
-	}
-	if req.Version != nil {
-		sets = append(sets, "version = ?")
-		args = append(args, *req.Version)
 	}
 	if req.Status != nil {
 		sets = append(sets, "status = ?")
@@ -136,12 +132,8 @@ func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, r
 
 func scanFramework(s scanner) (*domain.AuditFramework, error) {
 	var f domain.AuditFramework
-	var version sql.NullString
-	if err := s.Scan(&f.ID, &f.Name, &version, &f.Status, &f.CreatedOn, &f.UpdatedOn); err != nil {
+	if err := s.Scan(&f.ID, &f.Name, &f.Status, &f.CreatedOn, &f.UpdatedOn); err != nil {
 		return nil, err
-	}
-	if version.Valid {
-		f.Version = &version.String
 	}
 	return &f, nil
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type frameworkHandler struct {
@@ -31,6 +32,9 @@ type frameworkHandler struct {
 
 // listFrameworks handles GET /api/v1/audit/frameworks.
 func (h *frameworkHandler) listFrameworks(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	frameworks, err := h.svc.ListFrameworks(r.Context())
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
@@ -44,6 +48,9 @@ func (h *frameworkHandler) listFrameworks(w http.ResponseWriter, r *http.Request
 
 // createFramework handles POST /api/v1/audit/frameworks.
 func (h *frameworkHandler) createFramework(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
+		return
+	}
 	var req model.CreateFrameworkRequest
 	if err := response.DecodeJSON(w, r, &req); err != nil {
 		return
@@ -59,6 +66,9 @@ func (h *frameworkHandler) createFramework(w http.ResponseWriter, r *http.Reques
 
 // listProducts handles GET /api/v1/audit/products.
 func (h *frameworkHandler) listProducts(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	products, err := h.svc.ListProducts(r.Context())
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
@@ -72,6 +82,9 @@ func (h *frameworkHandler) listProducts(w http.ResponseWriter, r *http.Request) 
 
 // createProduct handles POST /api/v1/audit/products.
 func (h *frameworkHandler) createProduct(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
+		return
+	}
 	var req model.CreateProductRequest
 	if err := response.DecodeJSON(w, r, &req); err != nil {
 		return
@@ -83,4 +96,27 @@ func (h *frameworkHandler) createProduct(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	response.WriteJSONValue(w, http.StatusCreated, p)
+}
+
+// listFrameworkControls handles GET /api/v1/audit/frameworks/{id}/controls.
+func (h *frameworkHandler) listFrameworkControls(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
+	id, ok := parseIntParam(w, r, "id")
+	if !ok {
+		return
+	}
+	controls, err := h.svc.ListFrameworkControls(r.Context(), id)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	if controls == nil {
+		controls = []*model.AuditFrameworkControl{}
+	}
+	response.WriteJSONValue(w, http.StatusOK, model.FrameworkControlListResponse{
+		Controls: controls,
+		Total:    len(controls),
+	})
 }

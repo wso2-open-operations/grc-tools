@@ -30,6 +30,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/config"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/db"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/server"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/storage"
 )
 
 func main() {
@@ -48,8 +49,22 @@ func main() {
 	}
 	defer pool.Close()
 
+	// Azure Blob storage — the entity is the only component holding the account
+	// key. Disabled (nil) when unconfigured (local dev / metadata-only tests).
+	var store *storage.Service
+	if cfg.AzureConfigured() {
+		store = storage.NewService(storage.Config{
+			AccountName:   cfg.AzureAccountName,
+			AccountKey:    cfg.AzureAccountKey,
+			ContainerName: cfg.AzureContainerName,
+		})
+		log.Printf("Azure Blob storage enabled (container %q)", cfg.AzureContainerName)
+	} else {
+		log.Printf("Azure Blob storage NOT configured — file endpoints disabled")
+	}
+
 	addr := ":" + cfg.ServerPort
-	srv := server.New(addr, pool)
+	srv := server.New(addr, pool, store)
 
 	go func() {
 		log.Printf("Compliance Entity REST Service started on port %s", cfg.ServerPort)

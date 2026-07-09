@@ -23,6 +23,17 @@ export interface UserInfo {
   groups: string[];
 }
 
+// Derives a readable display name from an email address.
+// "yasiru.ekanayake@wso2.com" → "Yasiru Ekanayake"
+function emailToDisplayName(email: string): string {
+  const prefix = email.split("@")[0];
+  return prefix
+    .split(/[._-]/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
 // Maps raw ID token claims to a typed UserInfo object.
 export function resolveUserInfo(
   claims: Record<string, unknown> | null
@@ -40,15 +51,17 @@ export function resolveUserInfo(
 
   const given = (claims.given_name as string) ?? "";
   const family = (claims.family_name as string) ?? "";
+  const email = (claims.email as string) ?? "";
   const fullName =
     [given, family].filter(Boolean).join(" ") ||
     (claims.username as string) ||
+    emailToDisplayName(email) ||
     (claims.sub as string) ||
     "";
 
   return {
     fullName,
-    email: (claims.email as string) ?? "",
+    email,
     avatarUrl: (claims.picture as string) ?? "",
     orgName: (claims.org_name as string) ?? "",
     orgHandle: (claims.org_id as string) ?? "",

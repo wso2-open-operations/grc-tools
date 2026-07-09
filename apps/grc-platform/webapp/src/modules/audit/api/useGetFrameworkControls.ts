@@ -1,0 +1,41 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { useQuery } from "@tanstack/react-query";
+import { useAuthApiClient } from "@hooks/useAuthApiClient";
+import { BACKEND_BASE_URL } from "@config/apiConfig";
+import type { AuditFrameworkControl, FrameworkControlListResponse } from "@modules/audit/types/audit";
+
+export const frameworkControlsQueryKey = (frameworkId: number) =>
+  ["audit", "frameworks", frameworkId, "controls"] as const;
+
+export function useGetFrameworkControls(frameworkId: number | null) {
+  const authFetch = useAuthApiClient();
+
+  return useQuery({
+    queryKey: frameworkControlsQueryKey(frameworkId ?? 0),
+    enabled: frameworkId !== null && frameworkId > 0,
+    queryFn: async (): Promise<AuditFrameworkControl[]> => {
+      const res = await authFetch(
+        `${BACKEND_BASE_URL}/api/v1/audit/frameworks/${frameworkId}/controls`,
+      );
+      if (!res.ok) throw new Error(`Failed to load framework controls (${res.status})`);
+      const data = await res.json() as FrameworkControlListResponse;
+      return data.controls;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}

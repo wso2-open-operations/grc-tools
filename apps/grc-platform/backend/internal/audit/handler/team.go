@@ -22,6 +22,8 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type teamHandler struct {
@@ -31,6 +33,9 @@ type teamHandler struct {
 // listTeams handles GET /api/v1/audit/teams.
 // Returns all active teams for the team assignment dropdown in the control table.
 func (h *teamHandler) listTeams(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	teams, err := h.svc.List(r.Context())
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)

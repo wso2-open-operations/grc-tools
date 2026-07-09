@@ -42,11 +42,15 @@ func NewAuditRepository(db *sql.DB) AuditRepository { return &auditRepo{db: db} 
 
 const auditSelectCols = `
   a.id, a.name,
-  a.framework_id, f.name AS framework_name, f.version AS framework_version,
+  a.framework_id, f.name AS framework_name,
   a.product_id,   p.name AS product_name,
   DATE_FORMAT(a.period_start, '%Y-%m-%d'), DATE_FORMAT(a.period_end, '%Y-%m-%d'),
   a.status, a.scope_description,
-  a.created_at, a.updated_at`
+  a.created_at, a.updated_at,
+  (SELECT COUNT(*) FROM audit_control cc WHERE cc.audit_id = a.id) AS controls_total,
+  (SELECT COUNT(*) FROM audit_control cc WHERE cc.audit_id = a.id AND cc.status = 'COMPLETE') AS controls_approved,
+  (SELECT COUNT(*) FROM audit_control cc WHERE cc.audit_id = a.id
+     AND cc.due_date IS NOT NULL AND cc.due_date < CURDATE() AND cc.status <> 'COMPLETE') AS controls_overdue`
 
 const auditFromClause = `
 FROM audit a
@@ -68,6 +72,9 @@ func (r *auditRepo) SearchAudits(ctx context.Context, req domain.SearchAuditsReq
 		for _, s := range req.StatusKeys {
 			args = append(args, s)
 		}
+	} else {
+		// Hide soft-deleted audits by default; callers can request REMOVED explicitly.
+		where += " AND a.status != 'REMOVED'"
 	}
 	if len(req.FrameworkIDs) > 0 {
 		placeholders := strings.Repeat("?,", len(req.FrameworkIDs))
@@ -195,20 +202,18 @@ type scanner interface {
 
 func scanAudit(s scanner) (*domain.Audit, error) {
 	var a domain.Audit
-	var fwVersion, scopeDesc sql.NullString
+	var scopeDesc sql.NullString
 	err := s.Scan(
 		&a.ID, &a.Name,
-		&a.FrameworkID, &a.FrameworkName, &fwVersion,
+		&a.FrameworkID, &a.FrameworkName,
 		&a.ProductID, &a.ProductName,
 		&a.PeriodStart, &a.PeriodEnd,
 		&a.Status, &scopeDesc,
 		&a.CreatedOn, &a.UpdatedOn,
+		&a.ControlsTotal, &a.ControlsApproved, &a.ControlsOverdue,
 	)
 	if err != nil {
 		return nil, err
-	}
-	if fwVersion.Valid {
-		a.FrameworkVersion = &fwVersion.String
 	}
 	if scopeDesc.Valid {
 		a.ScopeDescription = &scopeDesc.String

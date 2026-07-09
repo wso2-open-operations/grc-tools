@@ -25,21 +25,24 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
-// FrameworkService defines business operations for audit frameworks and products.
+// FrameworkService defines business operations for audit frameworks, products,
+// and the versioned framework control library.
 type FrameworkService interface {
 	ListFrameworks(ctx context.Context) ([]*model.AuditFramework, error)
 	CreateFramework(ctx context.Context, req model.CreateFrameworkRequest, createdBy string) (*model.AuditFramework, error)
 	ListProducts(ctx context.Context) ([]*model.AuditProduct, error)
 	CreateProduct(ctx context.Context, req model.CreateProductRequest, createdBy string) (*model.AuditProduct, error)
+	ListFrameworkControls(ctx context.Context, frameworkID int) ([]*model.AuditFrameworkControl, error)
 }
 
 type frameworkService struct {
-	frameworkRepo repository.FrameworkRepository
-	productRepo   repository.ProductRepository
+	frameworkRepo        repository.FrameworkRepository
+	productRepo          repository.ProductRepository
+	frameworkControlRepo repository.FrameworkControlRepository
 }
 
-func NewFrameworkService(frameworkRepo repository.FrameworkRepository, productRepo repository.ProductRepository) FrameworkService {
-	return &frameworkService{frameworkRepo: frameworkRepo, productRepo: productRepo}
+func NewFrameworkService(frameworkRepo repository.FrameworkRepository, productRepo repository.ProductRepository, frameworkControlRepo repository.FrameworkControlRepository) FrameworkService {
+	return &frameworkService{frameworkRepo: frameworkRepo, productRepo: productRepo, frameworkControlRepo: frameworkControlRepo}
 }
 
 func (s *frameworkService) ListFrameworks(ctx context.Context) ([]*model.AuditFramework, error) {
@@ -62,4 +65,8 @@ func (s *frameworkService) CreateProduct(ctx context.Context, req model.CreatePr
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name is required"}
 	}
 	return s.productRepo.Create(ctx, req, createdBy)
+}
+
+func (s *frameworkService) ListFrameworkControls(ctx context.Context, frameworkID int) ([]*model.AuditFrameworkControl, error) {
+	return s.frameworkControlRepo.ListCurrent(ctx, frameworkID)
 }

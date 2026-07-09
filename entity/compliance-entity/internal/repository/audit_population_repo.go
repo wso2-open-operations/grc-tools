@@ -42,12 +42,12 @@ type populationRepo struct{ db *sql.DB }
 // NewPopulationRepository constructs a PopulationRepository.
 func NewPopulationRepository(db *sql.DB) PopulationRepository { return &populationRepo{db: db} }
 
-func (r *populationRepo) CreatePopulation(ctx context.Context, auditID, controlID int, req domain.CreatePopulationRequest) (*domain.AuditPopulation, error) {
+func (r *populationRepo) CreatePopulation(ctx context.Context, _, controlID int, req domain.CreatePopulationRequest) (*domain.AuditPopulation, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO audit_population
-		 (audit_id, control_id, owner_id, team_id, reference_number, description, due_date, status, created_by, updated_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
-		auditID, controlID,
+		 (control_id, owner_id, team_id, reference_number, description, due_date, status, created_by, updated_by)
+		 VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+		controlID,
 		nullableInt(req.OwnerID), nullableInt(req.TeamID),
 		req.ReferenceNumber, nullableString(req.Description),
 		req.DueDate,
@@ -61,7 +61,7 @@ func (r *populationRepo) CreatePopulation(ctx context.Context, auditID, controlI
 
 func (r *populationRepo) GetPopulationByID(ctx context.Context, populationID int) (*domain.AuditPopulation, error) {
 	pop, err := scanPopulationRow(r.db.QueryRowContext(ctx,
-		`SELECT id, audit_id, control_id, owner_id, team_id, reference_number, description,
+		`SELECT id, control_id, owner_id, team_id, reference_number, description,
 		        status, DATE_FORMAT(due_date,'%Y-%m-%d'), comments, created_at, updated_at
 		 FROM audit_population WHERE id = ?`, populationID))
 	if err == sql.ErrNoRows {
@@ -73,12 +73,12 @@ func (r *populationRepo) GetPopulationByID(ctx context.Context, populationID int
 	return pop, nil
 }
 
-func (r *populationRepo) ListPopulations(ctx context.Context, auditID, controlID int) ([]domain.AuditPopulation, error) {
+func (r *populationRepo) ListPopulations(ctx context.Context, _, controlID int) ([]domain.AuditPopulation, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, audit_id, control_id, owner_id, team_id, reference_number, description,
+		`SELECT id, control_id, owner_id, team_id, reference_number, description,
 		        status, DATE_FORMAT(due_date,'%Y-%m-%d'), comments, created_at, updated_at
-		 FROM audit_population WHERE audit_id = ? AND control_id = ? ORDER BY id`,
-		auditID, controlID)
+		 FROM audit_population WHERE control_id = ? ORDER BY id`,
+		controlID)
 	if err != nil {
 		return nil, fmt.Errorf("population.List: %w", err)
 	}
@@ -263,7 +263,7 @@ func scanPopulationRow(s scanner) (*domain.AuditPopulation, error) {
 	var ownerID, teamID, refNum sql.NullInt64
 	var desc, dueDate, comments sql.NullString
 	err := s.Scan(
-		&p.ID, &p.AuditID, &p.ControlID,
+		&p.ID, &p.ControlID,
 		&ownerID, &teamID, &refNum, &desc,
 		&p.Status, &dueDate, &comments,
 		&p.CreatedOn, &p.UpdatedOn,

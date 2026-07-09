@@ -71,13 +71,21 @@ export default function UserProfile(): JSX.Element {
       .then((token) => {
         const given = token?.given_name ?? "";
         const family = token?.family_name ?? "";
+        const email = token?.email ?? "";
+        const emailPrefix = email.split("@")[0];
+        const emailFallback = emailPrefix
+          .split(/[._-]/)
+          .filter(Boolean)
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(" ");
         const resolved =
           [given, family].filter(Boolean).join(" ") ||
           (token as Record<string, string>)?.username ||
+          emailFallback ||
           token?.sub ||
           "";
         setName(resolved);
-        setEmail(token?.email ?? "");
+        setEmail(email);
       })
       .catch((error) => {
         setName("");

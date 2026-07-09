@@ -24,6 +24,7 @@ export function useIdTokenClaims(): Record<string, unknown> | null {
 
   useEffect(() => {
     if (!isSignedIn) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setClaims(null);
       return;
     }

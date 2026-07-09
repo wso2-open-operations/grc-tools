@@ -17,7 +17,6 @@
 import {
   Button,
   Chip,
-  Divider,
   Drawer,
   IconButton,
   Paper,
@@ -27,7 +26,6 @@ import {
   Stepper,
   Tab,
   Tabs,
-  TextField,
 } from "@mui/material";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import {
@@ -37,7 +35,6 @@ import {
   CheckCircle2,
   Clock,
   ClipboardCheck,
-  Download,
   FileText,
   FileUp,
   History,
@@ -58,6 +55,8 @@ import EvidenceUploadBox from "@modules/audit/components/EvidenceUploadBox";
 import SubmittedEvidenceList from "@modules/audit/components/SubmittedEvidenceList";
 import CommentsSection from "@modules/audit/components/CommentsSection";
 import type { AuditControl, ControlStatus } from "@modules/audit/types/audit";
+import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
+import { AuditPrivilege } from "@modules/audit/privileges";
 
 interface ControlDrawerProps {
   control: AuditControl | null;
@@ -211,9 +210,11 @@ function designActiveStep(status: ControlStatus): number {
 function DesignEvidenceSection({
   control,
   onStatusChange,
+  canSubmitEvidence,
 }: {
   control: AuditControl;
   onStatusChange: (s: ControlStatus) => void;
+  canSubmitEvidence: boolean;
 }): JSX.Element {
   const activeStep = designActiveStep(control.status);
   return (
@@ -234,15 +235,17 @@ function DesignEvidenceSection({
             </SectionCard>
           )}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
-            <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Evidence Submission" flexContent>
-              <EvidenceUploadBox
-                auditId={control.auditId}
-                controlId={control.id}
-                hint="PDF, XLSX, PNG up to 50 MB"
-                buttonLabel="Submit Evidence"
-                onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
-              />
-            </SectionCard>
+            {canSubmitEvidence && (
+              <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Evidence Submission" flexContent>
+                <EvidenceUploadBox
+                  auditId={control.auditId}
+                  controlId={control.id}
+                  hint="PDF, XLSX, PNG up to 50 MB"
+                  buttonLabel="Submit Evidence"
+                  onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
+                />
+              </SectionCard>
+            )}
             <SectionCard icon={<Sparkles size={16} />} iconBg="#faf5ff" iconColor="#7c3aed" title="AI Validation">
               <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 2, py: 0.5 }}>
                 <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: "#faf5ff", display: "flex", alignItems: "center", justifyContent: "center", color: "#7c3aed" }}>
@@ -325,18 +328,8 @@ function UploadDropzone({ label, hint }: { label: string; hint: string }): JSX.E
   );
 }
 
-function fileTypeColor(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase();
-  if (ext === "csv") return "#16a34a";
-  if (ext === "xlsx" || ext === "xls") return "#1d6f42";
-  if (ext === "pdf") return "#dc2626";
-  return "#475569";
-}
-
 function SampleSelectionCard({ control }: { control: AuditControl }): JSX.Element {
-  const hasFile = Boolean(control.sampleFileUrl && control.sampleFileName);
   const hasNote = Boolean(control.sampleReference);
-  const isEmpty = !hasFile && !hasNote;
 
   return (
     <SectionCard
@@ -345,57 +338,10 @@ function SampleSelectionCard({ control }: { control: AuditControl }): JSX.Elemen
       iconColor="#1d4ed8"
       title="Sample Selected by Auditor"
     >
-      {isEmpty && (
+      {!hasNote && (
         <Typography variant="body2" color="text.secondary">
           Sample details will appear here once the auditor completes selection.
         </Typography>
-      )}
-
-      {hasFile && (
-        <Box
-          component="a"
-          href={control.sampleFileUrl!}
-          download={control.sampleFileName!}
-          target="_blank"
-          rel="noopener noreferrer"
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1.5,
-            p: 1.5,
-            borderRadius: 1.5,
-            border: "1px solid",
-            borderColor: "divider",
-            bgcolor: "background.paper",
-            textDecoration: "none",
-            color: "inherit",
-            mb: hasNote ? 1.5 : 0,
-            "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" },
-            transition: "border-color 0.15s, background-color 0.15s",
-          }}
-        >
-          <Box
-            sx={{
-              width: 40,
-              height: 40,
-              borderRadius: 1.5,
-              bgcolor: `${fileTypeColor(control.sampleFileName!)}18`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <FileText size={20} color={fileTypeColor(control.sampleFileName!)} />
-          </Box>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="body2" fontWeight={600} noWrap>{control.sampleFileName}</Typography>
-            <Typography variant="caption" color="text.secondary">
-              Click to view · Uploaded by auditor
-            </Typography>
-          </Box>
-          <Download size={16} color="#64748b" />
-        </Box>
       )}
 
       {hasNote && (
@@ -413,9 +359,11 @@ function SampleSelectionCard({ control }: { control: AuditControl }): JSX.Elemen
 function OEEvidenceSection({
   control,
   onStatusChange,
+  canSubmitEvidence,
 }: {
   control: AuditControl;
   onStatusChange: (s: ControlStatus) => void;
+  canSubmitEvidence: boolean;
 }): JSX.Element {
   const activeStep = oeActiveStep(control.status);
 
@@ -500,18 +448,20 @@ function OEEvidenceSection({
       {activeStep === 1 && (
         <>
           <SampleSelectionCard control={control} />
-          <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Submit Evidence" flexContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
-              Upload evidence covering all selected samples listed above.
-            </Typography>
-            <EvidenceUploadBox
-              auditId={control.auditId}
-              controlId={control.id}
-              hint="PDF, XLSX, PNG up to 50 MB"
-              buttonLabel="Submit Evidence"
-              onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
-            />
-          </SectionCard>
+          {canSubmitEvidence && (
+            <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Submit Evidence" flexContent>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                Upload evidence covering all selected samples listed above.
+              </Typography>
+              <EvidenceUploadBox
+                auditId={control.auditId}
+                controlId={control.id}
+                hint="PDF, XLSX, PNG up to 50 MB"
+                buttonLabel="Submit Evidence"
+                onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
+              />
+            </SectionCard>
+          )}
         </>
       )}
 
@@ -524,18 +474,20 @@ function OEEvidenceSection({
             </SectionCard>
           )}
           <SampleSelectionCard control={control} />
-          <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Resubmit Evidence" flexContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
-              Upload updated evidence addressing the rejection reason above.
-            </Typography>
-            <EvidenceUploadBox
-              auditId={control.auditId}
-              controlId={control.id}
-              hint="PDF, XLSX, PNG up to 50 MB"
-              buttonLabel="Resubmit Evidence"
-              onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
-            />
-          </SectionCard>
+          {canSubmitEvidence && (
+            <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Resubmit Evidence" flexContent>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.7 }}>
+                Upload updated evidence addressing the rejection reason above.
+              </Typography>
+              <EvidenceUploadBox
+                auditId={control.auditId}
+                controlId={control.id}
+                hint="PDF, XLSX, PNG up to 50 MB"
+                buttonLabel="Resubmit Evidence"
+                onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
+              />
+            </SectionCard>
+          )}
         </>
       )}
 
@@ -576,12 +528,18 @@ function OEEvidenceSection({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ControlDrawer({ control, open, onClose }: ControlDrawerProps): JSX.Element {
+  const { can } = useAuditPrivileges();
+  const canSubmitEvidence = can(AuditPrivilege.SubmitEvidence);
+  const canComment = can(AuditPrivilege.AddComment);
+
   const [tab, setTab] = useState(0);
   const [localStatus, setLocalStatus] = useState<{ id: number; status: ControlStatus } | null>(null);
 
   // Reset to the Overview tab whenever a different control is opened, so the
-  // drawer doesn't retain the previous control's active tab.
+  // drawer doesn't retain the previous control's active tab. Syncing tab state to
+  // the opened control is a legitimate effect here.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTab(0);
   }, [control?.id]);
   const updateStatus = useUpdateControlStatus();
@@ -786,11 +744,13 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               <OEEvidenceSection
                 control={{ ...control, status: displayStatus ?? control.status }}
                 onStatusChange={(s) => handleStatusChange(control, s)}
+                canSubmitEvidence={canSubmitEvidence}
               />
             ) : (
               <DesignEvidenceSection
                 control={{ ...control, status: displayStatus ?? control.status }}
                 onStatusChange={(s) => handleStatusChange(control, s)}
+                canSubmitEvidence={canSubmitEvidence}
               />
             )}
 
@@ -873,7 +833,7 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               iconColor="#ea580c"
               title="Comments"
             >
-              <CommentsSection auditId={control.auditId} controlId={control.id} />
+              <CommentsSection auditId={control.auditId} controlId={control.id} canComment={canComment} />
             </SectionCard>
 
           </TabPanel>

@@ -18,7 +18,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
@@ -42,16 +44,27 @@ func NewEvidenceService(repo repository.RiskEvidenceRepository, storage *file.Se
 }
 
 func (s *evidenceService) List(ctx context.Context, riskID int) ([]*model.RiskEvidence, error) {
-	// TODO: delegate to repo
-	return nil, nil
+	return s.repo.List(ctx, riskID)
 }
 
 func (s *evidenceService) Upload(ctx context.Context, riskID int, fileName, contentType string, content io.Reader, createdBy string) (*model.RiskEvidence, error) {
-	// TODO: upload to Azure Blob via storage.Upload, persist metadata via repo
-	return nil, nil
+	data, err := io.ReadAll(content)
+	if err != nil {
+		return nil, err
+	}
+	// Store under a per-risk evidence folder; the Compliance Entity writes to Azure
+	// (the backend never talks to Azure directly). The stored file_path is the
+	// relative blob name, downloaded later by proxy through the entity.
+	blobName := fmt.Sprintf("risks/%d/evidence/%d/%s", riskID, time.Now().Unix(), fileName)
+	if err := s.storage.UploadBlob(ctx, blobName, contentType, data); err != nil {
+		return nil, err
+	}
+	// evidence_type defaults to ACTION_PLAN_ATTACHMENT for uploaded attachments.
+	return s.repo.Create(ctx, riskID, fileName, blobName, "", "ACTION_PLAN_ATTACHMENT", createdBy)
 }
 
 func (s *evidenceService) Delete(ctx context.Context, riskID, evidenceID int, byUserID string) error {
-	// TODO: fetch evidence row, delete blob via storage.Delete, delete row via repo
-	return nil
+	// Remove the DB row. Blob cleanup can be added once a GetByID exposes the
+	// stored blob path; the file otherwise remains in the private container.
+	return s.repo.Delete(ctx, evidenceID)
 }

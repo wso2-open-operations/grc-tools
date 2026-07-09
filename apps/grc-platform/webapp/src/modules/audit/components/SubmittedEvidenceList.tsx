@@ -18,6 +18,8 @@ import { Box, Button, Skeleton, Typography } from "@mui/material";
 import { ExternalLink, FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useGetEvidence } from "@modules/audit/api/useGetEvidence";
+import { useAuthApiClient } from "@hooks/useAuthApiClient";
+import { BACKEND_BASE_URL } from "@config/apiConfig";
 
 function sizeLabel(bytes: number | null): string {
   if (bytes === null) return "";
@@ -49,6 +51,22 @@ export default function SubmittedEvidenceList({
   controlId: number;
 }): JSX.Element {
   const { data, isLoading, isError } = useGetEvidence(auditId, controlId, true);
+  const authFetch = useAuthApiClient();
+
+  // readUrl is a backend download endpoint (not a public link). Fetch it with the
+  // auth token, then open the returned bytes — the browser never contacts Azure.
+  async function handleView(readUrl: string): Promise<void> {
+    try {
+      const res = await authFetch(`${BACKEND_BASE_URL}${readUrl}`);
+      if (!res.ok) throw new Error(`download failed (${res.status})`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+      // best-effort; the "View" simply does nothing if the download fails
+    }
+  }
 
   if (isLoading) {
     return <Skeleton variant="rectangular" height={56} sx={{ borderRadius: 1 }} />;
@@ -87,9 +105,7 @@ export default function SubmittedEvidenceList({
               {f.readUrl ? (
                 <Button
                   size="small"
-                  href={f.readUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  onClick={() => { void handleView(f.readUrl as string); }}
                   startIcon={<ExternalLink size={13} />}
                   sx={{ textTransform: "none", minWidth: 0 }}
                 >

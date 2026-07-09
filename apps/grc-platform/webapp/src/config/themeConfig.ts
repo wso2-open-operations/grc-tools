@@ -17,18 +17,31 @@
 import {
   AcrylicOrangeTheme,
   AcrylicPurpleTheme,
+  ChoreoTheme,
   HighContrastTheme,
   ClassicTheme,
 } from "@wso2/oxygen-ui";
 import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
 
-// Themes configuration.
-const themes: Record<string, OxygenTheme> = {
+export const themes: Record<string, OxygenTheme> = {
   acrylicOrange: AcrylicOrangeTheme,
   acrylicPurple: AcrylicPurpleTheme,
+  choreo: ChoreoTheme,
   highContrast: HighContrastTheme,
   classic: ClassicTheme,
 };
+
+export const THEME_OPTIONS: { key: string; label: string }[] = [
+  { key: "acrylicOrange", label: "Acrylic Orange" },
+  { key: "acrylicPurple", label: "Acrylic Purple" },
+  { key: "choreo", label: "Choreo" },
+  { key: "highContrast", label: "High Contrast" },
+  { key: "classic", label: "Classic" },
+];
+
+export function isThemeKey(key: string): key is keyof typeof themes {
+  return key in themes;
+}
 
 export const themeConfig =
   themes[window.config?.GRC_PLATFORM_THEME || "acrylicOrange"] ||

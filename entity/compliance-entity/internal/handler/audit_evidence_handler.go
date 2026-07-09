@@ -149,6 +149,22 @@ func (h *EvidenceHandler) ListEvidenceFiles(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// GetEvidenceFileByID handles GET /evidence/files/{fileId}.
+func (h *EvidenceHandler) GetEvidenceFileByID(w http.ResponseWriter, r *http.Request) {
+	fileID, err := strconv.Atoi(r.PathValue("fileId"))
+	if err != nil {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "fileId must be a positive integer"})
+		return
+	}
+	f, err := h.svc.GetEvidenceFileByID(r.Context(), fileID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(f)
+}
+
 // DeleteEvidenceFile handles DELETE /evidence/files/{fileId}.
 func (h *EvidenceHandler) DeleteEvidenceFile(w http.ResponseWriter, r *http.Request) {
 	fileID, err := strconv.Atoi(r.PathValue("fileId"))

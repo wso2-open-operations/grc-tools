@@ -34,6 +34,7 @@ type EvidenceRepository interface {
 	UpdateEvidence(ctx context.Context, evidenceID int, req domain.UpdateEvidenceRequest) (*domain.AuditEvidence, error)
 	AddEvidenceFile(ctx context.Context, evidenceID int, req domain.CreateEvidenceFileRequest) (*domain.AuditEvidenceFile, error)
 	ListEvidenceFiles(ctx context.Context, evidenceID int) (*domain.ListEvidenceFilesResponse, error)
+	GetEvidenceFileByID(ctx context.Context, fileID int) (*domain.AuditEvidenceFile, error)
 	DeleteEvidenceFile(ctx context.Context, fileID int) error
 }
 
@@ -61,10 +62,10 @@ func (r *evidenceRepo) CreateEvidence(ctx context.Context, controlID int, req do
 func (r *evidenceRepo) GetEvidenceByID(ctx context.Context, evidenceID int) (*domain.AuditEvidence, error) {
 	var e domain.AuditEvidence
 	var submittedBy, reusedFrom sql.NullInt64
-	var folderPath sql.NullString
+	var folderPath, createdBy sql.NullString
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, control_id, submitted_by, status, folder_path, reused_from_evidence_id, created_at, updated_at FROM audit_evidence WHERE id = ?",
-		evidenceID).Scan(&e.ID, &e.ControlID, &submittedBy, &e.Status, &folderPath, &reusedFrom, &e.CreatedOn, &e.UpdatedOn)
+		"SELECT id, control_id, submitted_by, status, folder_path, reused_from_evidence_id, created_by, created_at, updated_at FROM audit_evidence WHERE id = ?",
+		evidenceID).Scan(&e.ID, &e.ControlID, &submittedBy, &e.Status, &folderPath, &reusedFrom, &createdBy, &e.CreatedOn, &e.UpdatedOn)
 	if err == sql.ErrNoRows {
 		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("evidence %d not found", evidenceID)}
 	}
@@ -82,6 +83,9 @@ func (r *evidenceRepo) GetEvidenceByID(ctx context.Context, evidenceID int) (*do
 		v := int(reusedFrom.Int64)
 		e.ReusedFromEvidenceID = &v
 	}
+	if createdBy.Valid {
+		e.CreatedBy = &createdBy.String
+	}
 	return &e, nil
 }
 
@@ -91,7 +95,7 @@ func (r *evidenceRepo) ListEvidenceByControl(ctx context.Context, auditID, contr
 	// audit's evidence.
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT e.id, e.control_id, e.submitted_by, e.status, e.folder_path,
-		        e.reused_from_evidence_id, e.created_at, e.updated_at
+		        e.reused_from_evidence_id, e.created_by, e.created_at, e.updated_at
 		 FROM audit_evidence e
 		 JOIN audit_control c ON c.id = e.control_id
 		 WHERE e.control_id = ? AND c.audit_id = ?
@@ -106,8 +110,8 @@ func (r *evidenceRepo) ListEvidenceByControl(ctx context.Context, auditID, contr
 	for rows.Next() {
 		var e domain.AuditEvidence
 		var submittedBy, reusedFrom sql.NullInt64
-		var folderPath sql.NullString
-		if err := rows.Scan(&e.ID, &e.ControlID, &submittedBy, &e.Status, &folderPath, &reusedFrom, &e.CreatedOn, &e.UpdatedOn); err != nil {
+		var folderPath, createdBy sql.NullString
+		if err := rows.Scan(&e.ID, &e.ControlID, &submittedBy, &e.Status, &folderPath, &reusedFrom, &createdBy, &e.CreatedOn, &e.UpdatedOn); err != nil {
 			return nil, fmt.Errorf("evidence.ListByControl scan: %w", err)
 		}
 		if folderPath.Valid {
@@ -120,6 +124,9 @@ func (r *evidenceRepo) ListEvidenceByControl(ctx context.Context, auditID, contr
 		if reusedFrom.Valid {
 			v := int(reusedFrom.Int64)
 			e.ReusedFromEvidenceID = &v
+		}
+		if createdBy.Valid {
+			e.CreatedBy = &createdBy.String
 		}
 		evidence = append(evidence, e)
 	}
@@ -163,6 +170,11 @@ func (r *evidenceRepo) AddEvidenceFile(ctx context.Context, evidenceID int, req 
 	}
 	id, _ := res.LastInsertId()
 	return r.getEvidenceFileByID(ctx, int(id))
+}
+
+// GetEvidenceFileByID returns a single evidence file row by its ID.
+func (r *evidenceRepo) GetEvidenceFileByID(ctx context.Context, fileID int) (*domain.AuditEvidenceFile, error) {
+	return r.getEvidenceFileByID(ctx, fileID)
 }
 
 func (r *evidenceRepo) getEvidenceFileByID(ctx context.Context, fileID int) (*domain.AuditEvidenceFile, error) {

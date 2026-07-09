@@ -19,9 +19,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"mime"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,26 +31,26 @@ import (
 
 // EvidenceService defines business operations for audit evidence submissions.
 type EvidenceService interface {
-	// GetUploadLink returns the folder path the agent uses as a prefix for this
-	// upload session. The agent then calls GetFileUploadURL once per file.
+	// GetUploadLink returns the folder path the client uses as a prefix for this
+	// upload session. The client then POSTs each file to the upload endpoint.
 	GetUploadLink(ctx context.Context, auditID, controlID int) (*model.UploadLinkResponse, error)
 
-	// GetFileUploadURL generates a blob-scoped SAS URL for exactly one file.
-	// The returned URL is valid for 30 minutes and scoped to that single blob only.
-	GetFileUploadURL(ctx context.Context, folderPath, fileName string) (*model.FileUploadURLResponse, error)
-
 	// UploadFile stores one file into the session folder by proxying the bytes
-	// through the backend (client -> backend -> Azure). The backend authenticates
-	// to Azure with its account key; no SAS is handed to the client.
+	// through the backend to the Compliance Entity, which writes it to Azure.
+	// No storage credential is handed to the client.
 	UploadFile(ctx context.Context, folderPath, fileName, contentType string, data []byte) error
 
 	// Submit reads all blobs at folderPath from Azure, records them in the DB as
 	// a new evidence submission, and returns the created evidence record.
 	// The caller (handler) is responsible for advancing the control status afterwards.
-	Submit(ctx context.Context, controlID int, folderPath, submittedBy string) (*model.AuditEvidence, error)
+	Submit(ctx context.Context, auditID, controlID int, folderPath, submittedBy string) (*model.AuditEvidence, error)
 
 	// List returns all evidence submissions for a control, newest first.
-	List(ctx context.Context, controlID int) ([]*model.AuditEvidence, error)
+	List(ctx context.Context, auditID, controlID int) ([]*model.AuditEvidence, error)
+
+	// DownloadFile returns one evidence file's bytes (proxied via the Compliance
+	// Entity) plus its name and content type, by file ID.
+	DownloadFile(ctx context.Context, fileID int) (data []byte, fileName, contentType string, err error)
 }
 
 type evidenceService struct {
@@ -73,21 +71,6 @@ func (s *evidenceService) GetUploadLink(_ context.Context, auditID, controlID in
 	}, nil
 }
 
-func (s *evidenceService) GetFileUploadURL(_ context.Context, folderPath, fileName string) (*model.FileUploadURLResponse, error) {
-	if strings.ContainsAny(fileName, "/\\") {
-		return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: "fileName must not contain path separators"}
-	}
-	blobName := folderPath + fileName
-	uploadURL, expiresAt, err := s.storage.GenerateBlobSASURL(blobName, 30*time.Minute)
-	if err != nil {
-		return nil, err
-	}
-	return &model.FileUploadURLResponse{
-		UploadURL: uploadURL,
-		ExpiresAt: expiresAt,
-	}, nil
-}
-
 func (s *evidenceService) UploadFile(ctx context.Context, folderPath, fileName, contentType string, data []byte) error {
 	if folderPath == "" {
 		return &apierror.Error{StatusCode: http.StatusBadRequest, Body: "folderPath is required"}
@@ -102,7 +85,7 @@ func (s *evidenceService) UploadFile(ctx context.Context, folderPath, fileName, 
 	return s.storage.UploadBlob(ctx, blobName, contentType, data)
 }
 
-func (s *evidenceService) Submit(ctx context.Context, controlID int, folderPath, submittedBy string) (*model.AuditEvidence, error) {
+func (s *evidenceService) Submit(ctx context.Context, auditID, controlID int, folderPath, submittedBy string) (*model.AuditEvidence, error) {
 	if folderPath == "" {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "folderPath is required"}
 	}
@@ -118,14 +101,15 @@ func (s *evidenceService) Submit(ctx context.Context, controlID int, folderPath,
 		}
 	}
 
-	evidenceID, err := s.repo.Create(ctx, controlID, folderPath, submittedBy)
+	evidenceID, err := s.repo.Create(ctx, auditID, controlID, folderPath, submittedBy)
 	if err != nil {
 		return nil, err
 	}
 
 	files := make([]*model.AuditEvidenceFile, 0, len(blobs))
 	for _, blob := range blobs {
-		filePath := s.storage.BlobURL(blob.Name)
+		// Store the blob's relative path; downloads are proxied through the entity.
+		filePath := blob.Name
 		ct := blob.ContentType
 		sz := blob.Size
 		if err := s.repo.AddFile(ctx, evidenceID, blob.FileName(), filePath, &ct, &sz, submittedBy); err != nil {
@@ -151,31 +135,39 @@ func (s *evidenceService) Submit(ctx context.Context, controlID int, folderPath,
 	}, nil
 }
 
-func (s *evidenceService) List(ctx context.Context, controlID int) ([]*model.AuditEvidence, error) {
-	evidence, err := s.repo.ListByControl(ctx, controlID)
+func (s *evidenceService) List(ctx context.Context, auditID, controlID int) ([]*model.AuditEvidence, error) {
+	evidence, err := s.repo.ListByControl(ctx, auditID, controlID)
 	if err != nil {
 		return nil, err
 	}
-	// Attach a short-lived read-only SAS URL to each file so the reviewer's
-	// browser can view/download it from the private container. Best-effort:
-	// if storage is unconfigured or signing fails, ReadURL stays nil.
+	// Attach a backend download URL to each file. The reviewer's browser fetches
+	// this authenticated endpoint, which proxies the bytes from the Compliance
+	// Entity (the browser never contacts Azure directly).
 	for _, e := range evidence {
 		for _, f := range e.Files {
-			if f.FilePath == "" {
+			if f.ID == 0 {
 				continue
 			}
-			blobName := s.storage.BlobName(f.FilePath)
-			// Prefer the MIME type from the filename extension so the browser can
-			// display the blob inline (blobs were stored as octet-stream); fall back
-			// to the recorded file type.
-			contentType := mime.TypeByExtension(filepath.Ext(f.FileName))
-			if contentType == "" && f.FileType != nil {
-				contentType = *f.FileType
-			}
-			if readURL, _, err := s.storage.GenerateReadSASURL(blobName, contentType, 30*time.Minute); err == nil {
-				f.ReadURL = &readURL
-			}
+			downloadURL := fmt.Sprintf("/api/v1/evidence/files/%d/download", f.ID)
+			f.ReadURL = &downloadURL
 		}
 	}
 	return evidence, nil
+}
+
+// DownloadFile fetches one evidence file's bytes (proxied via the Compliance
+// Entity) by file ID, for the authenticated download endpoint.
+func (s *evidenceService) DownloadFile(ctx context.Context, fileID int) (data []byte, fileName, contentType string, err error) {
+	f, err := s.repo.GetFileByID(ctx, fileID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	data, ct, err := s.storage.ReadBlob(ctx, f.FilePath)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if ct == "" && f.FileType != nil {
+		ct = *f.FileType
+	}
+	return data, f.FileName, ct, nil
 }

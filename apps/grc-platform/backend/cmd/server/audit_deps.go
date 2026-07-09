@@ -17,36 +17,37 @@
 package main
 
 import (
-	"database/sql"
-
 	audithandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/handler"
-	auditmysql "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository/mysql"
+	auditentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository/entity"
 	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/entityclient"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
 )
 
-// buildAuditDeps wires Audit Hub dependencies.
-func buildAuditDeps(db *sql.DB, fileSvc *file.Service) audithandler.Deps {
-	// ── Repositories ──────────────────────────────────────────────────────────
-	auditRepo     := auditmysql.NewAuditRepository(db)
-	controlRepo   := auditmysql.NewControlRepository(db)
-	frameworkRepo := auditmysql.NewFrameworkRepository(db)
-	productRepo   := auditmysql.NewProductRepository(db)
-	userRepo      := auditmysql.NewUserRepository(db)
-	teamRepo      := auditmysql.NewTeamRepository(db)
-	dashboardRepo := auditmysql.NewDashboardRepository(db)
-	evidenceRepo  := auditmysql.NewEvidenceRepository(db)
-	commentRepo   := auditmysql.NewCommentRepository(db)
+// buildAuditDeps wires Audit Hub dependencies. The audit module now reads/writes
+// ALL data through the Compliance Entity (via ec) — no direct MySQL access.
+func buildAuditDeps(fileSvc *file.Service, ec *entityclient.Client) audithandler.Deps {
+	// ── Repositories (all Compliance Entity) ──────────────────────────────────
+	auditRepo := auditentity.NewAuditRepository(ec)
+	frameworkRepo := auditentity.NewFrameworkRepository(ec)
+	frameworkControlRepo := auditentity.NewFrameworkControlRepository(ec)
+	productRepo := auditentity.NewProductRepository(ec)
+	userRepo := auditentity.NewUserRepository(ec)
+	teamRepo := auditentity.NewTeamRepository(ec)
+	commentRepo := auditentity.NewCommentRepository(ec)
+	controlRepo := auditentity.NewControlRepository(ec)
+	evidenceRepo := auditentity.NewEvidenceRepository(ec)
+	dashboardRepo := auditentity.NewDashboardRepository(ec)
 
 	// ── Services ──────────────────────────────────────────────────────────────
-	auditSvc     := auditservice.NewAuditService(auditRepo, frameworkRepo, productRepo)
-	controlSvc   := auditservice.NewControlService(controlRepo)
-	frameworkSvc := auditservice.NewFrameworkService(frameworkRepo, productRepo)
-	userSvc      := auditservice.NewUserService(userRepo)
-	teamSvc      := auditservice.NewTeamService(teamRepo)
+	auditSvc := auditservice.NewAuditService(auditRepo, frameworkRepo, productRepo)
+	controlSvc := auditservice.NewControlService(controlRepo)
+	frameworkSvc := auditservice.NewFrameworkService(frameworkRepo, productRepo, frameworkControlRepo)
+	userSvc := auditservice.NewUserService(userRepo)
+	teamSvc := auditservice.NewTeamService(teamRepo)
 	dashboardSvc := auditservice.NewDashboardService(dashboardRepo)
-	evidenceSvc  := auditservice.NewEvidenceService(evidenceRepo, fileSvc)
-	commentSvc   := auditservice.NewCommentService(commentRepo)
+	evidenceSvc := auditservice.NewEvidenceService(evidenceRepo, fileSvc)
+	commentSvc := auditservice.NewCommentService(commentRepo)
 
 	return audithandler.Deps{
 		Audit:     auditSvc,

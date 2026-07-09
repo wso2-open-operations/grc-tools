@@ -24,6 +24,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type auditHandler struct {
@@ -32,6 +33,9 @@ type auditHandler struct {
 
 // listAudits handles GET /api/v1/audits.
 func (h *auditHandler) listAudits(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	audits, err := h.svc.List(r.Context())
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
@@ -48,6 +52,9 @@ func (h *auditHandler) listAudits(w http.ResponseWriter, r *http.Request) {
 
 // getAudit handles GET /api/v1/audits/{id}.
 func (h *auditHandler) getAudit(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	id, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -62,6 +69,9 @@ func (h *auditHandler) getAudit(w http.ResponseWriter, r *http.Request) {
 
 // createAudit handles POST /api/v1/audits.
 func (h *auditHandler) createAudit(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.CreateAudit) {
+		return
+	}
 	var req model.CreateAuditRequest
 	if err := response.DecodeJSON(w, r, &req); err != nil {
 		return
@@ -77,6 +87,9 @@ func (h *auditHandler) createAudit(w http.ResponseWriter, r *http.Request) {
 
 // updateAudit handles PUT /api/v1/audits/{id}.
 func (h *auditHandler) updateAudit(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.UpdateAudit) {
+		return
+	}
 	id, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -95,6 +108,9 @@ func (h *auditHandler) updateAudit(w http.ResponseWriter, r *http.Request) {
 
 // deleteAudit handles DELETE /api/v1/audits/{id}.
 func (h *auditHandler) deleteAudit(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.CreateAudit) {
+		return
+	}
 	id, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return

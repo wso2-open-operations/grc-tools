@@ -101,7 +101,7 @@ func MapServiceError(ctx context.Context, w http.ResponseWriter, err error, fall
 		case http.StatusForbidden:
 			WriteError(w, http.StatusForbidden, ErrMsgForbidden)
 		case http.StatusBadRequest:
-			WriteError(w, http.StatusBadRequest, ErrMsgBadRequest)
+			WriteError(w, http.StatusBadRequest, apiErr.Body)
 		case http.StatusConflict, http.StatusUnprocessableEntity:
 			WriteError(w, apiErr.StatusCode, apiErr.Body)
 		default:

@@ -49,9 +49,11 @@ function formatTimestamp(iso: string): string {
 export default function CommentsSection({
   auditId,
   controlId,
+  canComment = true,
 }: {
   auditId: number;
   controlId: number;
+  canComment?: boolean;
 }): JSX.Element {
   const evidence = useGetEvidence(auditId, controlId, true);
   // Comments attach to the latest evidence round (list is newest-first).
@@ -134,42 +136,46 @@ export default function CommentsSection({
         </Box>
       )}
 
-      <Divider sx={{ mb: 2 }} />
+      {canComment && (
+        <>
+          <Divider sx={{ mb: 2 }} />
 
-      {addComment.isError && (
-        <Alert severity="error" sx={{ mb: 1.5, fontSize: "0.8rem" }}>
-          {(addComment.error as Error).message}
-        </Alert>
-      )}
+          {addComment.isError && (
+            <Alert severity="error" sx={{ mb: 1.5, fontSize: "0.8rem" }}>
+              {(addComment.error as Error).message}
+            </Alert>
+          )}
 
-      <TextField
-        fullWidth
-        multiline
-        minRows={3}
-        placeholder="Add a comment…"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        size="small"
-        sx={{ mb: 1 }}
-      />
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
-        <Tooltip title="Only compliance/internal staff will see this comment — hidden from the external auditor.">
-          <FormControlLabel
-            control={<Checkbox size="small" checked={internal} onChange={(e) => setInternal(e.target.checked)} />}
-            label={<Typography variant="body2">Internal only</Typography>}
+          <TextField
+            fullWidth
+            multiline
+            minRows={3}
+            placeholder="Add a comment…"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            size="small"
+            sx={{ mb: 1 }}
           />
-        </Tooltip>
-        <Button
-          variant="contained"
-          disableElevation
-          disabled={text.trim().length === 0 || addComment.isPending}
-          startIcon={<MessageSquare size={15} />}
-          onClick={handleAdd}
-          sx={{ textTransform: "none", fontWeight: 600 }}
-        >
-          {addComment.isPending ? "Posting…" : "Add Comment"}
-        </Button>
-      </Box>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
+            <Tooltip title="Only compliance/internal staff will see this comment — hidden from the external auditor.">
+              <FormControlLabel
+                control={<Checkbox size="small" checked={internal} onChange={(e) => setInternal(e.target.checked)} />}
+                label={<Typography variant="body2">Internal only</Typography>}
+              />
+            </Tooltip>
+            <Button
+              variant="contained"
+              disableElevation
+              disabled={text.trim().length === 0 || addComment.isPending}
+              startIcon={<MessageSquare size={15} />}
+              onClick={handleAdd}
+              sx={{ textTransform: "none", fontWeight: 600 }}
+            >
+              {addComment.isPending ? "Posting…" : "Add Comment"}
+            </Button>
+          </Box>
+        </>
+      )}
     </Box>
   );
 }

@@ -68,6 +68,8 @@ const (
 	ManageAssignments    = "MANAGE_ASSIGNMENTS"
 	ViewTrail            = "VIEW_TRAIL"
 	ManageFrameworks     = "MANAGE_FRAMEWORKS"
+	ManageUsers          = "MANAGE_USERS"
+	ExportReport         = "EXPORT_REPORT"
 )
 
 type contextKey struct{}

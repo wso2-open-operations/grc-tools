@@ -77,6 +77,9 @@ func (s *auditService) Create(ctx context.Context, req model.CreateAuditRequest,
 	if req.PeriodStart == "" || req.PeriodEnd == "" {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "periodStart and periodEnd are required"}
 	}
+	if createdBy == "" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "authenticated user email is missing from token — check Asgardeo app email scope"}
+	}
 
 	// Verify framework and product exist.
 	fw, err := s.frameworkRepo.GetByID(ctx, req.FrameworkID)

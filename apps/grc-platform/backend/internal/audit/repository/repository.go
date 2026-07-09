@@ -32,6 +32,11 @@ type AuditRepository interface {
 	Delete(ctx context.Context, id int) error
 }
 
+// FrameworkControlRepository is the data-access contract for the versioned framework control library.
+type FrameworkControlRepository interface {
+	ListCurrent(ctx context.Context, frameworkID int) ([]*model.AuditFrameworkControl, error)
+}
+
 // FrameworkRepository is the data-access contract for audit frameworks.
 type FrameworkRepository interface {
 	List(ctx context.Context) ([]*model.AuditFramework, error)
@@ -78,11 +83,13 @@ type DashboardRepository interface {
 // EvidenceRepository is the data-access contract for audit evidence submissions.
 type EvidenceRepository interface {
 	// Create inserts a new evidence row for the given control and returns its ID.
-	Create(ctx context.Context, controlID int, folderPath, createdBy string) (int, error)
+	Create(ctx context.Context, auditID, controlID int, folderPath, createdBy string) (int, error)
 	// AddFile inserts a single audit_evidence_file row linked to evidenceID.
 	AddFile(ctx context.Context, evidenceID int, fileName, filePath string, fileType *string, fileSize *int64, createdBy string) error
 	// ListByControl returns all evidence submissions for a control, newest first, with files pre-loaded.
-	ListByControl(ctx context.Context, controlID int) ([]*model.AuditEvidence, error)
+	ListByControl(ctx context.Context, auditID, controlID int) ([]*model.AuditEvidence, error)
+	// GetFileByID returns a single evidence file row by its ID (for downloads).
+	GetFileByID(ctx context.Context, fileID int) (*model.AuditEvidenceFile, error)
 }
 
 // These remain empty — add methods as their handlers are implemented.

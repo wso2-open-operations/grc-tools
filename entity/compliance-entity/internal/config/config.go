@@ -28,14 +28,30 @@ type Config struct {
 	// Format: user:password@tcp(host:port)/dbname?parseTime=true
 	DBDSN      string
 	ServerPort string
+
+	// Azure Blob Storage — the Compliance Entity is the only component that holds
+	// the account key and talks to Azure (evidence/risk file bytes flow through here).
+	AzureAccountName   string
+	AzureAccountKey    string
+	AzureContainerName string
 }
 
 // Load reads configuration from environment variables and returns a populated Config.
 func Load() *Config {
 	return &Config{
-		DBDSN:      os.Getenv("DB_DSN"),
-		ServerPort: getEnvOrDefault("SERVER_PORT", "8080"),
+		DBDSN:              os.Getenv("DB_DSN"),
+		ServerPort:         getEnvOrDefault("SERVER_PORT", "8080"),
+		AzureAccountName:   os.Getenv("AZURE_STORAGE_ACCOUNT_NAME"),
+		AzureAccountKey:    os.Getenv("AZURE_STORAGE_ACCOUNT_KEY"),
+		AzureContainerName: getEnvOrDefault("AZURE_STORAGE_CONTAINER", "grc-evidence"),
 	}
+}
+
+// AzureConfigured reports whether Azure Blob credentials are present. When false,
+// the file (byte-storage) endpoints are disabled — useful for local dev/tests that
+// only exercise the MySQL metadata endpoints.
+func (c *Config) AzureConfigured() bool {
+	return c.AzureAccountName != "" && c.AzureAccountKey != ""
 }
 
 func getEnvOrDefault(key, defaultVal string) string {

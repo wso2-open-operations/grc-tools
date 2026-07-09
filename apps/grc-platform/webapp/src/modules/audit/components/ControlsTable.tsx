@@ -309,26 +309,9 @@ const STATUS_FILTER_OPTIONS: { label: string; value: string }[] = [
   })),
 ];
 
-// Static column catalogue for the show/hide picker. Keep ids in sync with the
-// `columns` array built inside ControlsTable.
-export interface ControlColumnMeta { id: string; label: string; alwaysVisible?: boolean; defaultHidden?: boolean }
-export const CONTROL_COLUMNS: ControlColumnMeta[] = [
-  { id: "controlNumber", label: "Control No.", alwaysVisible: true },
-  { id: "description", label: "Description" },
-  { id: "requirementType", label: "Req. Type" },
-  { id: "controlType", label: "Control Type" },
-  { id: "status", label: "Status" },
-  { id: "auditorName", label: "Auditor POC" },
-  { id: "ownerName", label: "Process Owner" },
-  { id: "teamName", label: "Team" },
-  { id: "scope", label: "Scope" },
-  { id: "dueDate", label: "Due Date" },
-  { id: "populationDueDate", label: "Population Due Date", defaultHidden: true },
-  { id: "populationOwnerName", label: "Population Owner", defaultHidden: true },
-  { id: "populationTeamName", label: "Population Team", defaultHidden: true },
-];
-export const DEFAULT_VISIBLE_CONTROL_COLUMNS = CONTROL_COLUMNS.filter((c) => !c.defaultHidden).map((c) => c.id);
-export const CONTROL_COLUMNS_STORAGE_KEY = "audit.controlsTable.visibleColumns";
+// The column catalogue (CONTROL_COLUMNS / DEFAULT_VISIBLE_CONTROL_COLUMNS /
+// CONTROL_COLUMNS_STORAGE_KEY) lives in ./controlColumns so this component file
+// only exports components (react-refresh/only-export-components).
 
 // Reusable cell renderers
 function userCell(name: string | null | undefined): JSX.Element {

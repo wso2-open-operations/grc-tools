@@ -17,10 +17,13 @@
 // Package model defines the domain types for the Audit Hub module.
 package model
 
-// AuditAssignment represents the mapping of auditors to an audit.
-// TODO: add fields based on `audit_auditor_assignment` in audit_schema.sql
-type AuditAssignment struct{}
+// AuditAssignment represents an auditor assignment derived from audit_control.auditor_id.
+// There is no separate assignment table; assignments are managed per-control.
+type AuditAssignment struct {
+	AuditorID   int    `json:"auditorId"`
+	AuditorName string `json:"auditorName"`
+	ControlID   int    `json:"controlId"`
+}
 
-// CreateAssignmentRequest is the payload for POST /api/v1/audits/{id}/assignments.
-// TODO: define fields (auditorId, role within audit)
+// CreateAssignmentRequest is currently unused (assignment management is per-control).
 type CreateAssignmentRequest struct{}

@@ -24,11 +24,11 @@ import (
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
-	Port              string
-	DB                DBConfig
-	Auth              AuthConfig
-	Azure             AzureConfig
-	CORSAllowedOrigin string
+	Port                    string
+	DB                      DBConfig
+	Auth                    AuthConfig
+	ComplianceEntityBaseURL string
+	CORSAllowedOrigin       string
 }
 
 type DBConfig struct {
@@ -41,13 +41,6 @@ type AuthConfig struct {
 	Audience              string
 	ClockSkew             time.Duration
 	TokenValidatorEnabled bool
-}
-
-// AzureConfig holds Azure Blob Storage credentials used for evidence file uploads.
-type AzureConfig struct {
-	StorageAccountName string
-	StorageAccountKey  string
-	ContainerName      string
 }
 
 // Load reads configuration from environment variables.
@@ -84,13 +77,9 @@ func Load() (Config, error) {
 		DB: DBConfig{
 			DSN: dsn,
 		},
-		Auth: authCfg,
-		Azure: AzureConfig{
-			StorageAccountName: os.Getenv("AZURE_STORAGE_ACCOUNT_NAME"),
-			StorageAccountKey:  os.Getenv("AZURE_STORAGE_ACCOUNT_KEY"),
-			ContainerName:      os.Getenv("AZURE_STORAGE_CONTAINER"),
-		},
-		CORSAllowedOrigin: envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
+		Auth:                    authCfg,
+		ComplianceEntityBaseURL: envOrDefault("COMPLIANCE_ENTITY_BASE_URL", "http://localhost:8081"),
+		CORSAllowedOrigin:       envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
 	}, nil
 }
 

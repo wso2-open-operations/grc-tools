@@ -158,7 +158,7 @@ func (s *controlService) BulkCreateControls(ctx context.Context, auditID int, re
 		return domain.BulkCreateControlsResponse{}, &apierror.ValidationError{Msg: "controls must not be empty"}
 	}
 	for i, c := range req.Controls {
-		if c.ControlNumber == "" {
+		if c.ControlNumber == "" && c.FrameworkControlID == nil {
 			return domain.BulkCreateControlsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("controls[%d]: controlNumber is required", i)}
 		}
 		if !validRequirementTypes[strings.ToUpper(c.RequirementType)] {
@@ -209,10 +209,10 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 	if auditID <= 0 {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "auditId must be a positive integer"}
 	}
-	if req.ControlNumber == "" {
+	if req.ControlNumber == "" && req.FrameworkControlID == nil {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "controlNumber is required"}
 	}
-	if req.Description == "" {
+	if req.Description == "" && req.FrameworkControlID == nil {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "description is required"}
 	}
 	if !validRequirementTypes[strings.ToUpper(req.RequirementType)] {
@@ -232,6 +232,20 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 		return domain.AuditControl{}, err
 	}
 	return *c, nil
+}
+
+func (s *controlService) ListAssignedForEvidence(ctx context.Context, userEmail string) (domain.ListAssignedControlsResponse, error) {
+	if userEmail == "" {
+		return domain.ListAssignedControlsResponse{}, &apierror.ValidationError{Msg: "email is required"}
+	}
+	controls, err := s.repo.ListAssignedForEvidence(ctx, userEmail)
+	if err != nil {
+		return domain.ListAssignedControlsResponse{}, err
+	}
+	if controls == nil {
+		controls = []domain.AssignedControlForEvidence{}
+	}
+	return domain.ListAssignedControlsResponse{Controls: controls}, nil
 }
 
 func (s *controlService) UpdateControl(ctx context.Context, auditID, controlID int, req domain.UpdateControlRequest) (domain.AuditControl, error) {

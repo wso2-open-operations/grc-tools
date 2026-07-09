@@ -25,6 +25,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/middleware"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/repository"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/service"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/storage"
 )
 
 // NewRouter builds the full dependency graph (repository → service → handler),
@@ -33,15 +34,17 @@ import (
 //
 // Authentication is handled upstream by the Choreo API Gateway; no auth
 // middleware is applied here.
-func NewRouter(db *sql.DB) http.Handler {
+func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	// ── Repositories ────────────────────────────────────────────────────────
 	userRepo := repository.NewUserRepository(db)
 	auditTeamRepo := repository.NewAuditTeamRepository(db)
 	auditFrameworkRepo := repository.NewAuditFrameworkRepository(db)
+	frameworkControlRepo := repository.NewFrameworkControlRepository(db)
 	auditProductRepo := repository.NewAuditProductRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
 	controlRepo := repository.NewControlRepository(db)
 	evidenceRepo := repository.NewEvidenceRepository(db)
+	dashboardRepo := repository.NewDashboardRepository(db)
 	populationRepo := repository.NewPopulationRepository(db)
 	commentRepo := repository.NewCommentRepository(db)
 	aiValidationRepo := repository.NewAIValidationRepository(db)
@@ -59,9 +62,10 @@ func NewRouter(db *sql.DB) http.Handler {
 	riskAssessmentRepo := repository.NewRiskAssessmentRepository(db)
 
 	// ── Services ─────────────────────────────────────────────────────────────
-	userSvc := service.NewUserService(userRepo)
+	userSvc := service.NewCachedUserService(service.NewUserService(userRepo))
 	auditTeamSvc := service.NewAuditTeamService(auditTeamRepo)
-	auditFrameworkSvc := service.NewAuditFrameworkService(auditFrameworkRepo)
+	auditFrameworkSvc := service.NewCachedAuditFrameworkService(service.NewAuditFrameworkService(auditFrameworkRepo))
+	frameworkControlSvc := service.NewFrameworkControlService(frameworkControlRepo)
 	auditProductSvc := service.NewAuditProductService(auditProductRepo)
 	auditSvc := service.NewAuditService(auditRepo)
 	controlSvc := service.NewControlService(controlRepo)
@@ -71,7 +75,7 @@ func NewRouter(db *sql.DB) http.Handler {
 	aiValidationSvc := service.NewAIValidationService(aiValidationRepo)
 	trailSvc := service.NewTrailService(trailRepo)
 	riskTeamSvc := service.NewRiskTeamService(riskTeamRepo)
-	riskScoreSvc := service.NewRiskScoreService(riskScoreRepo)
+	riskScoreSvc := service.NewCachedRiskScoreService(service.NewRiskScoreService(riskScoreRepo))
 	riskReferenceSvc := service.NewRiskReferenceService(riskReferenceRepo)
 	riskSvc := service.NewRiskService(riskRepo)
 	riskActionPlanSvc := service.NewRiskActionPlanService(riskActionPlanRepo)
@@ -86,6 +90,7 @@ func NewRouter(db *sql.DB) http.Handler {
 	userH := handler.NewUserHandler(userSvc)
 	auditTeamH := handler.NewAuditTeamHandler(auditTeamSvc)
 	auditFrameworkH := handler.NewAuditFrameworkHandler(auditFrameworkSvc)
+	frameworkControlH := handler.NewFrameworkControlHandler(frameworkControlSvc)
 	auditProductH := handler.NewAuditProductHandler(auditProductSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
 	controlH := handler.NewControlHandler(controlSvc)
@@ -111,6 +116,17 @@ func NewRouter(db *sql.DB) http.Handler {
 
 	mux.HandleFunc("GET /health", handler.HealthCheck)
 
+	// File byte-storage (Azure Blob) — the entity is the only holder of the Azure
+	// account key. The GRC Backend proxies evidence/risk file bytes through these.
+	// Registered only when Azure is configured (store != nil).
+	if store != nil {
+		fileH := handler.NewFileHandler(store)
+		mux.HandleFunc("POST /files", fileH.UploadFile)
+		mux.HandleFunc("GET /files", fileH.DownloadFile)
+		mux.HandleFunc("GET /files/list", fileH.ListFiles)
+		mux.HandleFunc("DELETE /files", fileH.DeleteFile)
+	}
+
 	// Users
 	mux.HandleFunc("POST /users/search", userH.SearchUsers)
 	mux.HandleFunc("GET /users/by-email/{email}", userH.GetUserByEmail)
@@ -130,6 +146,12 @@ func NewRouter(db *sql.DB) http.Handler {
 	mux.HandleFunc("POST /audit/frameworks", auditFrameworkH.CreateAuditFramework)
 	mux.HandleFunc("PATCH /audit/frameworks/{id}", auditFrameworkH.UpdateAuditFramework)
 
+	// Framework control library (versioned, immutable; nested under frameworks)
+	mux.HandleFunc("GET /audit/frameworks/{id}/controls", frameworkControlH.ListCurrentControls)
+	mux.HandleFunc("POST /audit/frameworks/{id}/controls", frameworkControlH.CreateControl)
+	mux.HandleFunc("PUT /audit/frameworks/{id}/controls/{controlId}", frameworkControlH.NewVersion)
+	mux.HandleFunc("GET /audit/frameworks/{id}/controls/{controlNumber}/versions", frameworkControlH.ListAllVersions)
+
 	// Audit products
 	mux.HandleFunc("POST /audit/products/search", auditProductH.SearchAuditProducts)
 	mux.HandleFunc("GET /audit/products/{id}", auditProductH.GetAuditProductByID)
@@ -148,6 +170,8 @@ func NewRouter(db *sql.DB) http.Handler {
 	mux.HandleFunc("GET /audits/{auditId}/trail", trailH.ListTrail)
 
 	// Controls (cross-audit search; nested CRUD under audits)
+	mux.HandleFunc("POST /audit/dashboard", handler.NewDashboardHandler(dashboardRepo).GetDashboard)
+	mux.HandleFunc("GET /controls/assigned-for-evidence", controlH.ListAssignedForEvidence)
 	mux.HandleFunc("POST /controls/search", controlH.SearchControlsGlobal)
 	mux.HandleFunc("POST /audits/{auditId}/controls/search", controlH.SearchControls)
 	mux.HandleFunc("POST /audits/{auditId}/controls/bulk", controlH.BulkCreateControls)
@@ -163,6 +187,9 @@ func NewRouter(db *sql.DB) http.Handler {
 	mux.HandleFunc("PATCH /evidence/{evidenceId}", evidenceH.UpdateEvidence)
 	mux.HandleFunc("POST /evidence/{evidenceId}/files", evidenceH.AddEvidenceFile)
 	mux.HandleFunc("GET /evidence/{evidenceId}/files", evidenceH.ListEvidenceFiles)
+	// Distinct prefix (not /evidence/...) to avoid a routing conflict with the
+	// list-files pattern above.
+	mux.HandleFunc("GET /evidence-files/{fileId}", evidenceH.GetEvidenceFileByID)
 	mux.HandleFunc("DELETE /evidence/files/{fileId}", evidenceH.DeleteEvidenceFile)
 
 	// Evidence comments (evidence-scoped; flat delete by comment ID)

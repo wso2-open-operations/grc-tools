@@ -22,7 +22,6 @@ import type { AuditFramework } from "@modules/audit/types/audit";
 
 interface CreateFrameworkPayload {
   name: string;
-  version?: string | null;
 }
 
 export function useCreateFramework() {

@@ -82,6 +82,7 @@ export function useAuthApiClient() {
     });
   };
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const authFetch = useCallback(async (
     input: RequestInfo | URL,
     options?: RequestInit,

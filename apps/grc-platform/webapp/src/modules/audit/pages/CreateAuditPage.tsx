@@ -22,6 +22,8 @@ import {
   Card,
   CardActionArea,
   CardContent,
+  Checkbox,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -52,13 +54,15 @@ import {
   ClipboardList,
   Copy,
   FileUp,
+  Library,
   Plus,
   Trash2,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useRef, useEffect, type JSX, type ChangeEvent } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { useGetAudits } from "@modules/audit/api/useGetAudits";
 import { useGetControls } from "@modules/audit/api/useGetControls";
+import { useGetFrameworkControls } from "@modules/audit/api/useGetFrameworkControls";
 import { useGetFrameworks } from "@modules/audit/api/useGetFrameworks";
 import { useGetProducts } from "@modules/audit/api/useGetProducts";
 import { useGetUsers } from "@modules/audit/api/useGetUsers";
@@ -71,6 +75,7 @@ import type {
   AddControlRequest,
   AuditControl,
   AuditFramework,
+  AuditFrameworkControl,
   AuditProduct,
   AuditTeam,
   ControlScope,
@@ -82,7 +87,7 @@ import type { AuditUser } from "@modules/audit/types/user";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ControlSource = "empty" | "copy" | "csv";
+type ControlSource = "empty" | "copy" | "csv" | "template";
 
 let _localIdCounter = 0;
 const nextLocalId = () => String(++_localIdCounter);
@@ -103,6 +108,9 @@ function blankPopulation(): PopulationDraft {
 
 interface DraftControl {
   localId: string;
+  // When set this draft is linked to a framework template row (source = COPIED).
+  // Definition fields below are read-only display values; only assignments are editable.
+  frameworkControlId?: number;
   controlNumber: string;
   description: string;
   requirementType: RequirementType;
@@ -161,6 +169,23 @@ function draftToRequest(d: DraftControl): AddControlRequest {
       teamId: d.population.teamId,
     };
   }
+  // Template-linked: send only the FK + assignments; backend resolves definitions from the template.
+  if (d.frameworkControlId) {
+    return {
+      frameworkControlId: d.frameworkControlId,
+      controlSource: 'COPIED' as const,
+      controlNumber: "",       // unused — backend ignores when frameworkControlId is set
+      description: "",
+      requirementType: d.requirementType,
+      controlType: d.controlType,
+      scope: d.scope,
+      dueDate: d.dueDate || null,
+      ownerId: d.ownerId,
+      teamId: d.teamId,
+      auditorId: d.auditorId,
+      population,
+    };
+  }
   return {
     controlNumber: d.controlNumber.trim(),
     description: d.description.trim(),
@@ -172,7 +197,7 @@ function draftToRequest(d: DraftControl): AddControlRequest {
     ownerId: d.ownerId,
     teamId: d.teamId,
     auditorId: d.auditorId,
-    isManuallyAdded: true,
+    controlSource: 'MANUAL' as const,
     population,
   };
 }
@@ -438,51 +463,67 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
             <TableRow key={d.localId}>
               {/* Control # */}
               <TableCell>
-                <TextField
-                  value={d.controlNumber}
-                  onChange={(e) => update(d.localId, "controlNumber", e.target.value)}
-                  size="small"
-                  variant="standard"
-                  placeholder="CA-01"
-                  inputProps={{ style: FS }}
-                />
+                {d.frameworkControlId ? (
+                  <Typography variant="body2" fontWeight={600} noWrap sx={FS}>{d.controlNumber}</Typography>
+                ) : (
+                  <TextField
+                    value={d.controlNumber}
+                    onChange={(e) => update(d.localId, "controlNumber", e.target.value)}
+                    size="small"
+                    variant="standard"
+                    placeholder="CA-01"
+                    inputProps={{ style: FS }}
+                  />
+                )}
               </TableCell>
               {/* Description */}
               <TableCell>
-                <TextField
-                  value={d.description}
-                  onChange={(e) => update(d.localId, "description", e.target.value)}
-                  size="small"
-                  variant="standard"
-                  placeholder="Description"
-                  fullWidth
-                  inputProps={{ style: FS }}
-                />
+                {d.frameworkControlId ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ ...FS, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.description}>{d.description}</Typography>
+                ) : (
+                  <TextField
+                    value={d.description}
+                    onChange={(e) => update(d.localId, "description", e.target.value)}
+                    size="small"
+                    variant="standard"
+                    placeholder="Description"
+                    fullWidth
+                    inputProps={{ style: FS }}
+                  />
+                )}
               </TableCell>
               {/* Evidence Requirement */}
               <TableCell>
-                <TextField
-                  value={d.evidenceRequirement}
-                  onChange={(e) => update(d.localId, "evidenceRequirement", e.target.value)}
-                  size="small"
-                  variant="standard"
-                  placeholder="Requirement"
-                  fullWidth
-                  inputProps={{ style: FS }}
-                />
+                {d.frameworkControlId ? (
+                  <Typography variant="caption" color="text.disabled" sx={{ fontStyle: "italic" }}>from library</Typography>
+                ) : (
+                  <TextField
+                    value={d.evidenceRequirement}
+                    onChange={(e) => update(d.localId, "evidenceRequirement", e.target.value)}
+                    size="small"
+                    variant="standard"
+                    placeholder="Requirement"
+                    fullWidth
+                    inputProps={{ style: FS }}
+                  />
+                )}
               </TableCell>
               {/* Req. Type */}
               <TableCell>
-                <Select
-                  value={d.requirementType}
-                  onChange={(e) => handleReqTypeChange(d.localId, e.target.value as RequirementType)}
-                  size="small"
-                  variant="standard"
-                  sx={{ ...FS }}
-                >
-                  <MenuItem value="DESIGN">Design</MenuItem>
-                  <MenuItem value="OE">OE</MenuItem>
-                </Select>
+                {d.frameworkControlId ? (
+                  <Chip label={d.requirementType} size="small" color={d.requirementType === "OE" ? "warning" : "default"} sx={{ height: 18, fontSize: "0.65rem" }} />
+                ) : (
+                  <Select
+                    value={d.requirementType}
+                    onChange={(e) => handleReqTypeChange(d.localId, e.target.value as RequirementType)}
+                    size="small"
+                    variant="standard"
+                    sx={{ ...FS }}
+                  >
+                    <MenuItem value="DESIGN">Design</MenuItem>
+                    <MenuItem value="OE">OE</MenuItem>
+                  </Select>
+                )}
               </TableCell>
               {/* Population — only active for OE rows */}
               <TableCell>
@@ -510,29 +551,37 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
               </TableCell>
               {/* Control Type */}
               <TableCell>
-                <Select
-                  value={d.controlType}
-                  onChange={(e) => update(d.localId, "controlType", e.target.value as ControlType)}
-                  size="small"
-                  variant="standard"
-                  sx={{ ...FS }}
-                >
-                  <MenuItem value="CONFIG">Config</MenuItem>
-                  <MenuItem value="NON_CONFIG">Non-Config</MenuItem>
-                </Select>
+                {d.frameworkControlId ? (
+                  <Typography variant="caption" color="text.secondary" sx={FS}>{d.controlType === "CONFIG" ? "Config" : "Non-Config"}</Typography>
+                ) : (
+                  <Select
+                    value={d.controlType}
+                    onChange={(e) => update(d.localId, "controlType", e.target.value as ControlType)}
+                    size="small"
+                    variant="standard"
+                    sx={{ ...FS }}
+                  >
+                    <MenuItem value="CONFIG">Config</MenuItem>
+                    <MenuItem value="NON_CONFIG">Non-Config</MenuItem>
+                  </Select>
+                )}
               </TableCell>
               {/* Scope */}
               <TableCell>
-                <Select
-                  value={d.scope}
-                  onChange={(e) => update(d.localId, "scope", e.target.value as ControlScope)}
-                  size="small"
-                  variant="standard"
-                  sx={{ ...FS }}
-                >
-                  <MenuItem value="COMMON">Common</MenuItem>
-                  <MenuItem value="PRODUCT_SPECIFIC">Product Specific</MenuItem>
-                </Select>
+                {d.frameworkControlId ? (
+                  <Typography variant="caption" color="text.secondary" sx={FS}>{d.scope === "COMMON" ? "Common" : "Product"}</Typography>
+                ) : (
+                  <Select
+                    value={d.scope}
+                    onChange={(e) => update(d.localId, "scope", e.target.value as ControlScope)}
+                    size="small"
+                    variant="standard"
+                    sx={{ ...FS }}
+                  >
+                    <MenuItem value="COMMON">Common</MenuItem>
+                    <MenuItem value="PRODUCT_SPECIFIC">Product Specific</MenuItem>
+                  </Select>
+                )}
               </TableCell>
               {/* Process Owner — searchable */}
               <TableCell>
@@ -735,7 +784,7 @@ interface Step1Props {
   onScopeDescriptionChange: (v: string) => void;
 }
 
-const CREATE_FW_SENTINEL: AuditFramework = { id: -1, name: "＋ Create new framework…", version: null };
+const CREATE_FW_SENTINEL: AuditFramework = { id: -1, name: "＋ Create new framework…" };
 const CREATE_PRODUCT_SENTINEL: AuditProduct = { id: -1, name: "＋ Create new product…" };
 
 function Step1Form({
@@ -765,7 +814,6 @@ function Step1Form({
 
   const [fwDialogOpen, setFwDialogOpen] = useState(false);
   const [newFwName, setNewFwName] = useState("");
-  const [newFwVersion, setNewFwVersion] = useState("");
   const [fwError, setFwError] = useState<string | null>(null);
 
   const [productDialogOpen, setProductDialogOpen] = useState(false);
@@ -776,14 +824,10 @@ function Step1Form({
     if (!newFwName.trim()) return;
     setFwError(null);
     try {
-      const created = await createFramework.mutateAsync({
-        name: newFwName.trim(),
-        version: newFwVersion.trim() || null,
-      });
+      const created = await createFramework.mutateAsync({ name: newFwName.trim() });
       onFrameworkChange(created);
       setFwDialogOpen(false);
       setNewFwName("");
-      setNewFwVersion("");
     } catch (err) {
       setFwError(err instanceof Error ? err.message : "Failed to create framework.");
     }
@@ -813,109 +857,104 @@ function Step1Form({
         placeholder="e.g. SOC 2 Type II – 2026"
       />
 
-      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
-        <Box>
-          <Autocomplete
-            options={[...frameworks, CREATE_FW_SENTINEL]}
-            loading={loadingFrameworks}
-            getOptionLabel={(f) =>
-              f.id === -1 ? f.name : f.version ? `${f.name} (${f.version})` : f.name
+      <Box>
+        <Autocomplete
+          options={[...frameworks, CREATE_FW_SENTINEL]}
+          loading={loadingFrameworks}
+          getOptionLabel={(f) => f.name}
+          isOptionEqualToValue={(opt, val) => opt.id === val.id}
+          filterOptions={(options, params) => {
+            const real = options.filter((o) => o.id !== -1);
+            const q = params.inputValue.toLowerCase();
+            const filtered = q
+              ? real.filter((o) => o.name.toLowerCase().includes(q))
+              : real;
+            return [...filtered, CREATE_FW_SENTINEL];
+          }}
+          value={framework}
+          onChange={(_e, val) => {
+            if (val && val.id === -1) {
+              setNewFwName("");
+              setFwError(null);
+              setFwDialogOpen(true);
+              return;
             }
-            isOptionEqualToValue={(opt, val) => opt.id === val.id}
-            filterOptions={(options, params) => {
-              const real = options.filter((o) => o.id !== -1);
-              const q = params.inputValue.toLowerCase();
-              const filtered = q
-                ? real.filter((o) =>
-                    (o.version ? `${o.name} (${o.version})` : o.name).toLowerCase().includes(q),
-                  )
-                : real;
-              return [...filtered, CREATE_FW_SENTINEL];
-            }}
-            value={framework}
-            onChange={(_e, val) => {
-              if (val && val.id === -1) {
-                setNewFwName("");
-                setFwError(null);
-                setFwDialogOpen(true);
-                return;
-              }
-              onFrameworkChange(val);
-            }}
-            slotProps={{ paper: { sx: { backdropFilter: "none", backgroundColor: "background.paper" } } }}
-            renderOption={(props, option) => {
-              const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & { key?: React.Key };
-              if (option.id === -1) {
-                return (
-                  <li key={key} {...rest}>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "primary.main" }}>
-                      <Plus size={14} />
-                      <Typography variant="body2" fontWeight={600}>Create new framework</Typography>
-                    </Box>
-                  </li>
-                );
-              }
+            onFrameworkChange(val);
+          }}
+          slotProps={{ paper: { sx: { backdropFilter: "none", backgroundColor: "background.paper" } } }}
+          renderOption={(props, option) => {
+            const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & { key?: React.Key };
+            if (option.id === -1) {
               return (
                 <li key={key} {...rest}>
-                  {option.version ? `${option.name} (${option.version})` : option.name}
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "primary.main" }}>
+                    <Plus size={14} />
+                    <Typography variant="body2" fontWeight={600}>Create new framework</Typography>
+                  </Box>
                 </li>
               );
-            }}
-            renderInput={(params) => <TextField {...params} label="Framework" required />}
-          />
-          {errorFrameworks && (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
-              <Typography variant="caption" color="error">Failed to load frameworks.</Typography>
-              <Button size="small" onClick={() => void onRefetchFrameworks()}>Retry</Button>
-            </Box>
-          )}
-        </Box>
-        <Box>
-          <Autocomplete
-            options={[...products, CREATE_PRODUCT_SENTINEL]}
-            loading={loadingProducts}
-            getOptionLabel={(p) => p.name}
-            isOptionEqualToValue={(opt, val) => opt.id === val.id}
-            filterOptions={(options, params) => {
-              const real = options.filter((o) => o.id !== -1);
-              const q = params.inputValue.toLowerCase();
-              const filtered = q ? real.filter((o) => o.name.toLowerCase().includes(q)) : real;
-              return [...filtered, CREATE_PRODUCT_SENTINEL];
-            }}
-            value={product}
-            onChange={(_e, val) => {
-              if (val && val.id === -1) {
-                setNewProductName("");
-                setProductError(null);
-                setProductDialogOpen(true);
-                return;
-              }
-              onProductChange(val);
-            }}
-            slotProps={{ paper: { sx: { backdropFilter: "none", backgroundColor: "background.paper" } } }}
-            renderOption={(props, option) => {
-              const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & { key?: React.Key };
-              if (option.id === -1) {
-                return (
-                  <li key={key} {...rest}>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "primary.main" }}>
-                      <Plus size={14} />
-                      <Typography variant="body2" fontWeight={600}>Create new product</Typography>
-                    </Box>
-                  </li>
-                );
-              }
-              return <li key={key} {...rest}>{option.name}</li>;
-            }}
-            renderInput={(params) => <TextField {...params} label="Product / System" required />}
-          />
-          {errorProducts && (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
-              <Typography variant="caption" color="error">Failed to load products.</Typography>
-              <Button size="small" onClick={() => void onRefetchProducts()}>Retry</Button>
-            </Box>
-          )}
-        </Box>
+            }
+            return (
+              <li key={key} {...rest}>
+                {option.name}
+              </li>
+            );
+          }}
+          renderInput={(params) => <TextField {...params} label="Framework" required />}
+        />
+        {errorFrameworks && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
+            <Typography variant="caption" color="error">Failed to load frameworks.</Typography>
+            <Button size="small" onClick={() => void onRefetchFrameworks()}>Retry</Button>
+          </Box>
+        )}
+      </Box>
+
+      <Box>
+        <Autocomplete
+          options={[...products, CREATE_PRODUCT_SENTINEL]}
+          loading={loadingProducts}
+          getOptionLabel={(p) => p.name}
+          isOptionEqualToValue={(opt, val) => opt.id === val.id}
+          filterOptions={(options, params) => {
+            const real = options.filter((o) => o.id !== -1);
+            const q = params.inputValue.toLowerCase();
+            const filtered = q ? real.filter((o) => o.name.toLowerCase().includes(q)) : real;
+            return [...filtered, CREATE_PRODUCT_SENTINEL];
+          }}
+          value={product}
+          onChange={(_e, val) => {
+            if (val && val.id === -1) {
+              setNewProductName("");
+              setProductError(null);
+              setProductDialogOpen(true);
+              return;
+            }
+            onProductChange(val);
+          }}
+          slotProps={{ paper: { sx: { backdropFilter: "none", backgroundColor: "background.paper" } } }}
+          renderOption={(props, option) => {
+            const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & { key?: React.Key };
+            if (option.id === -1) {
+              return (
+                <li key={key} {...rest}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "primary.main" }}>
+                    <Plus size={14} />
+                    <Typography variant="body2" fontWeight={600}>Create new product</Typography>
+                  </Box>
+                </li>
+              );
+            }
+            return <li key={key} {...rest}>{option.name}</li>;
+          }}
+          renderInput={(params) => <TextField {...params} label="Product / System" required />}
+        />
+        {errorProducts && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
+            <Typography variant="caption" color="error">Failed to load products.</Typography>
+            <Button size="small" onClick={() => void onRefetchProducts()}>Retry</Button>
+          </Box>
+        )}
       </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
@@ -959,15 +998,7 @@ function Step1Form({
             value={newFwName}
             onChange={(e) => setNewFwName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void handleCreateFramework(); }}
-            placeholder="e.g. SOC 2 Type II"
-          />
-          <TextField
-            label="Version (optional)"
-            fullWidth
-            value={newFwVersion}
-            onChange={(e) => setNewFwVersion(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleCreateFramework(); }}
-            placeholder="e.g. 2024"
+            placeholder="e.g. SOC 2"
           />
           {fwError && <Alert severity="error">{fwError}</Alert>}
         </DialogContent>
@@ -1033,6 +1064,7 @@ interface Step2Props {
   onCopyAuditIdChange: (id: number | null) => void;
   csvError: string | null;
   onCsvErrorChange: (e: string | null) => void;
+  framework: AuditFramework | null;
 }
 
 function Step2Controls({
@@ -1044,10 +1076,14 @@ function Step2Controls({
   onCopyAuditIdChange,
   csvError,
   onCsvErrorChange,
+  framework,
 }: Step2Props): JSX.Element {
   const { data: auditsData } = useGetAudits();
   const { data: sourceControlsData, isLoading: sourceControlsLoading } = useGetControls(
     copyAuditId ?? 0,
+  );
+  const { data: fwControlsData, isLoading: fwControlsLoading } = useGetFrameworkControls(
+    source === "template" ? (framework?.id ?? null) : null,
   );
   const { data: usersData } = useGetUsers();
   const { data: teamsData } = useGetTeams();
@@ -1057,6 +1093,31 @@ function Step2Controls({
   // Tracks which auditId we've already seeded into drafts, so that a
   // background refetch of sourceControlsData never overwrites user edits.
   const seededForAuditId = useRef<number | null>(null);
+  // Set of selected framework control IDs for the template source.
+  const selectedFwCtlIds = new Set(drafts.filter((d) => d.frameworkControlId).map((d) => d.frameworkControlId!));
+
+  function toggleFwControl(fc: AuditFrameworkControl) {
+    if (selectedFwCtlIds.has(fc.id)) {
+      onDraftsChange(drafts.filter((d) => d.frameworkControlId !== fc.id));
+    } else {
+      const newDraft: DraftControl = {
+        localId: nextLocalId(),
+        frameworkControlId: fc.id,
+        controlNumber: fc.controlNumber,
+        description: fc.description,
+        requirementType: fc.requirementType as RequirementType,
+        controlType: fc.controlType as ControlType,
+        scope: fc.scope as ControlScope,
+        evidenceRequirement: fc.evidenceRequirement ?? "",
+        dueDate: "",
+        ownerId: null,
+        teamId: null,
+        auditorId: null,
+        population: fc.requirementType === "OE" ? blankPopulation() : null,
+      };
+      onDraftsChange([...drafts, newDraft]);
+    }
+  }
 
   useEffect(() => {
     if (source !== "copy") {
@@ -1095,25 +1156,35 @@ function Step2Controls({
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       {/* Source cards */}
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 2 }}>
         <SourceCard
-          icon={<ClipboardList size={22} />}
-          title="Start Empty"
-          description="Add controls manually via the table."
-          selected={source === "empty"}
+          icon={<Library size={22} />}
+          title="From Framework Library"
+          description="Pick controls from the framework's control library. Definitions are pre-filled."
+          selected={source === "template"}
           onClick={() => {
-            onSourceChange("empty");
+            onSourceChange("template");
             onDraftsChange([]);
           }}
         />
         <SourceCard
           icon={<Copy size={22} />}
-          title="Copy from Previous"
+          title="Copy from Previous Audit"
           description="Import controls from an existing audit and edit before submitting."
           selected={source === "copy"}
           onClick={() => {
             onSourceChange("copy");
             onCopyAuditIdChange(null);
+            onDraftsChange([]);
+          }}
+        />
+        <SourceCard
+          icon={<ClipboardList size={22} />}
+          title="Start Empty"
+          description="Add controls manually — control number, description, and all fields are yours to fill."
+          selected={source === "empty"}
+          onClick={() => {
+            onSourceChange("empty");
             onDraftsChange([]);
           }}
         />
@@ -1129,6 +1200,133 @@ function Step2Controls({
           }}
         />
       </Box>
+
+      {/* Template — framework control library checklist */}
+      {source === "template" && (
+        <Box>
+          {!framework && (
+            <Alert severity="warning" sx={{ py: 0.5 }}>
+              Select a framework in Step 1 first — controls are specific to each framework.
+            </Alert>
+          )}
+          {framework && fwControlsLoading && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <CircularProgress size={16} />
+              <Typography variant="body2" color="text.secondary">
+                Loading {framework.name} controls…
+              </Typography>
+            </Box>
+          )}
+          {framework && !fwControlsLoading && (fwControlsData ?? []).length === 0 && (
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              No controls in the {framework.name} library yet.
+            </Alert>
+          )}
+          {framework && !fwControlsLoading && (fwControlsData ?? []).length > 0 && (
+            <Box>
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+                <Typography variant="subtitle2" fontWeight={600}>
+                  {framework.name} — {fwControlsData!.length} controls
+                </Typography>
+                <Box sx={{ display: "flex", gap: 1 }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    sx={{ textTransform: "none" }}
+                    onClick={() => {
+                      const toAdd = (fwControlsData ?? []).filter((fc) => !selectedFwCtlIds.has(fc.id));
+                      const newDrafts: DraftControl[] = toAdd.map((fc) => ({
+                        localId: nextLocalId(),
+                        frameworkControlId: fc.id,
+                        controlNumber: fc.controlNumber,
+                        description: fc.description,
+                        requirementType: fc.requirementType as RequirementType,
+                        controlType: fc.controlType as ControlType,
+                        scope: fc.scope as ControlScope,
+                        evidenceRequirement: fc.evidenceRequirement ?? "",
+                        dueDate: "",
+                        ownerId: null,
+                        teamId: null,
+                        auditorId: null,
+                        population: fc.requirementType === "OE" ? blankPopulation() : null,
+                      }));
+                      onDraftsChange([...drafts, ...newDrafts]);
+                    }}
+                  >
+                    Select All
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    sx={{ textTransform: "none" }}
+                    onClick={() => onDraftsChange(drafts.filter((d) => !d.frameworkControlId))}
+                  >
+                    Clear All
+                  </Button>
+                </Box>
+              </Box>
+              <Paper variant="outlined" sx={{ borderRadius: 2, maxHeight: 400, overflowY: "auto" }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell padding="checkbox" />
+                      <TableCell sx={{ fontWeight: 600, width: 90 }}>Control #</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Description</TableCell>
+                      <TableCell sx={{ fontWeight: 600, width: 80 }}>Type</TableCell>
+                      <TableCell sx={{ fontWeight: 600, width: 80 }}>Scope</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(fwControlsData ?? []).map((fc) => {
+                      const checked = selectedFwCtlIds.has(fc.id);
+                      return (
+                        <TableRow
+                          key={fc.id}
+                          hover
+                          onClick={() => toggleFwControl(fc)}
+                          sx={{ cursor: "pointer", bgcolor: checked ? "primary.50" : undefined }}
+                        >
+                          <TableCell padding="checkbox">
+                            <Checkbox checked={checked} size="small" />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight={600} noWrap>
+                              {fc.controlNumber}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ maxWidth: 400 }}>
+                              {fc.description}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={fc.requirementType}
+                              size="small"
+                              color={fc.requirementType === "OE" ? "warning" : "default"}
+                              sx={{ height: 20, fontSize: "0.65rem" }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption" color="text.secondary">
+                              {fc.scope === "COMMON" ? "Common" : "Product"}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Paper>
+              {selectedFwCtlIds.size > 0 && (
+                <Typography variant="caption" color="primary.main" sx={{ mt: 1, display: "block" }}>
+                  {selectedFwCtlIds.size} control{selectedFwCtlIds.size !== 1 ? "s" : ""} selected — assign owners and due dates in the table below.
+                </Typography>
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
 
       {/* Copy — audit selector */}
       {source === "copy" && (
@@ -1194,7 +1392,7 @@ function Step2Controls({
       )}
 
       {/* Editable table — shown for empty source always, or once drafts are populated */}
-      {(source === "empty" || drafts.length > 0) && !sourceControlsLoading && (
+      {(source === "empty" || drafts.length > 0) && !sourceControlsLoading && !fwControlsLoading && (
           <Box>
             <Box
               sx={{
@@ -1207,7 +1405,7 @@ function Step2Controls({
               <Typography variant="subtitle2" fontWeight={600}>
                 Controls ({drafts.length})
               </Typography>
-              {source !== "csv" && (
+              {source !== "csv" && source !== "template" && (
                 <Button
                   size="small"
                   startIcon={<Plus size={14} />}
@@ -1272,7 +1470,7 @@ function Step3Review({
               Framework
             </Typography>
             <Typography variant="body2">
-              {framework ? (framework.version ? `${framework.name} (${framework.version})` : framework.name) : "—"}
+              {framework ? framework.name : "—"}
             </Typography>
           </Box>
           <Box>
@@ -1376,6 +1574,8 @@ const STEPS = ["Audit Details", "Add Controls", "Review & Submit"];
 
 export default function CreateAuditPage(): JSX.Element {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const preselectedFrameworkId = searchParams.get("framework") ? Number(searchParams.get("framework")) : null;
 
   const { data: frameworksData, isLoading: loadingFrameworks, isError: errorFrameworks, refetch: refetchFrameworks } = useGetFrameworks();
   const { data: productsData, isLoading: loadingProducts, isError: errorProducts, refetch: refetchProducts } = useGetProducts();
@@ -1410,6 +1610,14 @@ export default function CreateAuditPage(): JSX.Element {
   const frameworks = frameworksData ?? [];
   const products = productsData ?? [];
 
+  // Pre-select framework when navigating from a framework card (e.g. ?framework=2)
+  useEffect(() => {
+    if (preselectedFrameworkId && framework === null && frameworks.length > 0) {
+      const fw = frameworks.find((f) => f.id === preselectedFrameworkId);
+      if (fw) setFramework(fw);
+    }
+  }, [frameworks, preselectedFrameworkId, framework]);
+
   const step1Valid =
     name.trim().length > 0 &&
     framework !== null &&
@@ -1422,9 +1630,12 @@ export default function CreateAuditPage(): JSX.Element {
     .flatMap((d) => {
       const errs: string[] = [];
       const label = d.controlNumber.trim() || "(unnamed)";
-      if (!d.controlNumber.trim())       errs.push(`${label}: Control Number is required`);
-      if (!d.description.trim())         errs.push(`${label}: Description is required`);
-      if (!d.evidenceRequirement.trim()) errs.push(`${label}: Evidence Requirement is required`);
+      // Template-linked drafts skip definition column checks — those come from the library.
+      if (!d.frameworkControlId) {
+        if (!d.controlNumber.trim())       errs.push(`${label}: Control Number is required`);
+        if (!d.description.trim())         errs.push(`${label}: Description is required`);
+        if (!d.evidenceRequirement.trim()) errs.push(`${label}: Evidence Requirement is required`);
+      }
       if (!d.dueDate)                    errs.push(`${label}: Due Date is required`);
       if (d.requirementType === "OE") {
         if (!d.population?.description.trim()) errs.push(`${label}: Population Requirement is required`);
@@ -1530,6 +1741,7 @@ export default function CreateAuditPage(): JSX.Element {
             onCopyAuditIdChange={setCopyAuditId}
             csvError={csvError}
             onCsvErrorChange={setCsvError}
+            framework={framework}
           />
         )}
 

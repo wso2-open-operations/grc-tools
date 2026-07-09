@@ -21,20 +21,23 @@ import (
 	"database/sql"
 	"net/http"
 	"time"
+
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/storage"
 )
 
 const (
-	serverReadTimeout  = 15 * time.Second
-	serverWriteTimeout = 15 * time.Second
+	serverReadTimeout  = 60 * time.Second // allow file upload/download bodies
+	serverWriteTimeout = 60 * time.Second
 	serverIdleTimeout  = 60 * time.Second
 )
 
 // New creates an http.Server with production-safe timeouts and the full
-// middleware/router chain wired up via NewRouter.
-func New(addr string, db *sql.DB) *http.Server {
+// middleware/router chain wired up via NewRouter. store may be nil when Azure is
+// not configured (local dev); the file (byte-storage) routes are then skipped.
+func New(addr string, db *sql.DB, store *storage.Service) *http.Server {
 	return &http.Server{
 		Addr:         addr,
-		Handler:      NewRouter(db),
+		Handler:      NewRouter(db, store),
 		ReadTimeout:  serverReadTimeout,
 		WriteTimeout: serverWriteTimeout,
 		IdleTimeout:  serverIdleTimeout,

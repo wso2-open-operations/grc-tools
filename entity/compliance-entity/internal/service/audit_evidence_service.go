@@ -176,6 +176,17 @@ func (s *evidenceService) ListEvidenceFiles(ctx context.Context, evidenceID int)
 	return *resp, nil
 }
 
+func (s *evidenceService) GetEvidenceFileByID(ctx context.Context, fileID int) (domain.AuditEvidenceFile, error) {
+	if fileID <= 0 {
+		return domain.AuditEvidenceFile{}, &apierror.ValidationError{Msg: "fileId must be a positive integer"}
+	}
+	f, err := s.repo.GetEvidenceFileByID(ctx, fileID)
+	if err != nil {
+		return domain.AuditEvidenceFile{}, err
+	}
+	return *f, nil
+}
+
 func (s *evidenceService) DeleteEvidenceFile(ctx context.Context, fileID int) error {
 	if fileID <= 0 {
 		return &apierror.ValidationError{Msg: "fileId must be a positive integer"}

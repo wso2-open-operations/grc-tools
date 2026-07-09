@@ -38,17 +38,14 @@ func NewTrailRepository(db *sql.DB) TrailRepository { return &trailRepo{db: db} 
 func (r *trailRepo) CreateTrail(ctx context.Context, auditID int, req domain.CreateAuditTrailRequest) (*domain.AuditTrail, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO audit_trail
-		 (audit_id, actor_id, control_id, evidence_id, action, entity_type, entity_id, details, ip_address, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (audit_id, actor_id, control_id, evidence_id, action, details, created_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		auditID,
 		nullableInt(req.ActorID),
 		nullableInt(req.ControlID),
 		nullableInt(req.EvidenceID),
 		req.Action,
-		nullableString(req.EntityType),
-		nullableInt(req.EntityID),
 		nullableString(req.Details),
-		nullableString(req.IPAddress),
 		nullableString(req.CreatedBy),
 	)
 	if err != nil {
@@ -61,7 +58,7 @@ func (r *trailRepo) CreateTrail(ctx context.Context, auditID int, req domain.Cre
 func (r *trailRepo) getTrailByID(ctx context.Context, id int64) (*domain.AuditTrail, error) {
 	return scanAuditTrail(r.db.QueryRowContext(ctx,
 		`SELECT id, actor_id, audit_id, control_id, evidence_id, action,
-		        entity_type, entity_id, details, ip_address, created_by, created_at
+		        details, created_by, created_at
 		 FROM audit_trail WHERE id = ?`, id))
 }
 
@@ -74,7 +71,7 @@ func (r *trailRepo) ListTrail(ctx context.Context, auditID int, limit, offset in
 
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, actor_id, audit_id, control_id, evidence_id, action,
-		        entity_type, entity_id, details, ip_address, created_by, created_at
+		        details, created_by, created_at
 		 FROM audit_trail WHERE audit_id = ?
 		 ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		auditID, limit, offset)
@@ -99,12 +96,11 @@ func (r *trailRepo) ListTrail(ctx context.Context, auditID int, limit, offset in
 
 func scanAuditTrail(s scanner) (*domain.AuditTrail, error) {
 	var e domain.AuditTrail
-	var actorID, controlID, evidenceID, entityID sql.NullInt64
-	var entityType, details, ipAddress, createdBy sql.NullString
+	var actorID, controlID, evidenceID sql.NullInt64
+	var details, createdBy sql.NullString
 	err := s.Scan(
 		&e.ID, &actorID, &e.AuditID, &controlID, &evidenceID,
-		&e.Action, &entityType, &entityID,
-		&details, &ipAddress, &createdBy, &e.CreatedOn,
+		&e.Action, &details, &createdBy, &e.CreatedOn,
 	)
 	if err != nil {
 		return nil, err
@@ -121,18 +117,8 @@ func scanAuditTrail(s scanner) (*domain.AuditTrail, error) {
 		v := int(evidenceID.Int64)
 		e.EvidenceID = &v
 	}
-	if entityID.Valid {
-		v := int(entityID.Int64)
-		e.EntityID = &v
-	}
-	if entityType.Valid {
-		e.EntityType = &entityType.String
-	}
 	if details.Valid {
 		e.Details = &details.String
-	}
-	if ipAddress.Valid {
-		e.IPAddress = &ipAddress.String
 	}
 	if createdBy.Valid {
 		e.CreatedBy = &createdBy.String

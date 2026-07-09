@@ -24,17 +24,17 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type commentHandler struct {
 	svc service.CommentService
 }
 
-// externalAuditorGroups are the Asgardeo group strings that map to an external
+// externalAuditorGroups are the Asgardeo group names that map to an external
 // auditor. Internal-only comments are hidden from these viewers.
 var externalAuditorGroups = map[string]bool{
-	"external_auditor":       true,
-	"Audit External Auditor": true,
+	"grc-platform-external-auditor": true,
 }
 
 func isExternalAuditor(groups []string) bool {
@@ -48,6 +48,9 @@ func isExternalAuditor(groups []string) bool {
 
 // listComments handles GET /api/v1/evidence/{evidenceId}/comments.
 func (h *commentHandler) listComments(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	evidenceID, ok := parseIntParam(w, r, "evidenceId")
 	if !ok {
 		return
@@ -67,6 +70,9 @@ func (h *commentHandler) listComments(w http.ResponseWriter, r *http.Request) {
 
 // addComment handles POST /api/v1/evidence/{evidenceId}/comments.
 func (h *commentHandler) addComment(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.AddComment) {
+		return
+	}
 	evidenceID, ok := parseIntParam(w, r, "evidenceId")
 	if !ok {
 		return

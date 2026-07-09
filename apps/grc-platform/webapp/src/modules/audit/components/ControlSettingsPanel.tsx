@@ -52,6 +52,8 @@ import { useGetUsers } from "@modules/audit/api/useGetUsers";
 import { useAddControl } from "@modules/audit/api/useAddControl";
 import { useUpdateControl } from "@modules/audit/api/useUpdateControl";
 import { useDeleteControl } from "@modules/audit/api/useDeleteControl";
+import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
+import { AuditPrivilege } from "@modules/audit/privileges";
 import type {
   AddControlRequest,
   AuditControl,
@@ -324,6 +326,9 @@ export default function ControlSettingsPanel({
   open,
   onClose,
 }: ControlSettingsPanelProps): JSX.Element {
+  const { can } = useAuditPrivileges();
+  const canManage = can(AuditPrivilege.ManageControls);
+
   const { data: controlsData, isLoading: controlsLoading } = useGetControls(auditId);
   const { data: users = [] } = useGetUsers();
 
@@ -350,7 +355,7 @@ export default function ControlSettingsPanel({
       dueDate: form.dueDate || null,
       ownerId: form.owner?.id ?? null,
       auditorId: form.auditor?.id ?? null,
-      isManuallyAdded: true,
+      controlSource: 'MANUAL' as const,
     };
     addMutation.mutate(
       { auditId, req },
@@ -420,18 +425,20 @@ export default function ControlSettingsPanel({
             Manage Controls
           </Typography>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<Plus size={14} />}
-              onClick={() => {
-                setMutationError(null);
-                setAddDialogOpen(true);
-              }}
-              sx={{ textTransform: "none" }}
-            >
-              Add Control
-            </Button>
+            {canManage && (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<Plus size={14} />}
+                onClick={() => {
+                  setMutationError(null);
+                  setAddDialogOpen(true);
+                }}
+                sx={{ textTransform: "none" }}
+              >
+                Add Control
+              </Button>
+            )}
             <Tooltip title="Close">
               <IconButton onClick={onClose} size="small">
                 <X size={18} />
@@ -463,9 +470,11 @@ export default function ControlSettingsPanel({
                     <TableCell sx={{ fontWeight: 600 }}>Description</TableCell>
                     <TableCell sx={{ fontWeight: 600, width: 90 }}>Type</TableCell>
                     <TableCell sx={{ fontWeight: 600, width: 130 }}>Status</TableCell>
-                    <TableCell sx={{ fontWeight: 600, width: 80 }} align="right">
-                      Actions
-                    </TableCell>
+                    {canManage && (
+                      <TableCell sx={{ fontWeight: 600, width: 80 }} align="right">
+                        Actions
+                      </TableCell>
+                    )}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -475,7 +484,7 @@ export default function ControlSettingsPanel({
                         <Typography variant="body2" fontWeight={600} noWrap>
                           {c.controlNumber}
                         </Typography>
-                        {c.isManuallyAdded && (
+                        {c.controlSource === 'MANUAL' && (
                           <Chip label="Manual" size="small" sx={{ fontSize: "0.65rem", height: 16, mt: 0.25 }} />
                         )}
                       </TableCell>
@@ -502,33 +511,35 @@ export default function ControlSettingsPanel({
                       <TableCell>
                         <ControlStatusChip status={c.status} />
                       </TableCell>
-                      <TableCell align="right">
-                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                          <Tooltip title="Edit">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setMutationError(null);
-                                setEditingControl(c);
-                              }}
-                            >
-                              <Pencil size={14} />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Remove">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => {
-                                setMutationError(null);
-                                setDeletingControl(c);
-                              }}
-                            >
-                              <Trash2 size={14} />
-                            </IconButton>
-                          </Tooltip>
-                        </Stack>
-                      </TableCell>
+                      {canManage && (
+                        <TableCell align="right">
+                          <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                            <Tooltip title="Edit">
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setMutationError(null);
+                                  setEditingControl(c);
+                                }}
+                              >
+                                <Pencil size={14} />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Remove">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => {
+                                  setMutationError(null);
+                                  setDeletingControl(c);
+                                }}
+                              >
+                                <Trash2 size={14} />
+                              </IconButton>
+                            </Tooltip>
+                          </Stack>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>

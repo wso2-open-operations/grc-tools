@@ -14,42 +14,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package mysql
+package entity
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/entityclient"
 )
 
-type teamRepository struct{ db *sql.DB }
+type dashboardRepo struct{ c *entityclient.Client }
 
-// NewTeamRepository creates a MySQL-backed repository.TeamRepository.
-func NewTeamRepository(db *sql.DB) repository.TeamRepository {
-	return &teamRepository{db: db}
+// NewDashboardRepository returns an entity-backed DashboardRepository.
+func NewDashboardRepository(c *entityclient.Client) repository.DashboardRepository {
+	return &dashboardRepo{c: c}
 }
 
-func (r *teamRepository) List(ctx context.Context) ([]*model.AuditTeam, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name
-		FROM audit_team
-		WHERE status = 'ACTIVE'
-		ORDER BY name`)
-	if err != nil {
-		return nil, fmt.Errorf("team.List: %w", err)
+func (r *dashboardRepo) Get(ctx context.Context, f model.DashboardFilter) (*model.DashboardData, error) {
+	body := map[string]any{"roles": f.Roles, "userEmail": f.UserEmail}
+	var data model.DashboardData
+	if err := r.c.Post(ctx, "/audit/dashboard", body, &data); err != nil {
+		return nil, err
 	}
-	defer rows.Close()
-
-	var teams []*model.AuditTeam
-	for rows.Next() {
-		var t model.AuditTeam
-		if err := rows.Scan(&t.ID, &t.Name); err != nil {
-			return nil, fmt.Errorf("team.List scan: %w", err)
-		}
-		teams = append(teams, &t)
-	}
-	return teams, rows.Err()
+	return &data, nil
 }

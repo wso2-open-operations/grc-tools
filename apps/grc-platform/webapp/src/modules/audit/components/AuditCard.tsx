@@ -37,9 +37,10 @@ interface AuditCardProps {
   audit: Audit;
   onClick: () => void;
   onDelete: () => void;
+  canDelete?: boolean;
 }
 
-export default function AuditCard({ audit, onClick, onDelete }: AuditCardProps): JSX.Element {
+export default function AuditCard({ audit, onClick, onDelete, canDelete = false }: AuditCardProps): JSX.Element {
   const { controlCounts } = audit;
   const approvedPct =
     controlCounts.total > 0
@@ -66,24 +67,28 @@ export default function AuditCard({ audit, onClick, onDelete }: AuditCardProps):
         "&:hover": { boxShadow: 4 },
       }}
     >
-      {/* Menu button sits outside CardActionArea so it doesn't trigger card navigation */}
-      <Box sx={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}>
-        <IconButton size="small" aria-label="Audit actions" onClick={handleMenuOpen} sx={{ color: "text.secondary" }}>
-          <MoreVertical size={16} />
-        </IconButton>
-      </Box>
-      <Menu
-        anchorEl={menuAnchor}
-        open={Boolean(menuAnchor)}
-        onClose={() => setMenuAnchor(null)}
-      >
-        <MenuItem onClick={handleDelete} sx={{ color: "error.main" }}>
-          <ListItemIcon sx={{ color: "error.main" }}>
-            <Trash2 size={16} />
-          </ListItemIcon>
-          Delete audit
-        </MenuItem>
-      </Menu>
+      {/* Menu button — only visible to users with delete privilege */}
+      {canDelete && (
+        <>
+          <Box sx={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}>
+            <IconButton size="small" aria-label="Audit actions" onClick={handleMenuOpen} sx={{ color: "text.secondary" }}>
+              <MoreVertical size={16} />
+            </IconButton>
+          </Box>
+          <Menu
+            anchorEl={menuAnchor}
+            open={Boolean(menuAnchor)}
+            onClose={() => setMenuAnchor(null)}
+          >
+            <MenuItem onClick={handleDelete} sx={{ color: "error.main" }}>
+              <ListItemIcon sx={{ color: "error.main" }}>
+                <Trash2 size={16} />
+              </ListItemIcon>
+              Delete audit
+            </MenuItem>
+          </Menu>
+        </>
+      )}
 
       <CardActionArea
         onClick={onClick}
@@ -106,7 +111,6 @@ export default function AuditCard({ audit, onClick, onDelete }: AuditCardProps):
           {/* Framework · Product */}
           <Typography variant="body2" color="text.secondary">
             {audit.framework.name}
-            {audit.framework.version ? ` (${audit.framework.version})` : ""}
             {" · "}
             {audit.product.name}
           </Typography>

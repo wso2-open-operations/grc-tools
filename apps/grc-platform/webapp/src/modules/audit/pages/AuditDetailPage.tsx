@@ -34,19 +34,20 @@ import {
   ListChecks,
   Settings,
 } from "@wso2/oxygen-ui-icons-react";
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import FilterPanel from "@modules/audit/components/FilterPanel";
 import AuditStatusChip from "@modules/audit/components/AuditStatusChip";
-import ControlsTable, {
-  ColumnPicker,
+import ControlsTable, { ColumnPicker } from "@modules/audit/components/ControlsTable";
+import {
   CONTROL_COLUMNS,
   DEFAULT_VISIBLE_CONTROL_COLUMNS,
   CONTROL_COLUMNS_STORAGE_KEY,
-} from "@modules/audit/components/ControlsTable";
+} from "@modules/audit/components/controlColumns";
 import ControlDrawer from "@modules/audit/components/ControlDrawer";
 import ControlSettingsPanel from "@modules/audit/components/ControlSettingsPanel";
-import { useAuditRole } from "@modules/audit/hooks/useAuditRole";
+import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
+import { AuditPrivilege } from "@modules/audit/privileges";
 import { useGetAudit } from "@modules/audit/api/useGetAudit";
 import { useGetControls } from "@modules/audit/api/useGetControls";
 import { formatDateRange } from "@modules/audit/utils/format";
@@ -181,14 +182,10 @@ export default function AuditDetailPage(): JSX.Element {
   const [activeQuickFilter, setActiveQuickFilter] = useState<QuickFilter | null>(null);
   const [selectedControl, setSelectedControl] = useState<AuditControl | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const auditRole = useAuditRole();
-  // TEMPORARY: role gating disabled so all controls are visible while roles &
-  // privileges are seeded in the DB. Restore the check below once privileges
-  // are wired: auditRole === "compliance_admin" || auditRole === "compliance_team".
-  void auditRole;
-  const canManageControls = true;
+  const { can } = useAuditPrivileges();
+  const canManageControls = can(AuditPrivilege.ManageControls);
 
-  const controls = controlsData?.items ?? [];
+  const controls = useMemo(() => controlsData?.items ?? [], [controlsData]);
 
   // Deep link from the dashboard: ?control={id} opens that control's drawer once
   // controls have loaded, then the param is cleared so it doesn't re-open on close.
@@ -198,6 +195,7 @@ export default function AuditDetailPage(): JSX.Element {
     if (!cid || controls.length === 0) return;
     const match = controls.find((c) => c.id === Number(cid));
     if (match) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedControl(match);
       searchParams.delete("control");
       setSearchParams(searchParams, { replace: true });
@@ -303,7 +301,6 @@ export default function AuditDetailPage(): JSX.Element {
               <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                 <Typography variant="body2" color="text.secondary">
                   {audit.framework.name}
-                  {audit.framework.version ? ` (${audit.framework.version})` : ""}
                 </Typography>
                 <Divider orientation="vertical" flexItem />
                 <Typography variant="body2" color="text.secondary">

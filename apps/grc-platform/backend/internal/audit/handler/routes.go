@@ -57,6 +57,7 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	// Lookup data for Create Audit form dropdowns.
 	mux.HandleFunc("GET /api/v1/audit/frameworks", fh.listFrameworks)
 	mux.HandleFunc("POST /api/v1/audit/frameworks", fh.createFramework)
+	mux.HandleFunc("GET /api/v1/audit/frameworks/{id}/controls", fh.listFrameworkControls)
 	mux.HandleFunc("GET /api/v1/audit/products", fh.listProducts)
 	mux.HandleFunc("POST /api/v1/audit/products", fh.createProduct)
 	mux.HandleFunc("GET /api/v1/audit/users", uh.listUsers)
@@ -89,6 +90,8 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/upload", eh.uploadEvidence)
 	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/submit", eh.submitEvidence)
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence", eh.listEvidence)
+	// Proxied file download by file ID (bytes streamed via the Compliance Entity).
+	mux.HandleFunc("GET /api/v1/evidence/files/{fileId}/download", eh.downloadEvidenceFile)
 
 	// Evidence comments (evidence-scoped; is_internal hides from external auditors)
 	mux.HandleFunc("GET /api/v1/evidence/{evidenceId}/comments", cmh.listComments)
