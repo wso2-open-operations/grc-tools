@@ -30,6 +30,7 @@ import (
 	audithandler "github.com/wso2-open-operations/grc-platform/backend/internal/audit/handler"
 	"github.com/wso2-open-operations/grc-platform/backend/internal/config"
 	"github.com/wso2-open-operations/grc-platform/backend/internal/db"
+	"github.com/wso2-open-operations/grc-platform/backend/internal/hrentity"
 	"github.com/wso2-open-operations/grc-platform/backend/internal/middleware"
 	riskhandler "github.com/wso2-open-operations/grc-platform/backend/internal/risk/handler"
 	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/file"
@@ -75,6 +76,8 @@ func main() {
 		ContainerName: cfg.Azure.ContainerName,
 	})
 
+	hrClient := hrentity.NewClient(cfg.HREntity.GraphQLURL)
+
 	userDeps := userhandler.Deps{
 		Users: usermysql.NewRepository(sqlDB),
 	}
@@ -86,20 +89,22 @@ func main() {
 	})
 
 	userhandler.RegisterRoutes(mux, userDeps)
-	riskhandler.RegisterRoutes(mux, buildRiskDeps(sqlDB, fileSvc))
+	riskhandler.RegisterRoutes(mux, buildRiskDeps(sqlDB, fileSvc, hrClient))
 	audithandler.RegisterRoutes(mux, buildAuditDeps(sqlDB, fileSvc))
 
-	handler := middleware.CORS(cfg.CORSAllowedOrigin)(
-		middleware.CorrelationID(
-			middleware.Logger(
-				middleware.Auth(middleware.Config{
-					JWKSEndpoint:          cfg.Auth.JWKSEndpoint,
-					Issuer:                cfg.Auth.Issuer,
-					Audience:              cfg.Auth.Audience,
-					ClockSkew:             cfg.Auth.ClockSkew,
-					TokenValidatorEnabled: cfg.Auth.TokenValidatorEnabled,
-					PrivilegeStore:        privStore,
-				})(mux),
+	handler := middleware.SecurityHeaders(
+		middleware.CORS(cfg.CORSAllowedOrigin)(
+			middleware.CorrelationID(
+				middleware.Logger(
+					middleware.Auth(middleware.Config{
+						JWKSEndpoint:          cfg.Auth.JWKSEndpoint,
+						Issuer:                cfg.Auth.Issuer,
+						Audience:              cfg.Auth.Audience,
+						ClockSkew:             cfg.Auth.ClockSkew,
+						TokenValidatorEnabled: cfg.Auth.TokenValidatorEnabled,
+						PrivilegeStore:        privStore,
+					})(mux),
+				),
 			),
 		),
 	)

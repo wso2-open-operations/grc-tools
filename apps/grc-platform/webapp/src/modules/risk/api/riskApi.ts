@@ -50,6 +50,14 @@ export interface UserOption {
   email: string;
 }
 
+// EmployeeOption is a WSO2 employee returned by GET /api/v1/employees/search,
+// sourced live from the HR entity service — never from the GRC platform's
+// own database. Used only for the "Risk Identified By: Employee" field.
+export interface EmployeeOption {
+  name: string;
+  email: string;
+}
+
 export interface CreateRiskResponse {
   id: number;
   risk_code: string;
@@ -129,7 +137,6 @@ export interface RiskDetail {
   risk_description: string;
   risk_identified_date: string | null;
   identified_by_type: string | null;
-  identified_by_user_id: number | null;
   identified_by_name: string | null;
   assigner_id: number;
   owner_id: number;
@@ -154,7 +161,6 @@ export interface RiskDetail {
   assignment_team_name: string;
   owner_name: string;
   assigner_name: string;
-  identified_by_user_name: string | null;
   compliance_approver_name: string | null;
   gross_score: RiskScoreInfo | null;
   compliance_references: ComplianceReference[];
@@ -184,7 +190,6 @@ export interface UpdateRiskPayload {
   risk_description: string;
   risk_identified_date?: string;
   identified_by_type?: string;
-  identified_by_user_id?: number;
   identified_by_name?: string;
   assigner_id?: number;
   owner_id?: number;
@@ -405,17 +410,15 @@ export async function fetchUsers(authFetch: AuthFetch): Promise<UserOption[]> {
   return handleResponse<UserOption[]>(res);
 }
 
-<<<<<<< Updated upstream
-=======
-// searchEmployees looks up active employees by email substring, live
+// searchEmployees looks up active WSO2 employees by email substring, live
 // from the HR entity service (never the GRC platform's own database), for
+// the "Risk Identified By: Employee" Autocomplete.
 export async function searchEmployees(authFetch: AuthFetch, query: string): Promise<EmployeeOption[]> {
   const params = new URLSearchParams({ q: query });
   const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/employees/search?${params}`);
   return handleResponse<EmployeeOption[]>(res);
 }
 
->>>>>>> Stashed changes
 export async function fetchNextSequenceID(
   authFetch: AuthFetch,
   sourceRegisterID: number,
@@ -443,9 +446,7 @@ export function buildCreateRiskPayload(data: AddRiskFormValues): Record<string, 
     risk_description: data.riskDescription,
     compliance_reference_ids: data.complianceReferences,
     identified_by_type: data.identifiedByType,
-    ...(data.identifiedByType === "EMPLOYEE"
-      ? { identified_by_user_id: data.identifiedByEmployee !== "" ? data.identifiedByEmployee : undefined }
-      : { identified_by_name: data.identifiedByName !== "" ? data.identifiedByName : undefined }),
+    identified_by_name: data.identifiedByName !== "" ? data.identifiedByName : undefined,
     assigner_id: data.assignedBy !== "" ? data.assignedBy : undefined,
     risk_identified_date: toDateOnlyString(data.riskIdentifiedDate),
     likelihood: data.likelihood,

@@ -129,7 +129,6 @@ export default function AddRisk(): JSX.Element {
       riskDescription: "",
       complianceReferences: [],
       identifiedByType: "EMPLOYEE",
-      identifiedByEmployee: "",
       identifiedByName: "",
       assignedBy: "",
       riskIdentifiedDate: null,
@@ -222,13 +221,7 @@ export default function AddRisk(): JSX.Element {
     let valid = true;
 
     if (activeStep === 0) {
-      const identifiedByType = getValues("identifiedByType");
-      const conditionalField: (keyof AddRiskFormValues)[] =
-        identifiedByType === "EMPLOYEE"
-          ? ["identifiedByEmployee"]
-          : ["identifiedByName"];
-
-      valid = await trigger([...STEP_1_FIELDS, ...conditionalField]);
+      valid = await trigger([...STEP_1_FIELDS, "identifiedByName"]);
     } else if (activeStep === 1) {
       valid = await trigger(STEP_2_FIELDS);
     }

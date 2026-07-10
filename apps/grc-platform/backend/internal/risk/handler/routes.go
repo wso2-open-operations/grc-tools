@@ -37,6 +37,7 @@ type Deps struct {
 	Compliance   riskservice.ComplianceReferenceService
 	Analytics    riskservice.AnalyticsService
 	Dashboard    riskservice.DashboardService
+	Employee     riskservice.EmployeeSearchService
 }
 
 // RegisterRoutes mounts all Risk Hub routes onto mux under /api/v1.
@@ -54,6 +55,9 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 
 	// Current user
 	mux.HandleFunc("GET /api/v1/me/privileges", d.handleGetMyPrivileges)
+
+	// Employees (HR entity)
+	mux.HandleFunc("GET /api/v1/employees/search", d.handleSearchEmployees)
 
 	// Risks
 	mux.HandleFunc("GET /api/v1/risks/next-sequence-id", d.handleNextSequenceID)

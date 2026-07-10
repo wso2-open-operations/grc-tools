@@ -139,7 +139,7 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 		INSERT INTO risk (
 			risk_year, source_register_id, risk_quarter, risk_code,
 			risk_title, risk_description, risk_identified_date,
-			identified_by_type, identified_by_user_id, identified_by_name,
+			identified_by_type, identified_by_name,
 			assigner_id, owner_id, impact_description, gross_score_id,
 			treatment_strategy, assignment_team_id, progress,
 			implementation_date, reassessment_date,
@@ -148,7 +148,7 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 		) VALUES (
 			?, ?, ?, ?,
 			?, ?, ?,
-			?, ?, ?,
+			?, ?,
 			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?,
@@ -157,7 +157,7 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 		)`,
 		req.Year, req.SourceRegisterID, req.Quarter, riskCode,
 		req.RiskTitle, req.RiskDescription, nullableString(req.RiskIdentifiedDate),
-		req.IdentifiedByType, req.IdentifiedByUserID, req.IdentifiedByName,
+		req.IdentifiedByType, req.IdentifiedByName,
 		req.AssignerID, req.OwnerID, nullableString(req.ImpactDescription), grossScoreID,
 		req.TreatmentStrategy, req.AssignmentTeamID, nullableString(req.Progress),
 		nullableString(req.ImplementationDate), nullableString(req.ReassessmentDate),
@@ -334,7 +334,7 @@ func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail
 	err := r.db.QueryRowContext(ctx, `
 		SELECT r.id, r.risk_code, r.risk_year, r.risk_quarter,
 		       r.risk_title, r.risk_description, r.risk_identified_date,
-		       r.identified_by_type, r.identified_by_user_id, r.identified_by_name,
+		       r.identified_by_type, r.identified_by_name,
 		       r.assigner_id, r.owner_id,
 		       r.impact_description, r.treatment_strategy,
 		       r.assignment_team_id,
@@ -346,7 +346,6 @@ func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail
 		       COALESCE(at.name,'') AS assignment_team_name,
 		       COALESCE(owner.display_name,'') AS owner_name,
 		       COALESCE(asgn.display_name,'')  AS assigner_name,
-		       ibu.display_name                AS identified_by_user_name,
 		       ca.display_name                 AS compliance_approver_name,
 		       rs.id, rs.likelihood, rs.impact, rs.risk_rating, rs.risk_level, rs.color_code
 		FROM risk r
@@ -354,14 +353,13 @@ func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail
 		LEFT JOIN risk_team at ON at.id = r.assignment_team_id
 		LEFT JOIN `+"`user`"+` owner ON owner.id = r.owner_id
 		LEFT JOIN `+"`user`"+` asgn  ON asgn.id  = r.assigner_id
-		LEFT JOIN `+"`user`"+` ibu   ON ibu.id   = r.identified_by_user_id
 		LEFT JOIN `+"`user`"+` ca    ON ca.id    = r.compliance_approval_by
 		LEFT JOIN risk_score rs ON rs.id = r.gross_score_id
 		WHERE r.id = ?`, id,
 	).Scan(
 		&d.ID, &d.RiskCode, &d.RiskYear, &d.RiskQuarter,
 		&d.RiskTitle, &d.RiskDescription, &d.RiskIdentifiedDate,
-		&d.IdentifiedByType, &d.IdentifiedByUserID, &d.IdentifiedByName,
+		&d.IdentifiedByType, &d.IdentifiedByName,
 		&d.AssignerID, &d.OwnerID,
 		&d.ImpactDescription, &d.TreatmentStrategy,
 		&d.AssignmentTeamID,
@@ -371,7 +369,7 @@ func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail
 		&createdAt, &updatedAt,
 		&d.SourceRegisterName, &d.AssignmentTeamName,
 		&d.OwnerName, &d.AssignerName,
-		&d.IdentifiedByUserName, &d.ComplianceApproverName,
+		&d.ComplianceApproverName,
 		&scoreID, &scoreLikelihood, &scoreImpact, &scoreRating, &scoreLevel, &scoreColor,
 	)
 	if err == sql.ErrNoRows {
@@ -567,11 +565,6 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 		}
 	}
 
-	// Switching identified_by_type invalidates the counterpart field: an EMPLOYEE
-	// risk keeps no free-text name, a TOOL/EXTERNAL_PERSON risk keeps no user id.
-	clearIdentifiedByUser := req.IdentifiedByType == "EXTERNAL_PERSON" || req.IdentifiedByType == "TOOL"
-	clearIdentifiedByName := req.IdentifiedByType == "EMPLOYEE"
-
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin update tx: %w", err)
@@ -584,8 +577,7 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 			risk_title = ?, risk_description = ?,
 			risk_identified_date = COALESCE(NULLIF(?,''), risk_identified_date),
 			identified_by_type = COALESCE(NULLIF(?,''), identified_by_type),
-			identified_by_user_id = CASE WHEN ? THEN NULL ELSE COALESCE(?, identified_by_user_id) END,
-			identified_by_name = CASE WHEN ? THEN NULL ELSE COALESCE(?, identified_by_name) END,
+			identified_by_name = COALESCE(?, identified_by_name),
 			assigner_id = COALESCE(?, assigner_id),
 			owner_id = COALESCE(?, owner_id),
 			impact_description = COALESCE(NULLIF(?,''), impact_description),
@@ -602,8 +594,7 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 		WHERE id = ?`,
 		req.RiskTitle, req.RiskDescription,
 		req.RiskIdentifiedDate, req.IdentifiedByType,
-		clearIdentifiedByUser, req.IdentifiedByUserID,
-		clearIdentifiedByName, req.IdentifiedByName,
+		req.IdentifiedByName,
 		req.AssignerID, req.OwnerID,
 		req.ImpactDescription,
 		req.Progress, req.GitIssueURL, req.EmailSubject, req.Remarks,

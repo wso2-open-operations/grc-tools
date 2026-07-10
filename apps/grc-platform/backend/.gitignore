@@ -26,3 +26,9 @@ coverage.out
 
 # Go binaries
 /bin
+
+# Local-only HR entity mock server + its setup doc — not pushed to GitHub.
+# The real integration code (internal/hrentity) stays tracked; only this
+# throwaway local stand-in and its notes are excluded.
+/cmd/hrmock/
+/hr_readme.md

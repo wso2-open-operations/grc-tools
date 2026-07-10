@@ -19,6 +19,7 @@ package main
 import (
 	"database/sql"
 
+	"github.com/wso2-open-operations/grc-platform/backend/internal/hrentity"
 	riskhandler "github.com/wso2-open-operations/grc-platform/backend/internal/risk/handler"
 	riskmysql "github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository/mysql"
 	riskservice "github.com/wso2-open-operations/grc-platform/backend/internal/risk/service"
@@ -28,7 +29,9 @@ import (
 // buildRiskDeps wires the full Risk Hub dependency graph:
 // MySQL repositories → services → handler Deps struct.
 // file is the shared Azure Blob service used by evidence uploads.
-func buildRiskDeps(db *sql.DB, fileSvc *file.Service) riskhandler.Deps {
+// hrClient talks to the HR entity GraphQL service for employee lookups —
+// it is never backed by the GRC platform's own database.
+func buildRiskDeps(db *sql.DB, fileSvc *file.Service, hrClient *hrentity.Client) riskhandler.Deps {
 	riskRepo := riskmysql.NewRiskRepository(db)
 	assessmentRepo := riskmysql.NewAssessmentRepository(db)
 	teamRepo := riskmysql.NewTeamRepository(db)
@@ -53,5 +56,6 @@ func buildRiskDeps(db *sql.DB, fileSvc *file.Service) riskhandler.Deps {
 		Compliance:   riskservice.NewComplianceReferenceService(complianceRepo),
 		Analytics:    riskservice.NewAnalyticsService(analyticsRepo),
 		Dashboard:    riskservice.NewDashboardService(dashboardRepo),
+		Employee:     riskservice.NewEmployeeSearchService(hrClient),
 	}
 }

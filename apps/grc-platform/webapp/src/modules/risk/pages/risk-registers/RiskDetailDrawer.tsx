@@ -351,12 +351,7 @@ export default function RiskDetailDrawer({
               <DetailRow label="Risk Identified Date" value={formatDate(detail.risk_identified_date)} />
               <DetailRow
                 label="Identified By"
-                value={
-                  detail.identified_by_user_name ??
-                  detail.identified_by_name ??
-                  detail.identified_by_type ??
-                  "—"
-                }
+                value={detail.identified_by_name ?? detail.identified_by_type ?? "—"}
               />
               <Stack direction="row" gap={4}>
                 <DetailRow label="Assigned By" value={detail.assigner_name} />

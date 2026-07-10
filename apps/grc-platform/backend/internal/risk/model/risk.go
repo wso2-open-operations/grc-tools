@@ -30,7 +30,6 @@ type Risk struct {
 	RiskDescription        string    `json:"risk_description"`
 	RiskIdentifiedDate     *string   `json:"risk_identified_date"`
 	IdentifiedByType       *string   `json:"identified_by_type"`
-	IdentifiedByUserID     *int      `json:"identified_by_user_id"`
 	IdentifiedByName       *string   `json:"identified_by_name"`
 	AssignerID             int       `json:"assigner_id"`
 	OwnerID                int       `json:"owner_id"`
@@ -67,7 +66,6 @@ type CreateRiskRequest struct {
 	RiskDescription        string  `json:"risk_description"`
 	ComplianceReferenceIDs []int   `json:"compliance_reference_ids"`
 	IdentifiedByType       string  `json:"identified_by_type"`
-	IdentifiedByUserID     *int    `json:"identified_by_user_id,omitempty"`
 	IdentifiedByName       *string `json:"identified_by_name,omitempty"`
 	AssignerID             int     `json:"assigner_id"`
 	RiskIdentifiedDate     string  `json:"risk_identified_date"`
@@ -158,7 +156,6 @@ type RiskDetail struct {
 	RiskDescription        string  `json:"risk_description"`
 	RiskIdentifiedDate     *string `json:"risk_identified_date"`
 	IdentifiedByType       *string `json:"identified_by_type"`
-	IdentifiedByUserID     *int    `json:"identified_by_user_id"`
 	IdentifiedByName       *string `json:"identified_by_name"`
 	AssignerID             int     `json:"assigner_id"`
 	OwnerID                int     `json:"owner_id"`
@@ -185,7 +182,6 @@ type RiskDetail struct {
 	AssignmentTeamName     string  `json:"assignment_team_name"`
 	OwnerName              string  `json:"owner_name"`
 	AssignerName           string  `json:"assigner_name"`
-	IdentifiedByUserName   *string `json:"identified_by_user_name"`
 	ComplianceApproverName *string `json:"compliance_approver_name"`
 
 	// Gross score (from risk_score join)
@@ -219,7 +215,6 @@ type UpdateRiskRequest struct {
 	RiskDescription        string  `json:"risk_description"`
 	RiskIdentifiedDate     string  `json:"risk_identified_date,omitempty"`
 	IdentifiedByType       string  `json:"identified_by_type,omitempty"`
-	IdentifiedByUserID     *int    `json:"identified_by_user_id,omitempty"`
 	IdentifiedByName       *string `json:"identified_by_name,omitempty"`
 	AssignerID             *int    `json:"assigner_id,omitempty"`
 	OwnerID                *int    `json:"owner_id,omitempty"`

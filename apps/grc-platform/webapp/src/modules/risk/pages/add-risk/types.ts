@@ -50,9 +50,9 @@ export interface AddRiskFormValues {
   // Fetched from GET /api/v1/compliance-references.
   complianceReferences: number[];
   identifiedByType: IdentifiedByType;
-  // User ID — used when identifiedByType = EMPLOYEE. Fetched from GET /api/v1/users.
-  identifiedByEmployee: number | "";
-  // Free-text name — used when identifiedByType = EXTERNAL_PERSON | TOOL.
+  // Selected person/tool's name for all three identifiedByType values.
+  // EMPLOYEE: picked from a live HR entity search (GET /api/v1/employees/search),
+  // never our own database. EXTERNAL_PERSON | TOOL: free text.
   identifiedByName: string;
   // User ID of the risk assigner. Defaults to current user. Fetched from GET /api/v1/users.
   assignedBy: number | "";

@@ -14,10 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AdapterDateFns,
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -41,8 +42,10 @@ import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { parseDateOnly, toDateOnlyString } from "@utils/dateTime";
 import type { JSX } from "react";
 import type * as React from "react";
+import { searchEmployees } from "../../api/riskApi";
 import type {
   ComplianceReference,
+  EmployeeOption,
   RiskDetail,
   RiskScore,
   RiskTeam,
@@ -51,6 +54,11 @@ import type {
 } from "../../api/riskApi";
 import { TREATMENT_STRATEGIES } from "../add-risk/constants";
 import { LEVEL_FALLBACK_COLORS } from "../dashboard/constants";
+import { useAuthApiClient } from "@hooks/useAuthApiClient";
+
+// Minimum characters before searching — matches the backend's own floor.
+const MIN_EMPLOYEE_SEARCH_LEN = 2;
+const EMPLOYEE_SEARCH_DEBOUNCE_MS = 300;
 
 const { DatePicker, LocalizationProvider } = DatePickers;
 
@@ -111,9 +119,6 @@ export default function EditRiskDialog({
     parseDateOnly(detail.risk_identified_date),
   );
   const [identifiedByType, setIdentifiedByType] = useState(detail.identified_by_type ?? "");
-  const [identifiedByUserId, setIdentifiedByUserId] = useState<number | "">(
-    detail.identified_by_user_id ?? "",
-  );
   const [identifiedByName, setIdentifiedByName] = useState(detail.identified_by_name ?? "");
   const [assignerId, setAssignerId] = useState<number | "">(detail.assigner_id || "");
   const [ownerId, setOwnerId] = useState<number | "">(detail.owner_id || "");
@@ -153,6 +158,35 @@ export default function EditRiskDialog({
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState("");
 
+  // Employee search is live against the HR entity (never our own database).
+  const authFetch = useAuthApiClient();
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
+  const [employeeSearchLoading, setEmployeeSearchLoading] = useState(false);
+  const [employeeSearchError, setEmployeeSearchError] = useState<string | null>(null);
+  const employeeSearchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runEmployeeSearch = useCallback((query: string) => {
+    if (query.trim().length < MIN_EMPLOYEE_SEARCH_LEN) {
+      setEmployeeOptions([]);
+      setEmployeeSearchError(null);
+      return;
+    }
+    setEmployeeSearchLoading(true);
+    setEmployeeSearchError(null);
+    searchEmployees(authFetch, query)
+      .then(setEmployeeOptions)
+      .catch(() => {
+        setEmployeeOptions([]);
+        setEmployeeSearchError("Unable to reach the employee directory. Please try again.");
+      })
+      .finally(() => setEmployeeSearchLoading(false));
+  }, [authFetch]);
+
+  const handleEmployeeInputChange = (value: string): void => {
+    if (employeeSearchDebounce.current) clearTimeout(employeeSearchDebounce.current);
+    employeeSearchDebounce.current = setTimeout(() => runEmployeeSearch(value), EMPLOYEE_SEARCH_DEBOUNCE_MS);
+  };
+
   useEffect(() => {
     if (!open) return;
     setRiskTitle(detail.risk_title);
@@ -160,7 +194,6 @@ export default function EditRiskDialog({
     setImpactDescription(detail.impact_description ?? "");
     setRiskIdentifiedDate(parseDateOnly(detail.risk_identified_date));
     setIdentifiedByType(detail.identified_by_type ?? "");
-    setIdentifiedByUserId(detail.identified_by_user_id ?? "");
     setIdentifiedByName(detail.identified_by_name ?? "");
     setAssignerId(detail.assigner_id || "");
     setOwnerId(detail.owner_id || "");
@@ -189,8 +222,8 @@ export default function EditRiskDialog({
     if (mode === "full") {
       if (!riskTitle.trim()) e.riskTitle = "Risk title is required.";
       if (!riskDescription.trim()) e.riskDescription = "Risk description is required.";
-      if (identifiedByType === "EMPLOYEE" && !identifiedByUserId) {
-        e.identifiedByUserId = "Please select the employee who identified this risk.";
+      if (identifiedByType === "EMPLOYEE" && !identifiedByName.trim()) {
+        e.identifiedByName = "Please select the employee who identified this risk.";
       }
       if ((identifiedByType === "EXTERNAL_PERSON" || identifiedByType === "TOOL") && !identifiedByName.trim()) {
         e.identifiedByName = "Please enter the name of who identified this risk.";
@@ -233,7 +266,6 @@ export default function EditRiskDialog({
         payload.impact_description = impactDescription.trim() || undefined;
         payload.risk_identified_date = toDateOnlyString(riskIdentifiedDate);
         payload.identified_by_type = identifiedByType || undefined;
-        payload.identified_by_user_id = identifiedByUserId !== "" ? Number(identifiedByUserId) : undefined;
         payload.identified_by_name = identifiedByName.trim() || undefined;
         payload.assigner_id = assignerId !== "" ? Number(assignerId) : undefined;
         payload.owner_id = ownerId !== "" ? Number(ownerId) : undefined;
@@ -439,7 +471,7 @@ export default function EditRiskDialog({
                     <Select
                       label="Identified By Type"
                       value={identifiedByType}
-                      onChange={(e) => { setIdentifiedByType(e.target.value as string); setIdentifiedByUserId(""); setIdentifiedByName(""); }}
+                      onChange={(e) => { setIdentifiedByType(e.target.value as string); setIdentifiedByName(""); }}
                     >
                       <MenuItem value="EMPLOYEE">Employee</MenuItem>
                       <MenuItem value="EXTERNAL_PERSON">External Person</MenuItem>
@@ -447,17 +479,36 @@ export default function EditRiskDialog({
                     </Select>
                   </FormControl>
                   {identifiedByType === "EMPLOYEE" && (
-                    <FormControl fullWidth disabled={submitting} error={!!errors.identifiedByUserId}>
-                      <InputLabel>Identified By (Employee)</InputLabel>
-                      <Select
-                        label="Identified By (Employee)"
-                        value={identifiedByUserId}
-                        onChange={(e) => setIdentifiedByUserId(Number(e.target.value))}
-                      >
-                        {users.map((u) => <MenuItem key={u.id} value={u.id}>{u.display_name}</MenuItem>)}
-                      </Select>
-                      {errors.identifiedByUserId && <Typography variant="caption" color="error">{errors.identifiedByUserId}</Typography>}
-                    </FormControl>
+                    <Autocomplete
+                      options={employeeOptions}
+                      loading={employeeSearchLoading}
+                      filterOptions={(opts) => opts}
+                      getOptionLabel={(option) => option.name}
+                      isOptionEqualToValue={(option, value) => option.name === value.name}
+                      value={identifiedByName ? { name: identifiedByName, email: "" } : null}
+                      disabled={submitting}
+                      onInputChange={(_, newInputValue, reason) => {
+                        if (reason === "input") handleEmployeeInputChange(newInputValue);
+                      }}
+                      onChange={(_, newValue) => {
+                        setIdentifiedByName(newValue?.name ?? "");
+                        if (errors.identifiedByName) setErrors((p) => ({ ...p, identifiedByName: "" }));
+                      }}
+                      loadingText="Searching…"
+                      noOptionsText={
+                        employeeSearchError ??
+                        "Type at least 2 characters of the employee's WSO2 email to search"
+                      }
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Identified By (Employee)"
+                          placeholder="Search by WSO2 email"
+                          error={!!errors.identifiedByName || !!employeeSearchError}
+                          helperText={errors.identifiedByName ?? employeeSearchError ?? undefined}
+                        />
+                      )}
+                    />
                   )}
                   {(identifiedByType === "EXTERNAL_PERSON" || identifiedByType === "TOOL") && (
                     <TextField

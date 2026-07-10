@@ -168,11 +168,7 @@ func validateCreateRiskRequest(req model.CreateRiskRequest) error {
 		}
 	}
 	switch req.IdentifiedByType {
-	case "EMPLOYEE":
-		if req.IdentifiedByUserID == nil {
-			return errorf("identified_by_user_id is required when identified_by_type is EMPLOYEE")
-		}
-	case "EXTERNAL_PERSON", "TOOL":
+	case "EMPLOYEE", "EXTERNAL_PERSON", "TOOL":
 		if req.IdentifiedByName == nil || *req.IdentifiedByName == "" {
 			return errorf("identified_by_name is required when identified_by_type is %s", req.IdentifiedByType)
 		}

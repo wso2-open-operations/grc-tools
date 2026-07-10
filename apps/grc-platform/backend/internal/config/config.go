@@ -28,6 +28,7 @@ type Config struct {
 	DB                DBConfig
 	Auth              AuthConfig
 	Azure             AzureConfig
+	HREntity          HREntityConfig
 	CORSAllowedOrigin string
 }
 
@@ -48,6 +49,16 @@ type AzureConfig struct {
 	StorageAccountName string
 	StorageAccountKey  string
 	ContainerName      string
+}
+
+// HREntityConfig holds the connection details for the WSO2 HR entity GraphQL
+// service (hr_entity), used to look up employees for the Risk module's
+// "Risk Identified By: Employee" field. Employee data is never stored in the
+// GRC platform's own database — it is fetched live on every search.
+// GraphQLURL points at the real service on Choreo in production, or a local
+// mock server during development; the code is identical either way.
+type HREntityConfig struct {
+	GraphQLURL string
 }
 
 // Load reads configuration from environment variables.
@@ -79,6 +90,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	hrEntityGraphQLURL, err := mustEnv("HR_ENTITY_GRAPHQL_URL")
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Port: envOrDefault("PORT", ":8080"),
 		DB: DBConfig{
@@ -89,6 +105,9 @@ func Load() (Config, error) {
 			StorageAccountName: os.Getenv("AZURE_STORAGE_ACCOUNT_NAME"),
 			StorageAccountKey:  os.Getenv("AZURE_STORAGE_ACCOUNT_KEY"),
 			ContainerName:      os.Getenv("AZURE_STORAGE_CONTAINER"),
+		},
+		HREntity: HREntityConfig{
+			GraphQLURL: hrEntityGraphQLURL,
 		},
 		CORSAllowedOrigin: envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
 	}, nil
