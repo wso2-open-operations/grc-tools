@@ -20,9 +20,7 @@ import {
   Box,
   Button,
   CircularProgress,
-  PageContent,
-  PageTitle,
-  Stack,
+  Typography,
 } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
@@ -32,16 +30,7 @@ import {
   type DashboardSummary,
   type RiskScore,
 } from "../api/riskApi";
-import ChartCard from "./dashboard/ChartCard";
-import SummaryCards from "./dashboard/SummaryCards";
-import StatusPieChart from "./dashboard/StatusPieChart";
-import TreatmentByRegisterChart from "./dashboard/TreatmentByRegisterChart";
-import LevelCountChart from "./dashboard/LevelCountChart";
-import RiskHeatmap from "./dashboard/RiskHeatmap";
-import CertDistributionChart from "./dashboard/CertDistributionChart";
-import RegisterSection from "./dashboard/RegisterSection";
-import RepeatedRisksTable from "./dashboard/RepeatedRisksTable";
-import HighRisksTable from "./dashboard/HighRisksTable";
+import DashboardView from "./dashboard/DashboardView";
 
 // Risk dashboard: current organisational risk posture built from a single
 // GET /api/v1/dashboard payload, plus the 3×3 risk_score matrix that colors
@@ -75,10 +64,15 @@ export default function RiskDashboard(): JSX.Element {
   }, [load]);
 
   return (
-    <PageContent>
-      <PageTitle>
-        <PageTitle.Header>Risk Dashboard</PageTitle.Header>
-      </PageTitle>
+    <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 3 }}>
+      <Box>
+        <Typography variant="h4" fontWeight={700}>
+          Risk Dashboard
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          Overview of organizational risk posture
+        </Typography>
+      </Box>
 
       {loading && (
         <Box sx={{ display: "flex", justifyContent: "center", py: 10 }}>
@@ -100,60 +94,8 @@ export default function RiskDashboard(): JSX.Element {
       )}
 
       {!loading && !error && dashboard && (
-        <Stack spacing={3}>
-          <SummaryCards summary={dashboard.summary} />
-
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr", md: "5fr 7fr" },
-              gap: 3,
-            }}
-          >
-            <ChartCard title="Overall Risk Status Distribution">
-              <StatusPieChart summary={dashboard.summary} />
-            </ChartCard>
-            <ChartCard title="Risk Treatment Strategy on Open Risks">
-              <TreatmentByRegisterChart data={dashboard.treatment_by_register} />
-            </ChartCard>
-          </Box>
-
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
-              gap: 3,
-            }}
-          >
-            <ChartCard title="Count vs. Risk Level">
-              <LevelCountChart data={dashboard.level_counts} />
-            </ChartCard>
-            <ChartCard title="WSO2 Overall Risk Posture Based on Open Risks">
-              <RiskHeatmap cells={dashboard.org_heatmap} scores={scores} />
-            </ChartCard>
-          </Box>
-
-          <ChartCard title="Number of Open Risks against Compliance Certifications">
-            <CertDistributionChart data={dashboard.cert_distribution} />
-          </ChartCard>
-
-          {dashboard.registers.map((register) => (
-            <RegisterSection
-              key={register.register_id}
-              register={register}
-              scores={scores}
-            />
-          ))}
-
-          <ChartCard title="Repeated Risks Potentially Impacting Compliance Certs">
-            <RepeatedRisksTable data={dashboard.repeated_compliance_risks} />
-          </ChartCard>
-
-          <ChartCard title="High Risk Detailed View">
-            <HighRisksTable data={dashboard.high_risks} />
-          </ChartCard>
-        </Stack>
+        <DashboardView dashboard={dashboard} scores={scores} />
       )}
-    </PageContent>
+    </Box>
   );
 }

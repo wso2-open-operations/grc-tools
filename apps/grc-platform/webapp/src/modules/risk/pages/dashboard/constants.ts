@@ -68,6 +68,14 @@ export const LEVEL_FALLBACK_COLORS: Record<string, string> = {
   LOW: "#00B050",
 };
 
+// Recharts stores a stacked bar segment's value as its cumulative [start, end]
+// range, and LabelList's default valueAccessor extracts the range END — so
+// labels show running totals. This accessor recovers the segment's own value;
+// pass it as `valueAccessor` on a stacked bar's label config.
+export function stackedSegmentAccessor(entry: { value: number | [number, number] }): number {
+  return Array.isArray(entry.value) ? entry.value[1] - entry.value[0] : entry.value;
+}
+
 // Picks a readable label color for text drawn on top of a colored segment.
 export function labelColorOn(hex: string): string {
   const n = parseInt(hex.replace("#", ""), 16);

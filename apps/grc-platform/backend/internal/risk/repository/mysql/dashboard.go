@@ -49,11 +49,14 @@ func (d *dashboardRepository) StatusCounts(ctx context.Context) (*model.RiskStat
 	err := d.db.QueryRowContext(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(SUM(CASE WHEN workflow_status <> ? THEN 1 ELSE 0 END), 0),
-		       COALESCE(SUM(CASE WHEN workflow_status =  ? THEN 1 ELSE 0 END), 0)
+		       COALESCE(SUM(CASE WHEN workflow_status =  ? THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN workflow_status <> ?
+		                           AND implementation_date IS NOT NULL
+		                           AND implementation_date < CURDATE() THEN 1 ELSE 0 END), 0)
 		FROM risk
 		WHERE workflow_status <> ?`,
-		model.StatusClosed, model.StatusClosed, model.StatusCancelled,
-	).Scan(&s.Total, &s.Open, &s.Closed)
+		model.StatusClosed, model.StatusClosed, model.StatusClosed, model.StatusCancelled,
+	).Scan(&s.Total, &s.Open, &s.Closed, &s.Overdue)
 	if err != nil {
 		return nil, fmt.Errorf("dashboard status counts: %w", err)
 	}

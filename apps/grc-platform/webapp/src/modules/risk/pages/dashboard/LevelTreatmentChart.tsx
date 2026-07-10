@@ -25,6 +25,7 @@ import {
   TREATMENT_LABELS,
   TREATMENT_ORDER,
   labelColorOn,
+  stackedSegmentAccessor,
 } from "./constants";
 
 interface LevelTreatmentChartProps {
@@ -63,6 +64,8 @@ export default function LevelTreatmentChart({ data }: LevelTreatmentChartProps):
       position: "center",
       fontSize: 11,
       fill: labelColorOn(TREATMENT_COLORS[strategy]),
+      valueAccessor: stackedSegmentAccessor,
+      formatter: (value: unknown) => (Number(value) > 0 ? Number(value) : ""),
     },
   }));
 
@@ -72,9 +75,9 @@ export default function LevelTreatmentChart({ data }: LevelTreatmentChartProps):
       xAxisDataKey="level"
       bars={bars}
       height={280}
-      maxBarSize={64}
-      xAxis={{ show: true, name: "Risk Level" }}
-      yAxis={{ show: true, name: "Number of Risks" }}
+      maxBarSize={56}
+      isAnimationActive={false}
+      margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
     />
   );
 }

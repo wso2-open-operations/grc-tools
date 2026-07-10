@@ -15,7 +15,7 @@
 // under the License.
 
 import { BarChart } from "@wso2/oxygen-ui-charts-react";
-import { Typography } from "@wso2/oxygen-ui";
+import { Box, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { RegisterTreatmentCount } from "../../api/riskApi";
 import {
@@ -23,11 +23,14 @@ import {
   TREATMENT_LABELS,
   TREATMENT_ORDER,
   labelColorOn,
+  stackedSegmentAccessor,
 } from "./constants";
 
 interface TreatmentByRegisterChartProps {
   data: RegisterTreatmentCount[];
 }
+
+const CHART_HEIGHT = 320;
 
 // Stacked bar of open risks per BU/register, segmented by treatment strategy.
 // Zero counts are left undefined so recharts skips the segment and its label.
@@ -60,18 +63,46 @@ export default function TreatmentByRegisterChart({
       position: "center",
       fontSize: 11,
       fill: labelColorOn(TREATMENT_COLORS[strategy]),
+      valueAccessor: stackedSegmentAccessor,
+      formatter: (value: unknown) => (Number(value) > 0 ? Number(value) : ""),
     },
   }));
 
   return (
-    <BarChart
-      data={[...rows.values()]}
-      xAxisDataKey="register"
-      bars={bars}
-      height={340}
-      maxBarSize={72}
-      xAxis={{ show: true, name: "BU" }}
-      yAxis={{ show: true, name: "Number of Open Risks" }}
-    />
+    <Box sx={{ display: "flex", alignItems: "stretch", gap: 0.5 }}>
+      {/* Custom axis title, centered on the whole chart height (bars + legend)
+          rather than recharts' internal plot-only centering, which reads too
+          high once the legend strip below the bars is accounted for. */}
+      <Box
+        sx={{
+          height: CHART_HEIGHT,
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          noWrap
+          sx={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+        >
+          Number of Open Risks
+        </Typography>
+      </Box>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <BarChart
+          data={[...rows.values()]}
+          xAxisDataKey="register"
+          bars={bars}
+          height={CHART_HEIGHT}
+          maxBarSize={64}
+          isAnimationActive={false}
+          margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+          yAxis={{ show: true }}
+        />
+      </Box>
+    </Box>
   );
 }

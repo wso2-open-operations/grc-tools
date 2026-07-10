@@ -18,7 +18,7 @@ import { BarChart } from "@wso2/oxygen-ui-charts-react";
 import { Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { RegisterCertShare } from "../../api/riskApi";
-import { buildCertColorMap, labelColorOn } from "./constants";
+import { buildCertColorMap, labelColorOn, stackedSegmentAccessor } from "./constants";
 
 interface CertDistributionChartProps {
   data: RegisterCertShare[];
@@ -54,7 +54,11 @@ export default function CertDistributionChart({
       position: "center",
       fontSize: 11,
       fill: labelColorOn(color),
-      formatter: (value: number) => (value >= 8 ? `${value}%` : ""),
+      valueAccessor: stackedSegmentAccessor,
+      formatter: (value: unknown) => {
+        const n = Number(value);
+        return n >= 8 ? `${Math.round(n * 10) / 10}%` : "";
+      },
     },
   }));
 
@@ -63,10 +67,10 @@ export default function CertDistributionChart({
       data={[...rows.values()]}
       xAxisDataKey="register"
       bars={bars}
-      height={360}
-      maxBarSize={72}
-      xAxis={{ show: true, name: "Source Register" }}
-      yAxis={{ show: true, name: "% of Cert Tags on Open Risks" }}
+      height={340}
+      maxBarSize={64}
+      isAnimationActive={false}
+      margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
       tooltip={{ show: true, formatter: (value) => `${String(value)}%` }}
     />
   );

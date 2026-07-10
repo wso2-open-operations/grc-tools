@@ -14,45 +14,51 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Paper, Typography } from "@wso2/oxygen-ui";
+import { Box, Typography } from "@wso2/oxygen-ui";
+import { Card, CardContent } from "@mui/material";
+import { AlertTriangle, CheckCircle, Clock, ClipboardList } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
+import type * as React from "react";
 import type { RiskStatusSummary } from "../../api/riskApi";
-import { CLOSED_COLOR, OPEN_COLOR } from "./constants";
 
 interface SummaryCardsProps {
   summary: RiskStatusSummary;
 }
 
-interface TileProps {
+interface StatTileProps {
+  count: number;
+  pct?: number | null;
   label: string;
-  value: number;
-  share?: number | null;
-  dotColor?: string;
+  icon: React.ReactNode;
+  iconColor: "primary" | "error" | "success" | "warning";
 }
 
-function Tile({ label, value, share, dotColor }: TileProps): JSX.Element {
+function StatTile({ count, pct, label, icon, iconColor }: StatTileProps): JSX.Element {
   return (
-    <Paper variant="outlined" sx={{ p: 2.5, flex: 1, minWidth: 160 }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        {dotColor && (
-          <Box
-            component="span"
-            sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: dotColor }}
-          />
-        )}
-        <Typography variant="body2" color="text.secondary">
-          {label}
-        </Typography>
-      </Box>
-      <Typography variant="h4" fontWeight={700} sx={{ mt: 0.5 }}>
-        {value}
-        {share != null && (
-          <Typography component="span" variant="body1" color="text.secondary" sx={{ ml: 1 }}>
-            ({share}%)
-          </Typography>
-        )}
-      </Typography>
-    </Paper>
+    <Card variant="outlined">
+      <CardContent>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <Box sx={{ color: `${iconColor}.main`, display: "flex", alignItems: "center" }}>
+            {icon}
+          </Box>
+          <Box>
+            <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.75 }}>
+              <Typography variant="h4" component="span" sx={{ fontWeight: 400, lineHeight: 1 }}>
+                {count}
+              </Typography>
+              {pct != null && (
+                <Typography variant="body2" component="span" color="text.secondary">
+                  ({pct}%)
+                </Typography>
+              )}
+            </Box>
+            <Typography variant="body2" color="text.secondary">
+              {label}
+            </Typography>
+          </Box>
+        </Box>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -62,15 +68,17 @@ export default function SummaryCards({ summary }: SummaryCardsProps): JSX.Elemen
     summary.total > 0 ? Math.round((n / summary.total) * 100) : null;
 
   return (
-    <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-      <Tile label="Total Risks" value={summary.total} />
-      <Tile label="Open" value={summary.open} share={pct(summary.open)} dotColor={OPEN_COLOR} />
-      <Tile
-        label="Closed"
-        value={summary.closed}
-        share={pct(summary.closed)}
-        dotColor={CLOSED_COLOR}
-      />
+    <Box
+      sx={{
+        display: "grid",
+        gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
+        gap: 2,
+      }}
+    >
+      <StatTile count={summary.total}   label="Total Risks" icon={<ClipboardList size={24} />} iconColor="primary" />
+      <StatTile count={summary.open}    pct={pct(summary.open)}   label="Open"    icon={<AlertTriangle size={24} />} iconColor="error"   />
+      <StatTile count={summary.closed}  pct={pct(summary.closed)} label="Closed"  icon={<CheckCircle size={24} />}   iconColor="success" />
+      <StatTile count={summary.overdue} pct={pct(summary.overdue)} label="Overdue" icon={<Clock size={24} />}        iconColor="warning" />
     </Box>
   );
 }

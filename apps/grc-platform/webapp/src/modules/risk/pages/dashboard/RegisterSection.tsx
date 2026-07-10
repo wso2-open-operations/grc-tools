@@ -51,7 +51,7 @@ export default function RegisterSection({ register, scores }: RegisterSectionPro
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "5fr 7fr" },
+          gridTemplateColumns: { xs: "1fr", md: "6fr 6fr" },
           gap: 3,
           alignItems: "center",
         }}

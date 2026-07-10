@@ -56,11 +56,11 @@ export default function LevelCountChart({ data }: LevelCountChartProps): JSX.Ele
       data={rows}
       xAxisDataKey="level"
       bars={bars}
-      height={340}
-      maxBarSize={72}
+      height={320}
+      maxBarSize={64}
       legend={{ show: false }}
-      xAxis={{ show: true, name: "Risk Level" }}
-      yAxis={{ show: true, name: "Count" }}
+      isAnimationActive={false}
+      margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
     />
   );
 }

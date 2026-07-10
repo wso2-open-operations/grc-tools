@@ -42,12 +42,16 @@ export default function StatusPieChart({ summary }: StatusPieChartProps): JSX.El
   return (
     <PieChart
       data={data}
-      height={280}
+      height={300}
       colors={[OPEN_COLOR, CLOSED_COLOR]}
+      isAnimationActive={false}
       pies={[
         {
           dataKey: "value",
           nameKey: "name",
+          innerRadius: "45%",
+          outerRadius: "75%",
+          paddingAngle: 2,
           label: ({ percent }: { percent?: number }) =>
             `${((percent ?? 0) * 100).toFixed(1)}%`,
         },

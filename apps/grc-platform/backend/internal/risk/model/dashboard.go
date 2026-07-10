@@ -37,9 +37,10 @@ type DashboardSummary struct {
 
 // RiskStatusSummary backs the summary cards and the open/closed pie chart.
 type RiskStatusSummary struct {
-	Total  int `json:"total"`
-	Open   int `json:"open"`
-	Closed int `json:"closed"`
+	Total   int `json:"total"`
+	Open    int `json:"open"`
+	Closed  int `json:"closed"`
+	Overdue int `json:"overdue"`
 }
 
 // RegisterTreatmentCount is one stacked segment of the
