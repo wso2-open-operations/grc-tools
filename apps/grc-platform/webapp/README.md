@@ -111,17 +111,7 @@ Open [http://localhost:3000](http://localhost:3000). The root path redirects to
 
 Access is enforced at the Go backend and gated in the UI by role claims from Asgardeo. The table below defines what each role can do inside the Audit Hub.
 
-| Capability | Compliance Admin | Compliance Team | Auditor POC | Viewer |
-|---|:---:|:---:|:---:|:---:|
-| View audits and controls | ✅ | ✅ | ✅ | ✅ |
-| Create / edit audits | ✅ | — | — | — |
-| Create / edit controls | ✅ | — | — | — |
-| Set control owner, due date, auditor POC | ✅ | — | — | — |
-| Submit evidence for a control | ✅ | ✅ | — | — |
-| Add comments on a control | ✅ | ✅ | ✅ | — |
-| Review submitted evidence (compliance review) | ✅ | — | — | — |
-| Approve / reject / request resubmission (auditor review) | — | — | ✅ | — |
-| Archive / delete audits | ✅ | — | — | — |
+
 
 **Key decisions:**
 
