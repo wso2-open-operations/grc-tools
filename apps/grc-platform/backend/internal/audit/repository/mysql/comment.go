@@ -17,9 +17,13 @@
 package mysql
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
+	"time"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type commentRepository struct{ db *sql.DB }
@@ -29,4 +33,57 @@ func NewCommentRepository(db *sql.DB) repository.CommentRepository {
 	return &commentRepository{db: db}
 }
 
-// TODO: implement audit_comment CRUD
+func (r *commentRepository) Create(ctx context.Context, evidenceID int, content string, isInternal bool, parentCommentID *int, createdBy string) (*model.AuditComment, error) {
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO audit_comment
+		  (evidence_id, parent_comment_id, content, is_internal, created_by)
+		VALUES (?, ?, ?, ?, ?)`,
+		evidenceID, intPtrVal(parentCommentID), content, isInternal, createdBy,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("comment.Create: %w", err)
+	}
+	id64, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("comment.Create lastInsertId: %w", err)
+	}
+	return &model.AuditComment{
+		ID:              int(id64),
+		EvidenceID:      evidenceID,
+		ParentCommentID: parentCommentID,
+		Content:         content,
+		IsInternal:      isInternal,
+		CreatedBy:       createdBy,
+		CreatedAt:       time.Now(),
+	}, nil
+}
+
+func (r *commentRepository) ListByEvidence(ctx context.Context, evidenceID int) ([]*model.AuditComment, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, evidence_id, parent_comment_id, content, is_internal, created_by, created_at
+		FROM audit_comment
+		WHERE evidence_id = ?
+		ORDER BY created_at ASC`, evidenceID)
+	if err != nil {
+		return nil, fmt.Errorf("comment.ListByEvidence: %w", err)
+	}
+	defer rows.Close()
+
+	var list []*model.AuditComment
+	for rows.Next() {
+		var c model.AuditComment
+		var parentID sql.NullInt64
+		if err := rows.Scan(&c.ID, &c.EvidenceID, &parentID, &c.Content, &c.IsInternal, &c.CreatedBy, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("comment.ListByEvidence scan: %w", err)
+		}
+		if parentID.Valid {
+			v := int(parentID.Int64)
+			c.ParentCommentID = &v
+		}
+		list = append(list, &c)
+	}
+	if list == nil {
+		list = []*model.AuditComment{}
+	}
+	return list, rows.Err()
+}

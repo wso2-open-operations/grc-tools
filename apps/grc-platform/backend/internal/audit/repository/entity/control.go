@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sync"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
@@ -45,6 +46,7 @@ func (r *controlRepo) List(ctx context.Context, auditID int) ([]*model.AuditCont
 		}
 		all = append(all, resp.Controls...)
 		if len(resp.Controls) < pageLimit {
+			r.enrichPopulations(ctx, auditID, all)
 			return all, nil
 		}
 	}
@@ -55,7 +57,96 @@ func (r *controlRepo) GetByID(ctx context.Context, auditID, controlID int) (*mod
 	if err := r.c.Get(ctx, fmt.Sprintf("/audits/%d/controls/%d", auditID, controlID), &c); err != nil {
 		return nil, err
 	}
+	r.enrichPopulations(ctx, auditID, []*model.AuditControl{&c})
 	return &c, nil
+}
+
+// entPopulation is the subset of the entity's AuditPopulation JSON needed to
+// enrich controls with population-phase fields.
+type entPopulation struct {
+	ID      int     `json:"id"`
+	OwnerID *int    `json:"ownerId"`
+	TeamID  *int    `json:"teamId"`
+	DueDate *string `json:"dueDate"`
+}
+
+// enrichPopulations fills PopulationDueDate/OwnerName/TeamName on OE controls.
+// The entity's control queries do not join audit_population (and the entity is
+// owned by another team), so the backend stitches the data from the entity's
+// per-control populations endpoint plus the user/team lookups. Enrichment is
+// best-effort: on any error the population fields simply stay nil.
+func (r *controlRepo) enrichPopulations(ctx context.Context, auditID int, controls []*model.AuditControl) {
+	var oe []*model.AuditControl
+	for _, c := range controls {
+		if c.RequirementType == "OE" {
+			oe = append(oe, c)
+		}
+	}
+	if len(oe) == 0 {
+		return
+	}
+
+	// id → display name lookups (one paged call each).
+	userNames := map[int]string{}
+	for offset := 0; ; offset += pageLimit {
+		var resp struct {
+			Users []*model.UserRef `json:"users"`
+		}
+		if err := r.c.Post(ctx, "/users/search", pageBody(offset), &resp); err != nil {
+			break
+		}
+		for _, u := range resp.Users {
+			userNames[u.ID] = u.DisplayName
+		}
+		if len(resp.Users) < pageLimit {
+			break
+		}
+	}
+	teamNames := map[int]string{}
+	for offset := 0; ; offset += pageLimit {
+		var resp struct {
+			Teams []*model.AuditTeam `json:"teams"`
+		}
+		if err := r.c.Post(ctx, "/audit/teams/search", pageBody(offset), &resp); err != nil {
+			break
+		}
+		for _, t := range resp.Teams {
+			teamNames[t.ID] = t.Name
+		}
+		if len(resp.Teams) < pageLimit {
+			break
+		}
+	}
+
+	// Fetch each OE control's populations with bounded concurrency.
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for _, c := range oe {
+		wg.Add(1)
+		go func(c *model.AuditControl) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			var pops []entPopulation
+			if err := r.c.Get(ctx, fmt.Sprintf("/audits/%d/controls/%d/populations", auditID, c.ID), &pops); err != nil || len(pops) == 0 {
+				return
+			}
+			p := pops[len(pops)-1] // latest round
+			c.PopulationDueDate = p.DueDate
+			if p.OwnerID != nil {
+				if name, ok := userNames[*p.OwnerID]; ok {
+					c.PopulationOwnerName = &name
+				}
+			}
+			if p.TeamID != nil {
+				if name, ok := teamNames[*p.TeamID]; ok {
+					c.PopulationTeamName = &name
+				}
+			}
+		}(c)
+	}
+	wg.Wait()
 }
 
 func (r *controlRepo) Create(ctx context.Context, auditID int, req model.AddControlRequest, createdBy string) (*model.AuditControl, error) {

@@ -31,6 +31,43 @@ export const CONTROL_STATUS_LABELS: Record<ControlStatus, string> = {
   COMPLETE:                      "Complete",
 };
 
+// ── 4-phase rollup for the dashboard donut ───────────────────────────────────
+// Groups the 12 statuses into scannable phases; the donut offers a "Detailed"
+// toggle that switches back to the full per-status breakdown.
+
+export type ControlPhase = "NOT_STARTED" | "IN_PROGRESS" | "BLOCKED" | "COMPLETE";
+
+export const STATUS_PHASE: Record<ControlStatus, ControlPhase> = {
+  POPULATION_PENDING:            "NOT_STARTED",
+  EVIDENCE_PENDING:              "NOT_STARTED",
+  POPULATION_INTERNAL_REVIEW:    "IN_PROGRESS",
+  POPULATION_UNDER_VALIDATION:   "IN_PROGRESS",
+  POPULATION_COMPLETE:           "IN_PROGRESS",
+  AWAITING_SAMPLE:               "IN_PROGRESS",
+  SUBMITTED_SAMPLE:              "IN_PROGRESS",
+  EVIDENCE_INTERNAL_REVIEW:      "IN_PROGRESS",
+  EVIDENCE_UNDER_VALIDATION:     "IN_PROGRESS",
+  POPULATION_NEED_CLARIFICATION: "BLOCKED",
+  EVIDENCE_NEED_CLARIFICATION:   "BLOCKED",
+  COMPLETE:                      "COMPLETE",
+};
+
+export const PHASE_LABELS: Record<ControlPhase, string> = {
+  NOT_STARTED: "Not Started",
+  IN_PROGRESS: "In Progress",
+  BLOCKED:     "Needs Clarification",
+  COMPLETE:    "Complete",
+};
+
+export const PHASE_COLORS: Record<ControlPhase, string> = {
+  NOT_STARTED: "#94A3B8",
+  IN_PROGRESS: "#3B82F6",
+  BLOCKED:     "#EF4444",
+  COMPLETE:    "#22C55E",
+};
+
+export const PHASE_ORDER: ControlPhase[] = ["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "COMPLETE"];
+
 export const CONTROL_STATUS_COLORS: Record<ControlStatus, string> = {
   // OE population phase
   POPULATION_PENDING:            "#6b7280",

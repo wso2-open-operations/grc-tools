@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Avatar, Tooltip } from "@mui/material";
+import { Avatar, Tooltip } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
 function getInitials(name: string): string {

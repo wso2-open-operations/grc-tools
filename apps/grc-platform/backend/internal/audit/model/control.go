@@ -40,8 +40,11 @@ type AuditControl struct {
 	DueDate             *string   `json:"dueDate"`
 	Status              string    `json:"status"`
 	SampleReference     *string   `json:"sampleReference"`
+	SampleFileURL       *string   `json:"sampleFileUrl"`
+	SampleFileName      *string   `json:"sampleFileName"`
 	Comments            *string   `json:"comments"`
 	ControlSource       string    `json:"controlSource"` // MANUAL | COPIED | CSV
+	IsManuallyAdded     bool      `json:"isManuallyAdded"`
 	IsOverdue           bool      `json:"isOverdue"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
@@ -75,6 +78,7 @@ type PopulationDetails struct {
 type AddControlRequest struct {
 	FrameworkControlID  *int               `json:"frameworkControlId"` // set when adding from framework template
 	ControlSource       string             `json:"controlSource"`      // MANUAL | COPIED | CSV; defaults to MANUAL
+	IsManuallyAdded     bool               `json:"isManuallyAdded"`
 	ControlNumber       string             `json:"controlNumber"`
 	Description         string             `json:"description"`
 	EvidenceRequirement *string            `json:"evidenceRequirement"`

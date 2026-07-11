@@ -15,7 +15,9 @@
 // under the License.
 
 import {
-  Button as MuiButton,
+  Alert,
+  Box,
+  Button,
   Card,
   CardActionArea,
   CardContent,
@@ -25,103 +27,178 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Divider,
+  IconButton,
   InputAdornment,
+  LinearProgress,
   Skeleton,
+  Snackbar,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
-} from "@mui/material";
-import { Box, Button, Typography } from "@wso2/oxygen-ui";
-import { ChevronLeft, Plus, Search, ShieldCheck } from "@wso2/oxygen-ui-icons-react";
+  Typography,
+} from "@wso2/oxygen-ui";
+import { AlertTriangle, ChevronLeft, Plus, Search, ShieldCheck, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import AuditCard from "@modules/audit/components/AuditCard";
 import { useGetAudits } from "@modules/audit/api/useGetAudits";
 import { useGetFrameworks } from "@modules/audit/api/useGetFrameworks";
 import { useDeleteAudit } from "@modules/audit/api/useDeleteAudit";
-import type { Audit, AuditFramework } from "@modules/audit/types/audit";
+import { useUpdateAuditStatus } from "@modules/audit/api/useUpdateAuditStatus";
+import type { Audit, AuditFramework, AuditStatus } from "@modules/audit/types/audit";
 import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
 import { AuditPrivilege } from "@modules/audit/privileges";
 
-type StatusFilter = "ACTIVE" | "INACTIVE" | "ALL";
+type StatusFilter = "ACTIVE" | "COMPLETED" | "ARCHIVED" | "ALL";
+const STATUS_FILTERS: StatusFilter[] = ["ACTIVE", "COMPLETED", "ARCHIVED", "ALL"];
+const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
+  ACTIVE: "Active",
+  COMPLETED: "Completed",
+  ARCHIVED: "Archived",
+  ALL: "All",
+};
 
 function filterByStatus(audits: Audit[], statusFilter: StatusFilter): Audit[] {
   const visible = audits.filter((a) => a.status !== "REMOVED");
   if (statusFilter === "ALL") return visible;
-  if (statusFilter === "ACTIVE") return visible.filter((a) => a.status === "ACTIVE");
-  return visible.filter((a) => a.status === "COMPLETED" || a.status === "ARCHIVED");
+  return visible.filter((a) => a.status === (statusFilter as AuditStatus));
 }
+
+// ── Framework identity ────────────────────────────────────────────────────────
+
+const FRAMEWORK_PALETTE = ["#1E88E5", "#8E24AA", "#00897B", "#E53935", "#FB8C00", "#3949AB"];
+
+// Deterministic accent color per framework name so cards keep their identity.
+function frameworkColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return FRAMEWORK_PALETTE[Math.abs(hash) % FRAMEWORK_PALETTE.length];
+}
+
+// Number of active audits previewed on a framework card before "+N more".
+const FRAMEWORK_CARD_PREVIEW = 3;
 
 interface FrameworkCardProps {
   framework: AuditFramework;
-  totalCount: number;
-  activeCount: number;
+  /** ACTIVE audits belonging to this framework. */
+  activeAudits: Audit[];
+  /** Whether the framework has any (non-removed) audits at all. */
+  hasAudits: boolean;
   onClick: () => void;
 }
 
-function FrameworkCard({ framework, totalCount, activeCount, onClick }: FrameworkCardProps): JSX.Element {
+// FrameworkCard mirrors AuditCard's skeleton (accent border, chip row, title,
+// meta line, divider, progress footer) so the drill-in feels seamless.
+function FrameworkCard({ framework, activeAudits, hasAudits, onClick }: FrameworkCardProps): JSX.Element {
+  const color = frameworkColor(framework.name);
+  const overdue = activeAudits.reduce((s, a) => s + a.controlCounts.overdue, 0);
+  const preview = activeAudits.slice(0, FRAMEWORK_CARD_PREVIEW);
+  const moreCount = activeAudits.length - preview.length;
+
   return (
     <Card
       variant="outlined"
       sx={{
         height: "100%",
-        transition: "box-shadow 0.2s, border-color 0.2s",
-        "&:hover": { boxShadow: 4, borderColor: "primary.main" },
+        borderLeft: `3px solid ${color}`,
+        transition: "box-shadow 0.2s",
+        "&:hover": { boxShadow: 4 },
       }}
     >
       <CardActionArea onClick={onClick} sx={{ height: "100%", alignItems: "flex-start" }}>
-        <CardContent sx={{ display: "flex", flexDirection: "column", gap: 2, p: 3 }}>
-          <Box
-            sx={{
-              width: 48,
-              height: 48,
-              borderRadius: 2,
-              bgcolor: "primary.50",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "primary.main",
-            }}
-          >
-            <ShieldCheck size={24} />
+        <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column", gap: 1.5, p: 2.5 }}>
+          {/* Top row: chips left + icon right — mirrors AuditCard's chip/ring row */}
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+              {activeAudits.length > 0 ? (
+                <Chip
+                  label={`${activeAudits.length} active`}
+                  size="small"
+                  color="success"
+                  variant="outlined"
+                />
+              ) : (
+                <Chip label={hasAudits ? "No active audits" : "No audits yet"} size="small" variant="outlined" />
+              )}
+              {overdue > 0 && (
+                <Chip
+                  icon={<AlertTriangle size={11} />}
+                  label={`${overdue} overdue`}
+                  size="small"
+                  sx={{
+                    fontWeight: 700,
+                    color: "#E53935", bgcolor: "rgba(229,57,53,0.12)",
+                    "[data-color-scheme='dark'] &": { bgcolor: "rgba(229,57,53,0.25)" },
+                    "& .MuiChip-icon": { color: "#E53935" },
+                  }}
+                />
+              )}
+            </Box>
+            <Box
+              sx={{
+                width: 40, height: 40, borderRadius: 1.5, flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color, bgcolor: `${color}18`,
+                "[data-color-scheme='dark'] &": { bgcolor: `${color}33` },
+              }}
+            >
+              <ShieldCheck size={20} />
+            </Box>
           </Box>
 
-          <Box>
-            <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.3 }}>
-              {framework.name}
+          {/* Framework name — same slot as the audit name */}
+          <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.3, mt: -0.5 }}>
+            {framework.name}
+          </Typography>
+
+          <Divider sx={{ mt: "auto" }} />
+
+          {/* Progress footer — per-audit rows in the same slot as AuditCard's bar */}
+          {preview.length > 0 ? (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              {preview.map((a) => {
+                const pct = a.controlCounts.total > 0
+                  ? Math.round((a.controlCounts.approved / a.controlCounts.total) * 100)
+                  : 0;
+                return (
+                  <Box key={a.id}>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5, gap: 1 }}>
+                      <Typography variant="caption" color="text.secondary" noWrap title={a.name}>
+                        {a.name}
+                      </Typography>
+                      <Typography variant="caption" fontWeight={700} sx={{ color, flexShrink: 0 }}>
+                        {pct}%
+                      </Typography>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={pct}
+                      sx={{
+                        height: 6, borderRadius: 3, bgcolor: "#E0E0E0",
+                        "[data-color-scheme='dark'] &": { bgcolor: "rgba(255,255,255,0.12)" },
+                        "& .MuiLinearProgress-bar": { bgcolor: color, borderRadius: 3 },
+                      }}
+                    />
+                  </Box>
+                );
+              })}
+              {moreCount > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  +{moreCount} more active audit{moreCount === 1 ? "" : "s"}
+                </Typography>
+              )}
+            </Box>
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              Create an audit to start tracking progress
             </Typography>
-          </Box>
-
-          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mt: "auto" }}>
-            <Chip
-              label={`${totalCount} total`}
-              size="small"
-              variant="outlined"
-              sx={{ height: 22, fontSize: "0.7rem" }}
-            />
-            {activeCount > 0 && (
-              <Chip
-                label={`${activeCount} active`}
-                size="small"
-                color="success"
-                variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }}
-              />
-            )}
-            {totalCount > 0 && activeCount === 0 && (
-              <Chip
-                label="no active"
-                size="small"
-                variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem", color: "text.disabled" }}
-              />
-            )}
-          </Box>
+          )}
         </CardContent>
       </CardActionArea>
     </Card>
   );
 }
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function AuditsListPage(): JSX.Element {
   const navigate = useNavigate();
@@ -135,32 +212,62 @@ export default function AuditsListPage(): JSX.Element {
   } = useGetAudits();
   const { data: frameworksData, isLoading: frameworksLoading } = useGetFrameworks();
   const deleteAudit = useDeleteAudit();
+  const updateAuditStatus = useUpdateAuditStatus();
+  const canUpdateAudit = can(AuditPrivilege.UpdateAudit);
 
-  const [selectedFrameworkId, setSelectedFrameworkId] = useState<number | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ACTIVE");
+  // Drill + status filter live in the URL so refresh/back/sharing all work.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedFrameworkId = searchParams.get("framework") !== null
+    ? Number(searchParams.get("framework"))
+    : null;
+  const statusParam = (searchParams.get("status") ?? "ACTIVE") as StatusFilter;
+  const statusFilter: StatusFilter = STATUS_FILTERS.includes(statusParam) ? statusParam : "ACTIVE";
+
   const [search, setSearch] = useState("");
   const [auditToDelete, setAuditToDelete] = useState<Audit | null>(null);
 
   const allAudits = auditsData?.items ?? [];
   const allFrameworks = frameworksData ?? [];
-
   const selectedFramework = allFrameworks.find((f) => f.id === selectedFrameworkId) ?? null;
 
-  function frameworkCounts(fwId: number) {
-    const fwAudits = allAudits.filter((a) => a.framework.id === fwId && a.status !== "REMOVED");
-    return {
-      total: fwAudits.length,
-      active: fwAudits.filter((a) => a.status === "ACTIVE").length,
-    };
+  function selectFramework(id: number | null) {
+    const next = new URLSearchParams(searchParams);
+    if (id === null) {
+      next.delete("framework");
+      next.delete("status");
+    } else {
+      next.set("framework", String(id));
+      next.delete("status");
+    }
+    setSearchParams(next, { replace: id === null });
+    setSearch("");
   }
+
+  function setStatusFilter(sf: StatusFilter) {
+    const next = new URLSearchParams(searchParams);
+    if (sf === "ACTIVE") next.delete("status");
+    else next.set("status", sf);
+    setSearchParams(next, { replace: true });
+  }
+
+  const q = search.trim().toLowerCase();
+
+  // Global search (framework overview level): flat results across all audits.
+  const globalMatches = q && !selectedFramework
+    ? allAudits.filter((a) => a.status !== "REMOVED" && a.name.toLowerCase().includes(q))
+    : [];
 
   const frameworkAudits = selectedFrameworkId !== null
     ? allAudits.filter((a) => a.framework.id === selectedFrameworkId)
     : [];
   const statusFiltered = filterByStatus(frameworkAudits, statusFilter);
-  const q = search.trim().toLowerCase();
   const displayed = q ? statusFiltered.filter((a) => a.name.toLowerCase().includes(q)) : statusFiltered;
 
+  const statusCounts = Object.fromEntries(
+    STATUS_FILTERS.map((sf) => [sf, filterByStatus(frameworkAudits, sf).length]),
+  ) as Record<StatusFilter, number>;
+
+  const activeAuditsTotal = allAudits.filter((a) => a.status === "ACTIVE").length;
   const isLoading = auditsLoading || frameworksLoading;
 
   const handleDeleteConfirm = () => {
@@ -170,11 +277,52 @@ export default function AuditsListPage(): JSX.Element {
     });
   };
 
-  function handleBackToFrameworks() {
-    setSelectedFrameworkId(null);
-    setStatusFilter("ACTIVE");
-    setSearch("");
-  }
+  // Archive is reversible, so no confirmation dialog — just a result snackbar.
+  const [archiveSnack, setArchiveSnack] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const handleArchiveToggle = (audit: Audit) => {
+    const archiving = audit.status !== "ARCHIVED";
+    updateAuditStatus.mutate(
+      { auditId: audit.id, status: archiving ? "ARCHIVED" : "ACTIVE" },
+      {
+        onSuccess: () =>
+          setArchiveSnack({
+            severity: "success",
+            message: archiving ? `"${audit.name}" archived.` : `"${audit.name}" restored to active.`,
+          }),
+        onError: () =>
+          setArchiveSnack({
+            severity: "error",
+            message: archiving ? "Failed to archive the audit." : "Failed to restore the audit.",
+          }),
+      },
+    );
+  };
+
+  const searchField = (
+    <TextField
+      size="small"
+      placeholder={selectedFramework ? `Search ${selectedFramework.name} audits…` : "Search all audits…"}
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      sx={{ minWidth: 230 }}
+      slotProps={{
+        input: {
+          startAdornment: (
+            <InputAdornment position="start">
+              <Search size={16} />
+            </InputAdornment>
+          ),
+          endAdornment: search ? (
+            <InputAdornment position="end">
+              <IconButton size="small" edge="end" aria-label="Clear search" onClick={() => setSearch("")}>
+                <X size={14} />
+              </IconButton>
+            </InputAdornment>
+          ) : null,
+        },
+      }}
+    />
+  );
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 } }}>
@@ -191,13 +339,13 @@ export default function AuditsListPage(): JSX.Element {
       >
         {selectedFramework ? (
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <MuiButton
+            <Button
               startIcon={<ChevronLeft size={16} />}
-              onClick={handleBackToFrameworks}
+              onClick={() => selectFramework(null)}
               sx={{ textTransform: "none", color: "text.secondary", pl: 0, minWidth: 0 }}
             >
               Frameworks
-            </MuiButton>
+            </Button>
             <Typography variant="body2" color="text.secondary" sx={{ mx: 0.5 }}>
               /
             </Typography>
@@ -206,27 +354,37 @@ export default function AuditsListPage(): JSX.Element {
             </Typography>
           </Box>
         ) : (
-          <Typography variant="h4" fontWeight={700}>
-            Audits
-          </Typography>
+          <Box>
+            <Typography variant="h4" fontWeight={700}>
+              Audits
+            </Typography>
+            {!isLoading && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {allFrameworks.length} framework{allFrameworks.length === 1 ? "" : "s"} · {activeAuditsTotal} active audit{activeAuditsTotal === 1 ? "" : "s"}
+              </Typography>
+            )}
+          </Box>
         )}
 
-        {canCreateAudit && (
-          <Button
-            variant="contained"
-            startIcon={<Plus size={16} />}
-            sx={{ textTransform: "none" }}
-            onClick={() =>
-              void navigate(
-                selectedFrameworkId !== null
-                  ? `/audit/audits/create?framework=${selectedFrameworkId}`
-                  : "/audit/audits/create",
-              )
-            }
-          >
-            New Audit
-          </Button>
-        )}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+          {!selectedFramework && searchField}
+          {canCreateAudit && (
+            <Button
+              variant="contained"
+              startIcon={<Plus size={16} />}
+              sx={{ textTransform: "none" }}
+              onClick={() =>
+                void navigate(
+                  selectedFrameworkId !== null
+                    ? `/audit/audits/create?framework=${selectedFrameworkId}`
+                    : "/audit/audits/create",
+                )
+              }
+            >
+              New Audit
+            </Button>
+          )}
+        </Box>
       </Box>
 
       {/* Loading state */}
@@ -244,8 +402,43 @@ export default function AuditsListPage(): JSX.Element {
         </Box>
       )}
 
+      {/* Global search results (framework overview + query) */}
+      {!isLoading && !selectedFramework && q && (
+        <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {globalMatches.length} audit{globalMatches.length === 1 ? "" : "s"} matching “{search.trim()}”
+          </Typography>
+          {globalMatches.length > 0 ? (
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)" },
+                gap: 2.5,
+              }}
+            >
+              {globalMatches.map((audit) => (
+                <AuditCard
+                  key={audit.id}
+                  audit={audit}
+                  onClick={() => void navigate(`/audit/audits/${audit.id}`)}
+                  onDelete={() => setAuditToDelete(audit)}
+                  canDelete={canCreateAudit}
+                  onArchiveToggle={() => handleArchiveToggle(audit)}
+                  canArchive={canUpdateAudit}
+                />
+              ))}
+            </Box>
+          ) : (
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", py: 8, gap: 1.5 }}>
+              <Search size={40} style={{ opacity: 0.25 }} />
+              <Typography variant="body1" color="text.secondary">No audits match your search.</Typography>
+            </Box>
+          )}
+        </>
+      )}
+
       {/* Framework overview */}
-      {!isLoading && !selectedFramework && (
+      {!isLoading && !selectedFramework && !q && (
         <>
           {allFrameworks.length === 0 ? (
             <Box
@@ -281,28 +474,19 @@ export default function AuditsListPage(): JSX.Element {
               <Box
                 sx={{
                   display: "grid",
-                  gridTemplateColumns: {
-                    xs: "1fr",
-                    sm: "repeat(2, 1fr)",
-                    md: "repeat(3, 1fr)",
-                    lg: "repeat(4, 1fr)",
-                  },
+                  gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)" },
                   gap: 2.5,
                 }}
               >
                 {allFrameworks.map((fw) => {
-                  const { total, active } = frameworkCounts(fw.id);
+                  const fwAudits = allAudits.filter((a) => a.framework.id === fw.id && a.status !== "REMOVED");
                   return (
                     <FrameworkCard
                       key={fw.id}
                       framework={fw}
-                      totalCount={total}
-                      activeCount={active}
-                      onClick={() => {
-                        setSelectedFrameworkId(fw.id);
-                        setStatusFilter("ACTIVE");
-                        setSearch("");
-                      }}
+                      activeAudits={fwAudits.filter((a) => a.status === "ACTIVE")}
+                      hasAudits={fwAudits.length > 0}
+                      onClick={() => selectFramework(fw.id)}
                     />
                   );
                 })}
@@ -315,7 +499,7 @@ export default function AuditsListPage(): JSX.Element {
       {/* Drilled framework view */}
       {!isLoading && selectedFramework && (
         <>
-          {/* Status toggle + search bar */}
+          {/* Status chips + search bar */}
           <Box
             sx={{
               display: "flex",
@@ -325,39 +509,21 @@ export default function AuditsListPage(): JSX.Element {
               flexWrap: "wrap",
             }}
           >
-            <ToggleButtonGroup
-              value={statusFilter}
-              exclusive
-              onChange={(_e, val: StatusFilter | null) => {
-                if (val) setStatusFilter(val);
-              }}
-              size="small"
-            >
-              <ToggleButton value="ACTIVE" sx={{ textTransform: "none", px: 2 }}>
-                Active
-              </ToggleButton>
-              <ToggleButton value="INACTIVE" sx={{ textTransform: "none", px: 2 }}>
-                Inactive
-              </ToggleButton>
-              <ToggleButton value="ALL" sx={{ textTransform: "none", px: 2 }}>
-                All
-              </ToggleButton>
-            </ToggleButtonGroup>
+            <Box sx={{ display: "flex", gap: 1 }}>
+              {STATUS_FILTERS.map((sf) => (
+                <Chip
+                  key={sf}
+                  clickable
+                  label={sf === "ALL" ? STATUS_FILTER_LABELS[sf] : `${STATUS_FILTER_LABELS[sf]} (${statusCounts[sf]})`}
+                  onClick={() => setStatusFilter(sf)}
+                  color={statusFilter === sf ? "primary" : "default"}
+                  variant={statusFilter === sf ? "filled" : "outlined"}
+                  sx={{ fontWeight: statusFilter === sf ? 700 : 400 }}
+                />
+              ))}
+            </Box>
 
-            <TextField
-              size="small"
-              placeholder="Search audits…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              sx={{ minWidth: 220 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search size={16} />
-                  </InputAdornment>
-                ),
-              }}
-            />
+            {searchField}
 
             <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
               {displayed.length} {displayed.length === 1 ? "audit" : "audits"}
@@ -372,9 +538,9 @@ export default function AuditsListPage(): JSX.Element {
               <Typography variant="body1" color="text.secondary">
                 Failed to load audits.
               </Typography>
-              <MuiButton variant="outlined" onClick={() => void refetchAudits()}>
+              <Button variant="outlined" onClick={() => void refetchAudits()}>
                 Try again
-              </MuiButton>
+              </Button>
             </Box>
           )}
 
@@ -394,6 +560,8 @@ export default function AuditsListPage(): JSX.Element {
                   onClick={() => void navigate(`/audit/audits/${audit.id}`)}
                   onDelete={() => setAuditToDelete(audit)}
                   canDelete={canCreateAudit}
+                  onArchiveToggle={() => handleArchiveToggle(audit)}
+                  canArchive={canUpdateAudit}
                 />
               ))}
             </Box>
@@ -415,20 +583,18 @@ export default function AuditsListPage(): JSX.Element {
               <Typography variant="body2" color="text.secondary">
                 {search.trim()
                   ? "No audits match your search."
-                  : statusFilter === "ACTIVE"
-                  ? `No active ${selectedFramework.name} audits.`
-                  : statusFilter === "INACTIVE"
-                  ? `No inactive ${selectedFramework.name} audits.`
-                  : `No ${selectedFramework.name} audits yet.`}
+                  : statusFilter === "ALL"
+                  ? `No ${selectedFramework.name} audits yet.`
+                  : `No ${STATUS_FILTER_LABELS[statusFilter].toLowerCase()} ${selectedFramework.name} audits.`}
               </Typography>
-              {statusFilter === "ACTIVE" && frameworkAudits.filter((a) => a.status !== "REMOVED").length > 0 && (
-                <MuiButton
+              {statusFilter !== "ALL" && frameworkAudits.filter((a) => a.status !== "REMOVED").length > 0 && (
+                <Button
                   variant="outlined"
                   size="small"
                   onClick={() => setStatusFilter("ALL")}
                 >
                   Show all audits
-                </MuiButton>
+                </Button>
               )}
             </Box>
           )}
@@ -448,21 +614,42 @@ export default function AuditsListPage(): JSX.Element {
             <strong>{auditToDelete?.name}</strong> and all its controls will be permanently deleted.
             This cannot be undone.
           </DialogContentText>
+          {deleteAudit.isError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              Failed to delete the audit. Please try again.
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <MuiButton onClick={() => setAuditToDelete(null)} disabled={deleteAudit.isPending}>
+          <Button onClick={() => setAuditToDelete(null)} disabled={deleteAudit.isPending}>
             Cancel
-          </MuiButton>
-          <MuiButton
+          </Button>
+          <Button
             variant="contained"
             color="error"
             onClick={handleDeleteConfirm}
             disabled={deleteAudit.isPending}
           >
             {deleteAudit.isPending ? "Deleting…" : "Delete"}
-          </MuiButton>
+          </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Archive / restore result snackbar */}
+      <Snackbar
+        open={Boolean(archiveSnack)}
+        autoHideDuration={4000}
+        onClose={() => setArchiveSnack(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          severity={archiveSnack?.severity ?? "success"}
+          variant="filled"
+          onClose={() => setArchiveSnack(null)}
+        >
+          {archiveSnack?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

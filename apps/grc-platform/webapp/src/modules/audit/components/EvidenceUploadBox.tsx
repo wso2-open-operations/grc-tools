@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Alert, Box, Button, CircularProgress, IconButton, Typography } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, IconButton, Typography } from "@wso2/oxygen-ui";
 import { FileUp, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { useRef, useState, type JSX } from "react";
 import { useSubmitEvidence } from "@modules/audit/api/useSubmitEvidence";

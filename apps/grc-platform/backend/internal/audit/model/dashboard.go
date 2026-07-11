@@ -95,6 +95,34 @@ const (
 	RoleManagement      = "management"
 )
 
+// asgardeoGroupRoles maps Asgardeo group names (JWT groups claim) to the
+// canonical dashboard role tokens the Compliance Entity understands. The
+// entity scopes unknown roles to zero rows, so translation must happen here
+// (the entity itself is owned by another team and cannot be changed).
+var asgardeoGroupRoles = map[string]string{
+	"grc-platform-compliance-audit-admin": RoleComplianceAdmin,
+	"grc-platform-compliance-audit-team":  RoleComplianceTeam,
+	"grc-platform-internal-team":          RoleInternalTeam,
+	"grc-platform-external-auditor":       RoleExternalAuditor,
+	"grc-platform-management":             RoleManagement,
+	// Testing catch-all group — full visibility, mirroring its allow-all privileges.
+	"wso2-everyone": RoleComplianceAdmin,
+}
+
+// NormalizedRoles returns Roles translated to canonical role tokens.
+// Values that are already canonical (or unknown) pass through unchanged.
+func (f DashboardFilter) NormalizedRoles() []string {
+	out := make([]string, 0, len(f.Roles))
+	for _, g := range f.Roles {
+		if r, ok := asgardeoGroupRoles[g]; ok {
+			out = append(out, r)
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
 // PrimaryRole returns the highest-priority audit role from the filter's role list.
 func (f DashboardFilter) PrimaryRole() string {
 	priority := []string{

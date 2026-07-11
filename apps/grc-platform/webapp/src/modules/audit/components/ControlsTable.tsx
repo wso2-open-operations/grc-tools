@@ -25,7 +25,7 @@ import {
   TablePagination,
   TextField,
   Tooltip,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import { Box, ListingTable, Typography } from "@wso2/oxygen-ui";
 import type { ListingTableSortDirection } from "@wso2/oxygen-ui";
 import { AlertCircle, Filter, Search, SlidersHorizontal, X } from "@wso2/oxygen-ui-icons-react";

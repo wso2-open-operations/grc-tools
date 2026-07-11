@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type controlRepository struct{ db *sql.DB }
@@ -271,6 +271,39 @@ func (r *controlRepository) Delete(ctx context.Context, auditID, controlID int) 
 		return fmt.Errorf("control.Delete(%d,%d): %w", auditID, controlID, err)
 	}
 	return nil
+}
+
+func (r *controlRepository) ListAssignedForEvidence(ctx context.Context, userEmail string) ([]*model.AssignedControlForEvidence, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT c.audit_id, a.name, c.id, c.control_number, c.description, c.status,
+		       CONCAT('audits/', c.audit_id, '/controls/', c.id, '/evidence/') AS base_folder_path
+		FROM audit_control c
+		JOIN audit a ON a.id = c.audit_id
+		JOIN ` + "`user`" + ` u ON u.email = ?
+		WHERE c.team_id = u.audit_team_id
+		  AND a.status = 'ACTIVE'
+		  AND c.status IN (
+		    'EVIDENCE_PENDING','SUBMITTED_SAMPLE','EVIDENCE_NEED_CLARIFICATION',
+		    'POPULATION_PENDING','POPULATION_NEED_CLARIFICATION'
+		  )
+		ORDER BY c.due_date ASC, c.id ASC`, userEmail)
+	if err != nil {
+		return nil, fmt.Errorf("control.ListAssignedForEvidence: %w", err)
+	}
+	defer rows.Close()
+
+	var list []*model.AssignedControlForEvidence
+	for rows.Next() {
+		var ac model.AssignedControlForEvidence
+		if err := rows.Scan(&ac.AuditID, &ac.AuditName, &ac.ControlID, &ac.ControlNumber, &ac.Description, &ac.Status, &ac.BaseFolderPath); err != nil {
+			return nil, fmt.Errorf("control.ListAssignedForEvidence scan: %w", err)
+		}
+		list = append(list, &ac)
+	}
+	if list == nil {
+		list = []*model.AssignedControlForEvidence{}
+	}
+	return list, rows.Err()
 }
 
 func scanControl(s scanner) (*model.AuditControl, error) {

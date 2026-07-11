@@ -26,7 +26,7 @@ import {
   TextField,
   Tooltip,
   Typography,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import { Lock, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useGetEvidence } from "@modules/audit/api/useGetEvidence";

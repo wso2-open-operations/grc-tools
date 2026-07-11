@@ -32,9 +32,11 @@ func NewDashboardRepository(c *entityclient.Client) repository.DashboardReposito
 }
 
 func (r *dashboardRepo) Get(ctx context.Context, f model.DashboardFilter) (*model.DashboardData, error) {
-	body := map[string]any{"roles": f.Roles, "userEmail": f.UserEmail}
+	// Translate Asgardeo group names to the canonical role tokens the entity
+	// expects — unknown roles are scoped to zero rows on the entity side.
+	body := map[string]any{"roles": f.NormalizedRoles(), "userEmail": f.UserEmail}
 	var data model.DashboardData
-	if err := r.c.Post(ctx, "/audit/dashboard", body, &data); err != nil {
+	if err := r.c.Post(ctx, "/audit/dashboard/search", body, &data); err != nil {
 		return nil, err
 	}
 	return &data, nil

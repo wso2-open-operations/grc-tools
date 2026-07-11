@@ -52,3 +52,11 @@ func intPtrVal(i *int) any {
 	}
 	return *i
 }
+
+// nullInt64Ptr converts a sql.NullInt64 to a *int64 (nil when not valid).
+func nullInt64Ptr(ni sql.NullInt64) *int64 {
+	if !ni.Valid {
+		return nil
+	}
+	return &ni.Int64
+}

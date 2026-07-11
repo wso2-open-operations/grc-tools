@@ -21,8 +21,9 @@ import "time"
 
 // AuditFrameworkRef is the lightweight framework embedded in Audit list/detail responses.
 type AuditFrameworkRef struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID      int     `json:"id"`
+	Name    string  `json:"name"`
+	Version *string `json:"version"`
 }
 
 // AuditProductRef is the lightweight product embedded in Audit list/detail responses.

@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type auditRepository struct{ db *sql.DB }
@@ -145,9 +145,10 @@ func (r *auditRepository) Update(ctx context.Context, id int, req model.UpdateAu
 	return nil
 }
 
-func (r *auditRepository) Delete(ctx context.Context, id int) error {
+func (r *auditRepository) Delete(ctx context.Context, id int, deletedBy string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE audit SET status = 'REMOVED', updated_at = NOW() WHERE id = ? AND status != 'REMOVED'", id)
+		"UPDATE audit SET status = 'REMOVED', updated_by = ?, updated_at = NOW() WHERE id = ? AND status != 'REMOVED'",
+		deletedBy, id)
 	return err
 }
 

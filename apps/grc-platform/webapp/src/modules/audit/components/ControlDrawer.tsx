@@ -26,7 +26,7 @@ import {
   Stepper,
   Tab,
   Tabs,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import { Box, Typography } from "@wso2/oxygen-ui";
 import {
   AlertCircle,

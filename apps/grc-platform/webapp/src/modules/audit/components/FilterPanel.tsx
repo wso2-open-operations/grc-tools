@@ -24,7 +24,7 @@ import {
   MenuItem,
   Select,
   TextField,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import { Search, X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 

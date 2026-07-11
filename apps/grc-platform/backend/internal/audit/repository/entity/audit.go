@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
@@ -128,6 +129,7 @@ func (r *auditRepo) Update(ctx context.Context, id int, req model.UpdateAuditReq
 	return r.c.Patch(ctx, fmt.Sprintf("/audits/%d", id), body, nil)
 }
 
-func (r *auditRepo) Delete(ctx context.Context, id int) error {
-	return r.c.Delete(ctx, fmt.Sprintf("/audits/%d", id))
+func (r *auditRepo) Delete(ctx context.Context, id int, deletedBy string) error {
+	// The entity requires the acting user for the soft-delete audit trail.
+	return r.c.Delete(ctx, fmt.Sprintf("/audits/%d?deletedBy=%s", id, url.QueryEscape(deletedBy)))
 }

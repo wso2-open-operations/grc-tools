@@ -115,7 +115,8 @@ func (h *auditHandler) deleteAudit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.svc.Delete(r.Context(), id); err != nil {
+	actor := auth.FromContext(r.Context()).Email
+	if err := h.svc.Delete(r.Context(), id, actor); err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}

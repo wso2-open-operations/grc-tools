@@ -48,7 +48,7 @@ import {
   TextField,
   Tooltip,
   Typography,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import {
   ChevronLeft,
   ClipboardList,
@@ -1614,6 +1614,7 @@ export default function CreateAuditPage(): JSX.Element {
   useEffect(() => {
     if (preselectedFrameworkId && framework === null && frameworks.length > 0) {
       const fw = frameworks.find((f) => f.id === preselectedFrameworkId);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (fw) setFramework(fw);
     }
   }, [frameworks, preselectedFrameworkId, framework]);

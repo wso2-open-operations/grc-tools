@@ -15,9 +15,11 @@
 // under the License.
 
 import {
+  Box,
   Card,
   CardActionArea,
   CardContent,
+  Chip,
   Divider,
   IconButton,
   LinearProgress,
@@ -25,22 +27,43 @@ import {
   Menu,
   MenuItem,
   Stack,
-} from "@mui/material";
-import { Box, Typography } from "@wso2/oxygen-ui";
-import { CalendarDays, MoreVertical, Trash2 } from "@wso2/oxygen-ui-icons-react";
+  Typography,
+} from "@wso2/oxygen-ui";
+import { AlertTriangle, Archive, ArchiveRestore, CalendarDays, MoreVertical, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import AuditStatusChip from "@modules/audit/components/AuditStatusChip";
-import { formatDateRange } from "@modules/audit/utils/format";
-import type { Audit } from "@modules/audit/types/audit";
+import CompletionRing from "@modules/audit/components/dashboard/CompletionRing";
+import { daysLeft, formatDateRange } from "@modules/audit/utils/format";
+import type { Audit, AuditStatus } from "@modules/audit/types/audit";
+
+// Status accent colors — match AuditStatusChip's palette intent.
+const STATUS_ACCENT: Record<AuditStatus, string> = {
+  ACTIVE:    "#2E7D32",
+  COMPLETED: "#1565C0",
+  ARCHIVED:  "#757575",
+  REMOVED:   "#757575",
+};
+
+const ENDING_SOON_DAYS = 14;
 
 interface AuditCardProps {
   audit: Audit;
   onClick: () => void;
   onDelete: () => void;
   canDelete?: boolean;
+  /** Archives an active/completed audit, or restores an archived one to active. */
+  onArchiveToggle?: () => void;
+  canArchive?: boolean;
 }
 
-export default function AuditCard({ audit, onClick, onDelete, canDelete = false }: AuditCardProps): JSX.Element {
+export default function AuditCard({
+  audit,
+  onClick,
+  onDelete,
+  canDelete = false,
+  onArchiveToggle,
+  canArchive = false,
+}: AuditCardProps): JSX.Element {
   const { controlCounts } = audit;
   const approvedPct =
     controlCounts.total > 0
@@ -56,6 +79,17 @@ export default function AuditCard({ audit, onClick, onDelete, canDelete = false 
     setMenuAnchor(null);
     onDelete();
   };
+  const handleArchiveToggle = () => {
+    setMenuAnchor(null);
+    onArchiveToggle?.();
+  };
+
+  const showMenu = canDelete || canArchive;
+  const isArchived = audit.status === "ARCHIVED";
+
+  // Days-left hint for active audits (red when the period is nearly over).
+  const remaining = audit.status === "ACTIVE" ? daysLeft(audit.periodEnd) : null;
+  const endingSoon = remaining !== null && remaining >= 0 && remaining <= ENDING_SOON_DAYS;
 
   return (
     <Card
@@ -63,12 +97,13 @@ export default function AuditCard({ audit, onClick, onDelete, canDelete = false 
       sx={{
         height: "100%",
         position: "relative",
+        borderLeft: `3px solid ${STATUS_ACCENT[audit.status]}`,
         transition: "box-shadow 0.2s",
         "&:hover": { boxShadow: 4 },
       }}
     >
-      {/* Menu button — only visible to users with delete privilege */}
-      {canDelete && (
+      {/* Menu button — only visible to users with archive/delete privileges */}
+      {showMenu && (
         <>
           <Box sx={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}>
             <IconButton size="small" aria-label="Audit actions" onClick={handleMenuOpen} sx={{ color: "text.secondary" }}>
@@ -80,12 +115,22 @@ export default function AuditCard({ audit, onClick, onDelete, canDelete = false 
             open={Boolean(menuAnchor)}
             onClose={() => setMenuAnchor(null)}
           >
-            <MenuItem onClick={handleDelete} sx={{ color: "error.main" }}>
-              <ListItemIcon sx={{ color: "error.main" }}>
-                <Trash2 size={16} />
-              </ListItemIcon>
-              Delete audit
-            </MenuItem>
+            {canArchive && (
+              <MenuItem onClick={handleArchiveToggle}>
+                <ListItemIcon>
+                  {isArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                </ListItemIcon>
+                {isArchived ? "Restore to active" : "Archive audit"}
+              </MenuItem>
+            )}
+            {canDelete && (
+              <MenuItem onClick={handleDelete} sx={{ color: "error.main" }}>
+                <ListItemIcon sx={{ color: "error.main" }}>
+                  <Trash2 size={16} />
+                </ListItemIcon>
+                Delete audit
+              </MenuItem>
+            )}
           </Menu>
         </>
       )}
@@ -95,9 +140,10 @@ export default function AuditCard({ audit, onClick, onDelete, canDelete = false 
         sx={{ height: "100%", alignItems: "flex-start" }}
       >
         <CardContent sx={{ height: "100%", display: "flex", flexDirection: "column", gap: 1.5, p: 2.5 }}>
-          {/* Top row: status chip — leave space on right for the absolute menu button */}
-          <Box sx={{ display: "flex", alignItems: "center", pr: 3.5 }}>
+          {/* Top row: status chip + completion ring — leave space for the menu button */}
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", pr: showMenu ? 3.5 : 0 }}>
             <AuditStatusChip status={audit.status} />
+            <CompletionRing percent={approvedPct} size={40} caption={false} />
           </Box>
 
           {/* Audit name */}
@@ -115,12 +161,20 @@ export default function AuditCard({ audit, onClick, onDelete, canDelete = false 
             {audit.product.name}
           </Typography>
 
-          {/* Period */}
-          <Stack direction="row" spacing={0.75} alignItems="center">
+          {/* Period + days-left urgency hint */}
+          <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
             <CalendarDays size={14} style={{ color: "var(--mui-palette-text-secondary, #666)" }} />
             <Typography variant="caption" color="text.secondary">
               {formatDateRange(audit.periodStart, audit.periodEnd)}
             </Typography>
+            {remaining !== null && remaining >= 0 && (
+              <Typography
+                variant="caption"
+                sx={{ fontWeight: endingSoon ? 700 : 400, color: endingSoon ? "error.main" : "text.secondary" }}
+              >
+                · {remaining === 0 ? "ends today" : `${remaining}d left`}
+              </Typography>
+            )}
           </Stack>
 
           <Divider sx={{ mt: "auto" }} />
@@ -139,9 +193,17 @@ export default function AuditCard({ audit, onClick, onDelete, canDelete = false 
                 {controlCounts.approved} / {controlCounts.total} approved
               </Typography>
               {controlCounts.overdue > 0 && (
-                <Typography variant="caption" color="error.main" fontWeight={600}>
-                  {controlCounts.overdue} overdue
-                </Typography>
+                <Chip
+                  icon={<AlertTriangle size={11} />}
+                  label={`${controlCounts.overdue} overdue`}
+                  size="small"
+                  sx={{
+                    height: 20, fontSize: "0.68rem", fontWeight: 700,
+                    color: "#E53935", bgcolor: "rgba(229,57,53,0.12)",
+                    "[data-color-scheme='dark'] &": { bgcolor: "rgba(229,57,53,0.25)" },
+                    "& .MuiChip-icon": { color: "#E53935" },
+                  }}
+                />
               )}
             </Box>
             <LinearProgress

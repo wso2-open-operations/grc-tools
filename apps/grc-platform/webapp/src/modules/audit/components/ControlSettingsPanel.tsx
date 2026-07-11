@@ -43,7 +43,7 @@ import {
   TextField,
   Tooltip,
   Typography,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import { Pencil, Plus, Trash2, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Chip } from "@mui/material";
+import { Chip } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { AuditStatus } from "@modules/audit/types/audit";
 

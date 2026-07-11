@@ -23,6 +23,7 @@ import "time"
 type AuditFramework struct {
 	ID        int       `json:"id"`
 	Name      string    `json:"name"`
+	Version   *string   `json:"version"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -30,7 +31,8 @@ type AuditFramework struct {
 
 // CreateFrameworkRequest is the payload for POST /api/v1/audit/frameworks.
 type CreateFrameworkRequest struct {
-	Name string `json:"name"`
+	Name    string  `json:"name"`
+	Version *string `json:"version"`
 }
 
 // CreateProductRequest is the payload for POST /api/v1/audit/products.

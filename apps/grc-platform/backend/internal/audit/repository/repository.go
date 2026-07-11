@@ -29,7 +29,7 @@ type AuditRepository interface {
 	GetByID(ctx context.Context, id int) (*model.Audit, error)
 	Create(ctx context.Context, req model.CreateAuditRequest, createdBy string) (*model.Audit, error)
 	Update(ctx context.Context, id int, req model.UpdateAuditRequest, updatedBy string) error
-	Delete(ctx context.Context, id int) error
+	Delete(ctx context.Context, id int, deletedBy string) error
 }
 
 // FrameworkControlRepository is the data-access contract for the versioned framework control library.
@@ -104,3 +104,7 @@ type AssignmentRepository interface{}
 type NotificationRepository interface{}
 type AIValidationLogRepository interface{}
 type TrailRepository interface{}
+
+// ReviewRepository is the data-access contract for audit_item_review.
+// TODO: add Review/List/GetByID methods as the table schema is finalised.
+type ReviewRepository interface{}

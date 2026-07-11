@@ -14,504 +14,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import {
-  Alert,
-  Box,
-  Chip,
-  Divider,
-  LinearProgress,
-  Paper,
-  Skeleton,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Typography,
-} from "@wso2/oxygen-ui";
-import {
-  AlertTriangle,
-  CheckCircle,
-  ClipboardList,
-  FolderOpen,
-} from "@wso2/oxygen-ui-icons-react";
-import { PieChart, Pie, Cell } from "@wso2/oxygen-ui-charts-react";
-import { Sector } from "recharts";
+import { Alert, Box, Paper, Skeleton, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useGetAudits } from "@modules/audit/api/useGetAudits";
 import { useGetDashboard } from "@modules/audit/api/useGetDashboard";
 import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
 import { AuditPrivilege } from "@modules/audit/privileges";
-import { CONTROL_STATUS_COLORS, CONTROL_STATUS_LABELS } from "@modules/audit/utils/controlStatus";
-import type { ControlStatus } from "@modules/audit/types/audit";
-import type { ActionItem, OverdueControl, StatusCount, TeamCompletion } from "@modules/audit/types/dashboard";
-
-function statusColor(s: string): string {
-  return CONTROL_STATUS_COLORS[s as ControlStatus] ?? "#90A4AE";
-}
-function statusLabel(s: string): string {
-  return CONTROL_STATUS_LABELS[s as ControlStatus] ?? s;
-}
-
-const DUE_OVERDUE = "#E53935";
-const DUE_SOON = "#FB8C00";
-
-// dueInfo derives a color, a relative label, and a sort key from a YYYY-MM-DD date.
-function dueInfo(dueDate: string | null): { color: string; label: string; sortKey: number } {
-  if (!dueDate) return { color: "text.disabled", label: "—", sortKey: Number.POSITIVE_INFINITY };
-  const due = new Date(`${dueDate}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
-
-  let color = "text.primary";
-  let rel = "";
-  if (days < 0) { color = DUE_OVERDUE; rel = `${-days}d overdue`; }
-  else if (days === 0) { color = DUE_SOON; rel = "due today"; }
-  else if (days <= 3) { color = DUE_SOON; rel = `in ${days}d`; }
-  else { rel = `in ${days}d`; }
-
-  return { color, label: `${dueDate} · ${rel}`, sortKey: days };
-}
-
-// ── Action label per role/status ─────────────────────────────────────────────
-
-function actionLabel(status: string, canApprove: boolean): string {
-  switch (status) {
-    case "EVIDENCE_PENDING":               return "Submit evidence";
-    case "SUBMITTED_SAMPLE":              return "Submit evidence for sample";
-    case "EVIDENCE_NEED_CLARIFICATION":   return "Resubmit evidence";
-    case "POPULATION_PENDING":            return "Submit population";
-    case "POPULATION_NEED_CLARIFICATION": return "Resubmit population";
-    case "EVIDENCE_INTERNAL_REVIEW":
-    case "POPULATION_INTERNAL_REVIEW":
-      return canApprove ? "Review & approve" : "Pending review";
-    case "EVIDENCE_UNDER_VALIDATION":     return "Approve / request resubmission";
-    case "POPULATION_UNDER_VALIDATION":   return "Approve / reject population";
-    case "POPULATION_COMPLETE":           return "Submit sample";
-    case "AWAITING_SAMPLE":               return "Submit sample";
-    default:                              return "Action required";
-  }
-}
-
-// ── Active shape that doesn't expand (fixes the triangle/spike on hover) ─────
-
-function StillSector(props: Record<string, unknown>): JSX.Element {
-  // recharts passes the *expanded* outerRadius to activeShape; we subtract back
-  // the default active offset (5px) so the sector stays the same size on hover.
-  return (
-    <Sector
-      {...(props as Parameters<typeof Sector>[0])}
-      outerRadius={((props.outerRadius as number) ?? 0) - 5}
-    />
-  );
-}
-
-// ── Status donut chart ────────────────────────────────────────────────────────
-
-function StatusDonut({ data }: { data: StatusCount[] }): JSX.Element {
-  // Merge API data into the full 12-status list so all statuses always appear.
-  const countMap = Object.fromEntries(data.map((d) => [d.status, d.count]));
-  const pieData = (Object.keys(CONTROL_STATUS_LABELS) as ControlStatus[]).map((status) => ({
-    status,
-    label: CONTROL_STATUS_LABELS[status],
-    color: CONTROL_STATUS_COLORS[status],
-    value: countMap[status] ?? 0,
-  })).filter((s) => s.value > 0); // only show statuses that have controls
-
-  const total = pieData.reduce((s, d) => s + d.value, 0);
-
-  if (total === 0) {
-    return (
-      <Box sx={{ height: 240, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Typography variant="body2" color="text.secondary">No controls yet</Typography>
-      </Box>
-    );
-  }
-
-  return (
-    <Box sx={{ display: "flex", gap: 3, alignItems: "center" }}>
-      {/* Donut */}
-      <Box sx={{ width: 220, height: 220, flexShrink: 0 }}>
-        <PieChart
-          legend={{ show: false }}
-          margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-          height={220}
-          tooltip={{ show: true }}
-        >
-          <Pie
-            data={pieData}
-            dataKey="value"
-            nameKey="label"
-            cx="50%"
-            cy="50%"
-            innerRadius="50%"
-            outerRadius="80%"
-            paddingAngle={2}
-            strokeWidth={0}
-            activeShape={StillSector as unknown as (props: unknown) => JSX.Element}
-          >
-            {pieData.map((entry) => (
-              <Cell key={entry.status} fill={entry.color} />
-            ))}
-          </Pie>
-        </PieChart>
-      </Box>
-
-      {/* Legend — single column */}
-      <Box sx={{ flex: 1, display: "flex", flexDirection: "column", gap: 0.9 }}>
-        {pieData.map((entry) => (
-          <Box key={entry.status} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: entry.color, flexShrink: 0 }} />
-            <Typography variant="body2" sx={{ flex: 1, lineHeight: 1.3 }} noWrap title={entry.label}>
-              {entry.label}
-            </Typography>
-            <Typography variant="body2" fontWeight={700} sx={{ ml: 0.5 }}>
-              {total > 0 ? `${Math.round((entry.value / total) * 100)}%` : "0%"}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-    </Box>
-  );
-}
-
-// ── Team donut chart ──────────────────────────────────────────────────────────
-
-function TeamDonut({ data }: { data: TeamCompletion[] }): JSX.Element {
-  if (data.length === 0) {
-    return (
-      <Box sx={{ height: 240, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Typography variant="body2" color="text.secondary">No team data</Typography>
-      </Box>
-    );
-  }
-
-  const TEAM_COLORS = [
-    "#1E88E5","#43A047","#FB8C00","#8E24AA","#E53935",
-    "#039BE5","#FFB300","#AB47BC","#EF5350","#26A69A",
-  ];
-
-  const pieData = data.map((d, i) => ({
-    name: d.team,
-    value: d.total,
-    color: TEAM_COLORS[i % TEAM_COLORS.length],
-    completed: d.completed,
-    total: d.total,
-  }));
-
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {/* Donut */}
-      <Box sx={{ width: "100%", height: 200 }}>
-        <PieChart
-          legend={{ show: false }}
-          margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-          height={200}
-          tooltip={{ show: true }}
-        >
-          <Pie
-            data={pieData}
-            dataKey="value"
-            nameKey="name"
-            cx="50%"
-            cy="50%"
-            innerRadius="45%"
-            outerRadius="75%"
-            paddingAngle={2}
-            strokeWidth={0}
-            activeShape={StillSector}
-          >
-            {pieData.map((entry) => (
-              <Cell key={entry.name} fill={entry.color} />
-            ))}
-          </Pie>
-        </PieChart>
-      </Box>
-
-      {/* Legend with completion bars */}
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
-        {pieData.map((entry) => (
-          <Box key={entry.name} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: entry.color, flexShrink: 0 }} />
-            <Typography variant="body2" sx={{ width: 110, flexShrink: 0 }} noWrap title={entry.name}>
-              {entry.name}
-            </Typography>
-            <LinearProgress
-              variant="determinate"
-              value={entry.total > 0 ? (entry.completed / entry.total) * 100 : 0}
-              sx={{ flex: 1, height: 6, borderRadius: 3, bgcolor: "#E0E0E0",
-                "[data-color-scheme='dark'] &": { bgcolor: "rgba(255,255,255,0.12)" },
-                "& .MuiLinearProgress-bar": { bgcolor: entry.color } }}
-            />
-            <Typography variant="body2" color="text.secondary" sx={{ width: 44, textAlign: "right", flexShrink: 0 }}>
-              {entry.completed}/{entry.total}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-    </Box>
-  );
-}
-
-// ── Overview banner (replaces 8 stat cards + completion bar) ─────────────────
-
-interface OverviewBannerProps {
-  auditStats: { totalAudits: number; activeAudits: number; completedAudits: number; archivedAudits: number };
-  stats: { totalControls: number; completedControls: number; evidenceRequiredControls: number; overdueControls: number; completionPercent: number };
-  onOverdueClick: () => void;
-  onEvidenceClick: () => void;
-}
-
-function OverviewBanner({ auditStats, stats, onOverdueClick, onEvidenceClick }: OverviewBannerProps): JSX.Element {
-  const { totalAudits, activeAudits, completedAudits, archivedAudits } = auditStats;
-  const { totalControls, completedControls, evidenceRequiredControls, overdueControls, completionPercent } = stats;
-
-  return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, display: "flex", overflow: "hidden" }}>
-      {/* ── Audits panel ───────────────────────────────────────────────────── */}
-      <Box sx={{ flex: 1, p: 3, display: "flex", flexDirection: "column", gap: 2 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ width: 34, height: 34, borderRadius: 1.5, bgcolor: "#1E88E518", "[data-color-scheme='dark'] &": { bgcolor: "rgba(30,136,229,0.2)" }, display: "flex", alignItems: "center", justifyContent: "center", color: "#1E88E5" }}>
-            <FolderOpen size={18} />
-          </Box>
-          <Typography variant="subtitle2" color="text.secondary" sx={{ lineHeight: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Audits</Typography>
-        </Box>
-
-        {/* Primary number: Active */}
-        <Box sx={{ display: "flex", alignItems: "baseline", gap: 1.5 }}>
-          <Typography variant="h2" fontWeight={700} color="#1E88E5" lineHeight={1}>
-            {activeAudits}
-          </Typography>
-          <Typography variant="body1" color="text.secondary">Active</Typography>
-        </Box>
-
-        {/* Secondary breakdown */}
-        <Box sx={{ display: "flex", gap: 0, alignItems: "stretch" }}>
-          <Box sx={{ textAlign: "center", px: 2, pl: 0 }}>
-            <Typography variant="h4" fontWeight={700}>{totalAudits}</Typography>
-            <Typography variant="body2" color="text.secondary">Total</Typography>
-          </Box>
-          <Divider orientation="vertical" flexItem />
-          <Box sx={{ textAlign: "center", px: 2 }}>
-            <Typography variant="h4" fontWeight={700} color="#43A047">{completedAudits}</Typography>
-            <Typography variant="body2" color="text.secondary">Completed</Typography>
-          </Box>
-          <Divider orientation="vertical" flexItem />
-          <Box sx={{ textAlign: "center", px: 2 }}>
-            <Typography variant="h4" fontWeight={700} color="#78909C">{archivedAudits}</Typography>
-            <Typography variant="body2" color="text.secondary">Archived</Typography>
-          </Box>
-        </Box>
-      </Box>
-
-      <Divider orientation="vertical" flexItem />
-
-      {/* ── Controls panel ─────────────────────────────────────────────────── */}
-      <Box sx={{ flex: 1.4, p: 3, display: "flex", flexDirection: "column", gap: 2 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Box sx={{ width: 34, height: 34, borderRadius: 1.5, bgcolor: "#43A04718", "[data-color-scheme='dark'] &": { bgcolor: "rgba(67,160,71,0.2)" }, display: "flex", alignItems: "center", justifyContent: "center", color: "#43A047" }}>
-            <ClipboardList size={18} />
-          </Box>
-          <Typography variant="subtitle2" color="text.secondary" sx={{ lineHeight: 1, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Controls</Typography>
-        </Box>
-
-        {/* Total + progress bar */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 3 }}>
-          <Box sx={{ flexShrink: 0 }}>
-            <Typography variant="h2" fontWeight={700} lineHeight={1}>{totalControls}</Typography>
-            <Typography variant="body2" color="text.secondary">Total</Typography>
-          </Box>
-          <Box sx={{ flex: 1 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.75 }}>
-              <Typography variant="caption" color="text.secondary">Completion</Typography>
-              <Typography variant="body2" fontWeight={700} color="primary.main">
-                {completionPercent.toFixed(1)}%
-              </Typography>
-            </Box>
-            <LinearProgress
-              variant="determinate"
-              value={Math.min(completionPercent, 100)}
-              sx={{ height: 8, borderRadius: 4 }}
-            />
-          </Box>
-        </Box>
-
-        {/* 3 key metrics */}
-        <Box sx={{ display: "flex", gap: 0, alignItems: "stretch" }}>
-          <Box sx={{ textAlign: "center", px: 2, pl: 0 }}>
-            <Typography variant="h4" fontWeight={700} color="#43A047">{completedControls}</Typography>
-            <Typography variant="body2" color="text.secondary">Completed</Typography>
-          </Box>
-          <Divider orientation="vertical" flexItem />
-          <Box
-            onClick={onEvidenceClick}
-            sx={{
-              textAlign: "center", px: 2, borderRadius: 1.5, cursor: "pointer",
-              transition: "background 0.15s",
-              "&:hover": { bgcolor: "#FB8C0012" },
-            }}
-          >
-            <Typography variant="h4" fontWeight={700} color="#FB8C00">{evidenceRequiredControls}</Typography>
-            <Typography variant="body2" color="text.secondary">Evidence Required</Typography>
-          </Box>
-          <Divider orientation="vertical" flexItem />
-          <Box
-            onClick={onOverdueClick}
-            sx={{
-              textAlign: "center", px: 2, borderRadius: 1.5, cursor: "pointer",
-              transition: "background 0.15s",
-              "&:hover": { bgcolor: overdueControls > 0 ? "#E5393512" : "#78909C12" },
-            }}
-          >
-            <Typography variant="h4" fontWeight={700} color={overdueControls > 0 ? "#E53935" : "#78909C"}>
-              {overdueControls}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">Overdue</Typography>
-          </Box>
-        </Box>
-      </Box>
-    </Paper>
-  );
-}
+import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import AuditProgressList from "@modules/audit/components/dashboard/AuditProgressList";
+import HeroBand from "@modules/audit/components/dashboard/HeroBand";
+import KpiCards from "@modules/audit/components/dashboard/KpiCards";
+import PhaseDonut from "@modules/audit/components/dashboard/PhaseDonut";
+import TeamProgress from "@modules/audit/components/dashboard/TeamProgress";
+import WorkQueue, {
+  QUEUE_TAB_AWAITING,
+  QUEUE_TAB_OVERDUE,
+} from "@modules/audit/components/dashboard/WorkQueue";
+import { DUE_SOON_DAYS, dueInfo } from "@modules/audit/components/dashboard/dueDate";
 
 // ── Section card ──────────────────────────────────────────────────────────────
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+    // height: 100% + flex column lets grid rows stretch all cards equally;
+    // children with flex-basis 0 (AuditProgressList/TeamProgress) then fill
+    // whatever height the tallest card (e.g. the detailed donut) sets.
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
       <Box sx={{ px: 2.5, py: 1.5, borderBottom: 1, borderColor: "divider" }}>
         <Typography variant="subtitle1" fontWeight={700}>{title}</Typography>
       </Box>
-      <Box sx={{ p: 2.5 }}>{children}</Box>
+      <Box sx={{ p: 2.5, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{children}</Box>
     </Paper>
-  );
-}
-
-// ── Action items list ─────────────────────────────────────────────────────────
-
-function ActionItemsList({ items, canApprove }: { items: ActionItem[]; canApprove: boolean }): JSX.Element {
-  const navigate = useNavigate();
-
-  if (items.length === 0) {
-    return (
-      <Box sx={{ py: 3, textAlign: "center" }}>
-        <CheckCircle size={32} color="#43A047" />
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          No pending actions - you're all caught up!
-        </Typography>
-      </Box>
-    );
-  }
-
-  return (
-    <TableContainer>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>Control</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Audit</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Action needed</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
-            <TableCell sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>Due date</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {[...items].sort((a, b) => dueInfo(a.dueDate).sortKey - dueInfo(b.dueDate).sortKey).map((item) => {
-            const due = dueInfo(item.dueDate);
-            return (
-              <TableRow
-                key={item.controlId}
-                hover
-                sx={{ cursor: "pointer" }}
-                onClick={() => void navigate(`/audit/audits/${item.auditId}?control=${item.controlId}`)}
-              >
-                <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
-                <TableCell sx={{ maxWidth: 200 }}>
-                  <Typography variant="body2" noWrap title={item.auditName}>{item.auditName}</Typography>
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2" color="primary.main">{actionLabel(item.status, canApprove)}</Typography>
-                </TableCell>
-                <TableCell>
-                  <Chip
-                    label={statusLabel(item.status)}
-                    size="small"
-                    sx={{ bgcolor: `${statusColor(item.status)}18`, "[data-color-scheme='dark'] &": { bgcolor: `${statusColor(item.status)}40` }, color: statusColor(item.status), fontWeight: 600, fontSize: "0.7rem" }}
-                  />
-                </TableCell>
-                <TableCell sx={{ whiteSpace: "nowrap" }}>
-                  <Typography variant="body2" sx={{ color: due.color, fontWeight: due.sortKey <= 3 ? 600 : 400 }}>
-                    {due.label}
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-}
-
-// ── Overdue controls list ─────────────────────────────────────────────────────
-
-function OverdueList({ items }: { items: OverdueControl[] }): JSX.Element {
-  const navigate = useNavigate();
-
-  if (items.length === 0) {
-    return (
-      <Box sx={{ py: 3, textAlign: "center" }}>
-        <CheckCircle size={32} color="#43A047" />
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          No overdue controls
-        </Typography>
-      </Box>
-    );
-  }
-
-  return (
-    <TableContainer>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>Control</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Description</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Audit</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
-            <TableCell sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>Due date</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {items.map((item) => (
-            <TableRow
-              key={item.controlId}
-              hover
-              sx={{ cursor: "pointer" }}
-              onClick={() => void navigate(`/audit/audits/${item.auditId}?control=${item.controlId}`)}
-            >
-              <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
-              <TableCell sx={{ maxWidth: 260 }}>
-                <Typography variant="body2" noWrap title={item.description}>{item.description}</Typography>
-              </TableCell>
-              <TableCell sx={{ maxWidth: 180 }}>
-                <Typography variant="body2" noWrap title={item.auditName}>{item.auditName}</Typography>
-              </TableCell>
-              <TableCell>
-                <Chip
-                  label={statusLabel(item.status)}
-                  size="small"
-                  sx={{ bgcolor: `${statusColor(item.status)}18`, color: statusColor(item.status), fontWeight: 600, fontSize: "0.7rem" }}
-                />
-              </TableCell>
-              <TableCell sx={{ whiteSpace: "nowrap", color: "error.main", fontWeight: 600 }}>{item.dueDate}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
   );
 }
 
@@ -519,14 +53,19 @@ function OverdueList({ items }: { items: OverdueControl[] }): JSX.Element {
 
 function DashboardSkeleton(): JSX.Element {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <Skeleton variant="rectangular" height={150} sx={{ borderRadius: 2 }} />
-      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+    <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 3 }}>
+      <Skeleton variant="rectangular" height={140} sx={{ borderRadius: 2 }} />
+      <Box sx={{ display: "flex", gap: 2 }}>
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} variant="rectangular" height={92} sx={{ borderRadius: 2, flex: 1 }} />
+        ))}
+      </Box>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr 1fr" }, gap: 2 }}>
+        <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 2 }} />
         <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 2 }} />
         <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 2 }} />
       </Box>
-      <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 2 }} />
-      <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 2 }} />
+      <Skeleton variant="rectangular" height={260} sx={{ borderRadius: 2 }} />
     </Box>
   );
 }
@@ -536,27 +75,21 @@ function DashboardSkeleton(): JSX.Element {
 export default function AuditDashboard(): JSX.Element {
   const { can } = useAuditPrivileges();
   const { data, isLoading, isError } = useGetDashboard();
+  const { data: auditsData } = useGetAudits();
+  const claims = useIdTokenClaims();
 
-  const overdueRef = useRef<HTMLDivElement>(null);
-  const actionItemsRef = useRef<HTMLDivElement>(null);
-  const [overdueHighlight, setOverdueHighlight] = useState(false);
-  const [actionHighlight, setActionHighlight] = useState(false);
+  const queueRef = useRef<HTMLDivElement>(null);
+  const [queueTab, setQueueTab] = useState(QUEUE_TAB_AWAITING);
+  const [queueHighlight, setQueueHighlight] = useState(false);
 
-  const scrollAndHighlight = (ref: React.RefObject<HTMLDivElement | null>, setter: (v: boolean) => void) => {
-    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setter(true);
-    setTimeout(() => setter(false), 1800);
+  const jumpToQueue = (tab: number) => {
+    setQueueTab(tab);
+    queueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setQueueHighlight(true);
+    setTimeout(() => setQueueHighlight(false), 1800);
   };
 
-  if (isLoading) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Skeleton variant="text" width={240} height={44} sx={{ mb: 0.5 }} />
-        <Skeleton variant="text" width={180} height={22} sx={{ mb: 3 }} />
-        <DashboardSkeleton />
-      </Box>
-    );
-  }
+  if (isLoading) return <DashboardSkeleton />;
 
   if (isError || !data) {
     return (
@@ -567,107 +100,86 @@ export default function AuditDashboard(): JSX.Element {
   }
 
   const { auditStats, stats, statusDistribution, teamCompletion, actionItems, overdueControls } = data;
-  const canComment = can(AuditPrivilege.AddComment);
+
+  // Privilege-driven gating (never role names).
+  const canSubmit = can(AuditPrivilege.SubmitEvidence);
   const canApprove = can(AuditPrivilege.ReviewEvidence);
+  const hasQueue = canSubmit || canApprove;
+  const queueTitle = canApprove ? "Review Queue" : canSubmit ? "My Tasks" : "Action Items";
+  const awaitingCount = hasQueue ? actionItems.length : null;
+
+  const dueSoonCount = actionItems.filter((i) => {
+    const d = dueInfo(i.dueDate).days;
+    return d >= 0 && d <= DUE_SOON_DAYS;
+  }).length;
+
+  const userName =
+    (claims?.given_name as string | undefined) ??
+    (claims?.username as string | undefined)?.split("@")[0] ??
+    null;
 
   return (
     <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 3 }}>
 
-      {/* Header */}
-      <Box>
-        <Typography variant="h4" fontWeight={700}>Dashboard</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Overview of all active audits and controls
-        </Typography>
-      </Box>
-
-      {/* Attention banner — surfaces what needs action right now */}
-      {(overdueControls.length > 0 || (canComment && actionItems.length > 0)) && (
-        <Paper
-          variant="outlined"
-          sx={{
-            borderRadius: 2,
-            px: 2,
-            py: 1.25,
-            display: "flex",
-            alignItems: "center",
-            gap: 1.5,
-            flexWrap: "wrap",
-            borderColor: overdueControls.length > 0 ? DUE_OVERDUE : DUE_SOON,
-            bgcolor: overdueControls.length > 0 ? "rgba(229,57,53,0.05)" : "rgba(251,140,0,0.05)",
-            "[data-color-scheme='dark'] &": {
-              bgcolor: overdueControls.length > 0 ? "rgba(229,57,53,0.15)" : "rgba(251,140,0,0.15)",
-            },
-          }}
-        >
-          <AlertTriangle size={18} color={overdueControls.length > 0 ? DUE_OVERDUE : DUE_SOON} />
-          <Typography variant="body2" fontWeight={700}>Needs attention</Typography>
-          {overdueControls.length > 0 && (
-            <Chip
-              clickable
-              size="small"
-              label={`${overdueControls.length} overdue`}
-              onClick={() => scrollAndHighlight(overdueRef, setOverdueHighlight)}
-              sx={{ color: DUE_OVERDUE, bgcolor: "rgba(229,57,53,0.12)", "[data-color-scheme='dark'] &": { bgcolor: "rgba(229,57,53,0.25)" }, fontWeight: 600 }}
-            />
-          )}
-          {canComment && actionItems.length > 0 && (
-            <Chip
-              clickable
-              size="small"
-              label={`${actionItems.length} awaiting you`}
-              onClick={() => scrollAndHighlight(actionItemsRef, setActionHighlight)}
-              sx={{ color: DUE_SOON, bgcolor: "rgba(251,140,0,0.12)", "[data-color-scheme='dark'] &": { bgcolor: "rgba(251,140,0,0.25)" }, fontWeight: 600 }}
-            />
-          )}
-        </Paper>
-      )}
-
-      {/* Overview banner — Audits + Controls in one panel */}
-      <OverviewBanner
-        auditStats={auditStats}
-        stats={stats}
-        onOverdueClick={() => scrollAndHighlight(overdueRef, setOverdueHighlight)}
-        onEvidenceClick={() => scrollAndHighlight(actionItemsRef, setActionHighlight)}
+      {/* ① Hero band — greeting, completion ring, attention chips */}
+      <HeroBand
+        userName={userName}
+        completionPercent={stats.completionPercent}
+        activeAudits={auditStats.activeAudits}
+        totalControls={stats.totalControls}
+        overdueCount={overdueControls.length}
+        dueSoonCount={dueSoonCount}
+        awaitingCount={awaitingCount}
+        awaitingLabel={canApprove ? "to review" : "to submit"}
+        onOverdueClick={() => jumpToQueue(QUEUE_TAB_OVERDUE)}
+        onQueueClick={() => jumpToQueue(QUEUE_TAB_AWAITING)}
       />
 
-      {/* Charts */}
-      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
-        <SectionCard title="Controls by Status">
-          <StatusDonut data={statusDistribution} />
+      {/* ② KPI cards */}
+      <KpiCards
+        totalControls={stats.totalControls}
+        completedControls={stats.completedControls}
+        completionPercent={stats.completionPercent}
+        overdueControls={stats.overdueControls}
+        awaitingCount={awaitingCount}
+        awaitingLabel={queueTitle}
+        onAwaitingClick={() => jumpToQueue(QUEUE_TAB_AWAITING)}
+        onOverdueClick={() => jumpToQueue(QUEUE_TAB_OVERDUE)}
+      />
+
+      {/* ③ Charts row */}
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr 1fr" }, gap: 2 }}>
+        <SectionCard title="Controls by Phase">
+          <PhaseDonut data={statusDistribution} />
         </SectionCard>
-        <SectionCard title="Controls by Team">
-          <TeamDonut data={teamCompletion} />
+        <SectionCard title="Audit Progress">
+          <AuditProgressList audits={auditsData?.items ?? []} />
+        </SectionCard>
+        <SectionCard title="Team Progress">
+          <TeamProgress data={teamCompletion} />
         </SectionCard>
       </Box>
 
-      {/* My action items */}
-      {canComment && (
-        <Box
-          ref={actionItemsRef}
-          sx={{
-            borderRadius: 2,
-            outline: actionHighlight ? "2px solid #FB8C00" : "2px solid transparent",
-            transition: "outline-color 0.3s",
-          }}
-        >
-          <SectionCard title={`My Action Items (${actionItems.length})`}>
-            <ActionItemsList items={actionItems} canApprove={canApprove} />
-          </SectionCard>
-        </Box>
-      )}
-
-      {/* Overdue controls */}
+      {/* ④ Work queue — tabbed (awaiting you / due soon / overdue). Also shown
+          read-only for viewers without submit/review since the overdue tab is
+          the monitoring view (their awaiting tab will simply be empty). */}
       <Box
-        ref={overdueRef}
+        ref={queueRef}
         sx={{
           borderRadius: 2,
-          outline: overdueHighlight ? "2px solid #E53935" : "2px solid transparent",
+          outline: queueHighlight ? "2px solid #FB8C00" : "2px solid transparent",
           transition: "outline-color 0.3s",
         }}
       >
-        <SectionCard title={`Overdue Controls (${overdueControls.length})`}>
-          <OverdueList items={overdueControls} />
+        <SectionCard title="Work Queue">
+          <WorkQueue
+            actionItems={actionItems}
+            overdueControls={overdueControls}
+            canApprove={canApprove}
+            queueTitle={queueTitle}
+            tab={queueTab}
+            onTabChange={setQueueTab}
+          />
         </SectionCard>
       </Box>
 

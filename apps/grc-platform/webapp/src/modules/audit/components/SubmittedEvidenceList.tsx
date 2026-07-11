@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Skeleton, Typography } from "@mui/material";
+import { Box, Button, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { ExternalLink, FileText } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useGetEvidence } from "@modules/audit/api/useGetEvidence";
