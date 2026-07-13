@@ -74,7 +74,16 @@ export default function HighRisksTable({ data }: HighRisksTableProps): JSX.Eleme
             <TableRow
               key={risk.id}
               hover
+              role="button"
+              tabIndex={0}
+              aria-expanded={expanded.has(risk.id)}
               onClick={() => toggle(risk.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggle(risk.id);
+                }
+              }}
               sx={{ cursor: "pointer", verticalAlign: "top" }}
             >
               <TableCell>

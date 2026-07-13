@@ -66,7 +66,7 @@ func (d *dashboardRepository) StatusCounts(ctx context.Context) (*model.RiskStat
 func (d *dashboardRepository) OpenRiskFacts(ctx context.Context) ([]model.OpenRiskFact, error) {
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT st.id, st.name, rs.likelihood, rs.impact, rs.risk_level, rs.color_code,
-		       COALESCE(r.treatment_strategy, ''), COUNT(*)
+		       COALESCE(r.treatment_strategy, 'UNSPECIFIED'), COUNT(*)
 		FROM risk r
 		JOIN risk_team st ON st.id = r.source_register_id`+effectiveScoreJoin+`
 		WHERE r.workflow_status NOT IN (?, ?)
@@ -167,7 +167,7 @@ func (d *dashboardRepository) HighRisks(ctx context.Context) ([]model.HighRiskIt
 		LEFT JOIN `+"`user`"+` owner ON owner.id = r.owner_id
 		WHERE r.workflow_status NOT IN (?, ?)
 		  AND rs.risk_level = 'HIGH'
-		ORDER BY r.risk_identified_date ASC, r.id ASC`,
+		ORDER BY r.risk_identified_date IS NULL, r.risk_identified_date ASC, r.id ASC`,
 		model.StatusClosed, model.StatusCancelled,
 	)
 	if err != nil {

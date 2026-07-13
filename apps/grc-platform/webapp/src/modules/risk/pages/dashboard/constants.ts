@@ -19,13 +19,14 @@
 // separation. Segment labels stay visible because two hues sit below 3:1
 // contrast on light surfaces.
 
-export const TREATMENT_ORDER = ["REMEDIATE", "ACCEPT", "TRANSFER", "VOID"] as const;
+export const TREATMENT_ORDER = ["REMEDIATE", "ACCEPT", "TRANSFER", "VOID", "UNSPECIFIED"] as const;
 
 export const TREATMENT_LABELS: Record<string, string> = {
   REMEDIATE: "Remediate",
   ACCEPT: "Accept",
   TRANSFER: "Transfer",
   VOID: "Void",
+  UNSPECIFIED: "Unspecified",
 };
 
 export const TREATMENT_COLORS: Record<string, string> = {
@@ -33,6 +34,7 @@ export const TREATMENT_COLORS: Record<string, string> = {
   ACCEPT: "#1baf7a",
   TRANSFER: "#eda100",
   VOID: "#4a3aa7",
+  UNSPECIFIED: "#8a8a8a",
 };
 
 // Open/closed pair for the status pie and status chips (open = attention red).
@@ -98,18 +100,21 @@ export function buildCertColorMap(certNames: string[]): Map<string, string> {
   return map;
 }
 
+// Backend dates are date-only values serialized as UTC midnight timestamps
+// (e.g. "2026-03-15T00:00:00Z"); rendering in the viewer's local zone would
+// shift the displayed day for anyone west of UTC, so we format in UTC.
 export function formatDate(value: string | null): string {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 }
 
 export function formatMonthYear(value: string | null): string {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "short" });
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", timeZone: "UTC" });
 }
 
 // Renders the treatment column shown in tables: "Accept", or

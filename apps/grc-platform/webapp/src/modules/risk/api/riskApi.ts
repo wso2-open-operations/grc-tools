@@ -217,6 +217,7 @@ export interface RiskStatusSummary {
   total: number;
   open: number;
   closed: number;
+  overdue: number;
 }
 
 export interface RegisterTreatmentCount {
