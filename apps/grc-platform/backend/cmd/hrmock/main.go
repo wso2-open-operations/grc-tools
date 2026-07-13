@@ -149,7 +149,9 @@ func containsFold(list []string, target string) bool {
 }
 
 func main() {
-	port := os.Getenv("PORT")
+	// Deliberately not "PORT" — cmd/server's .env already sets PORT=:8080,
+	// and both get sourced from the same file in local dev.
+	port := os.Getenv("HRMOCK_PORT")
 	if port == "" {
 		port = "9090"
 	}
