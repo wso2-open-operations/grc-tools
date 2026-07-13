@@ -114,12 +114,13 @@ export default function RiskHeatmap({ cells, scores }: RiskHeatmapProps): JSX.El
                   const levelName = score
                     ? (LEVEL_LABELS[score.risk_level] ?? score.risk_level)
                     : "";
+                  const cellDescription = `Likelihood ${likelihood} × Impact ${impact}${levelName ? ` — ${levelName}` : ""}: ${count} open risk${count === 1 ? "" : "s"}`;
                   return (
-                    <Tooltip
-                      key={`${likelihood}-${impact}`}
-                      title={`Likelihood ${likelihood} × Impact ${impact}${levelName ? ` — ${levelName}` : ""}: ${count} open risk${count === 1 ? "" : "s"}`}
-                    >
+                    <Tooltip key={`${likelihood}-${impact}`} title={cellDescription}>
                       <Box
+                        tabIndex={0}
+                        role="img"
+                        aria-label={cellDescription}
                         sx={{
                           aspectRatio: "1.6",
                           minHeight: 56,
@@ -150,6 +151,9 @@ export default function RiskHeatmap({ cells, scores }: RiskHeatmapProps): JSX.El
                 title={`Overall residual risk — Likelihood ${overall.likelihood.toFixed(1)}, Impact ${overall.impact.toFixed(1)}`}
               >
                 <Box
+                  tabIndex={0}
+                  role="img"
+                  aria-label={`Overall residual risk — Likelihood ${overall.likelihood.toFixed(1)}, Impact ${overall.impact.toFixed(1)}`}
                   sx={{
                     position: "absolute",
                     left: `${axisValueToPercent(overall.impact)}%`,
