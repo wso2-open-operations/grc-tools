@@ -143,18 +143,24 @@ type AnalyticsRepository interface {
 
 // DashboardRepository provides the aggregated read queries behind GET /api/v1/risks/dashboard.
 // All methods exclude CANCELLED risks; "open" means any status other than CLOSED.
+// Every method takes an optional registerID (nil = all registers) to scope
+// its result to the page's register filter, mirroring AnalyticsRepository.
 type DashboardRepository interface {
 	// StatusCounts returns total / open / closed risk counts.
-	StatusCounts(ctx context.Context) (*model.RiskStatusSummary, error)
+	StatusCounts(ctx context.Context, registerID *int) (*model.RiskStatusSummary, error)
 	// OpenRiskFacts returns open risks grouped by register × effective residual
 	// score cell × treatment strategy; the service derives all open-risk charts from it.
-	OpenRiskFacts(ctx context.Context) ([]model.OpenRiskFact, error)
+	OpenRiskFacts(ctx context.Context, registerID *int) ([]model.OpenRiskFact, error)
+	// RegisterStatusFacts returns every non-cancelled risk (open and closed)
+	// grouped by register × effective residual level × status bucket; the
+	// service derives each register's status chart from it.
+	RegisterStatusFacts(ctx context.Context, registerID *int) ([]model.RegisterStatusFact, error)
 	// CertTagCounts returns open cert-tag occurrences per register × certification.
-	CertTagCounts(ctx context.Context) ([]model.RegisterCertCount, error)
+	CertTagCounts(ctx context.Context, registerID *int) ([]model.RegisterCertCount, error)
 	// RepeatedComplianceRisks returns per-register occurrences of cert-tagged risk
 	// titles that appear in two or more source registers.
-	RepeatedComplianceRisks(ctx context.Context) ([]model.RepeatedRiskRow, error)
+	RepeatedComplianceRisks(ctx context.Context, registerID *int) ([]model.RepeatedRiskRow, error)
 	// HighRisks returns open risks whose effective residual level is HIGH,
 	// oldest identified first.
-	HighRisks(ctx context.Context) ([]model.HighRiskItem, error)
+	HighRisks(ctx context.Context, registerID *int) ([]model.HighRiskItem, error)
 }

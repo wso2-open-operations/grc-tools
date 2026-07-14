@@ -252,9 +252,10 @@ export interface RegisterCertShare {
   percentage: number;
 }
 
-export interface RegisterLevelTreatmentCount {
+export interface RegisterStatusLevelCount {
+  bucket: string;
   risk_level: string;
-  treatment_strategy: string;
+  color_code: string;
   count: number;
 }
 
@@ -263,8 +264,7 @@ export interface RegisterAnalytics {
   register_name: string;
   open_count: number;
   heatmap: HeatmapCell[];
-  level_counts: RiskLevelCount[];
-  level_treatments: RegisterLevelTreatmentCount[];
+  status_levels: RegisterStatusLevelCount[];
 }
 
 export interface RepeatedRiskOccurrence {
@@ -282,7 +282,7 @@ export interface RepeatedComplianceRisk {
 export interface HighRiskItem {
   id: number;
   risk_code: string;
-  risk_description: string;
+  risk_title: string;
   register_name: string;
   owner_name: string;
   identified_date: string | null;
@@ -561,8 +561,12 @@ export async function resubmitRisk(authFetch: AuthFetch, id: number): Promise<vo
   return handleResponse<void>(res);
 }
 
-export async function fetchDashboard(authFetch: AuthFetch): Promise<DashboardSummary> {
-  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/dashboard`);
+export async function fetchDashboard(
+  authFetch: AuthFetch,
+  registerId?: number,
+): Promise<DashboardSummary> {
+  const qs = registerId ? `?register_id=${registerId}` : "";
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/dashboard${qs}`);
   return handleResponse<DashboardSummary>(res);
 }
 

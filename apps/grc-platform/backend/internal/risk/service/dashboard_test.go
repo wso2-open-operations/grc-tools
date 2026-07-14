@@ -107,10 +107,17 @@ func TestBuildRegisterBlocks(t *testing.T) {
 		{RegisterID: 1, RegisterName: "Choreo", Likelihood: 1, Impact: 1, RiskLevel: "LOW", ColorCode: "#00B050", TreatmentStrategy: "ACCEPT", Count: 1},
 		{RegisterID: 2, RegisterName: "Business", Likelihood: 2, Impact: 2, RiskLevel: "MEDIUM", ColorCode: "#FF9900", TreatmentStrategy: "TRANSFER", Count: 4},
 	}
+	statusFacts := []model.RegisterStatusFact{
+		{RegisterID: 1, RegisterName: "Choreo", RiskLevel: "HIGH", ColorCode: "#FF0000", Bucket: "REMEDIATE", Count: 2},
+		{RegisterID: 1, RegisterName: "Choreo", RiskLevel: "LOW", ColorCode: "#00B050", Bucket: "ACCEPT", Count: 1},
+		{RegisterID: 1, RegisterName: "Choreo", RiskLevel: "MEDIUM", ColorCode: "#FF9900", Bucket: "CLOSED", Count: 5},
+		{RegisterID: 2, RegisterName: "Business", RiskLevel: "MEDIUM", ColorCode: "#FF9900", Bucket: "TRANSFER", Count: 4},
+		{RegisterID: 3, RegisterName: "Ballerina", RiskLevel: "LOW", ColorCode: "#00B050", Bucket: "CLOSED", Count: 2},
+	}
 
-	got := buildRegisterBlocks(facts)
-	if len(got) != 2 {
-		t.Fatalf("buildRegisterBlocks() returned %d blocks, want 2", len(got))
+	got := buildRegisterBlocks(facts, statusFacts)
+	if len(got) != 3 {
+		t.Fatalf("buildRegisterBlocks() returned %d blocks, want 3", len(got))
 	}
 
 	choreo := got[0]
@@ -123,13 +130,52 @@ func TestBuildRegisterBlocks(t *testing.T) {
 	if len(choreo.Heatmap) != 2 {
 		t.Errorf("choreo.Heatmap has %d cells, want 2", len(choreo.Heatmap))
 	}
-	if len(choreo.LevelCounts) != 2 {
-		t.Errorf("choreo.LevelCounts has %d entries, want 2 (HIGH, LOW)", len(choreo.LevelCounts))
+	if len(choreo.StatusLevels) != 3 {
+		t.Errorf("choreo.StatusLevels has %d entries, want 3", len(choreo.StatusLevels))
 	}
 
 	business := got[1]
 	if business.RegisterID != 2 || business.OpenCount != 4 {
 		t.Errorf("block[1] = %+v, want register 2 with OpenCount 4", business)
+	}
+
+	// Ballerina has only closed risks (no OpenRiskFact rows) but must still
+	// get a section, since StatusLevels now covers closed risks too.
+	ballerina := got[2]
+	if ballerina.RegisterID != 3 || ballerina.OpenCount != 0 {
+		t.Errorf("block[2] = %+v, want register 3 (Ballerina) with OpenCount 0", ballerina)
+	}
+	if len(ballerina.Heatmap) != 0 {
+		t.Errorf("ballerina.Heatmap has %d cells, want 0 (no open risks)", len(ballerina.Heatmap))
+	}
+	if len(ballerina.StatusLevels) != 1 {
+		t.Errorf("ballerina.StatusLevels has %d entries, want 1", len(ballerina.StatusLevels))
+	}
+}
+
+func TestBuildStatusLevels(t *testing.T) {
+	facts := []model.RegisterStatusFact{
+		{RiskLevel: "LOW", ColorCode: "#00B050", Bucket: "CLOSED", Count: 2},
+		{RiskLevel: "HIGH", ColorCode: "#FF0000", Bucket: "REMEDIATE", Count: 1},
+		{RiskLevel: "LOW", ColorCode: "#00B050", Bucket: "CLOSED", Count: 3},
+		{RiskLevel: "MEDIUM", ColorCode: "#FF9900", Bucket: "ACCEPT", Count: 4},
+	}
+
+	got := buildStatusLevels(facts)
+	want := []model.RegisterStatusLevelCount{
+		{Bucket: "CLOSED", RiskLevel: "LOW", ColorCode: "#00B050", Count: 5},
+		{Bucket: "REMEDIATE", RiskLevel: "HIGH", ColorCode: "#FF0000", Count: 1},
+		{Bucket: "ACCEPT", RiskLevel: "MEDIUM", ColorCode: "#FF9900", Count: 4},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildStatusLevels() = %+v, want %+v", got, want)
+	}
+}
+
+func TestBuildStatusLevelsEmpty(t *testing.T) {
+	got := buildStatusLevels(nil)
+	if len(got) != 0 {
+		t.Errorf("buildStatusLevels(nil) = %+v, want empty", got)
 	}
 }
 

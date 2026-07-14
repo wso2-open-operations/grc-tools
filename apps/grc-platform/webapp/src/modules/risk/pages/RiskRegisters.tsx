@@ -50,6 +50,7 @@ import {
 import { Eye, RefreshCw, Search, X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import type * as React from "react";
+import { useSearchParams } from "react-router";
 import {
   approveRisk,
   cancelRisk,
@@ -398,6 +399,25 @@ export default function RiskRegisters(): JSX.Element {
     setDrawerDetail(null);
     setDrawerError("");
   };
+
+  // Deep link from the dashboard's High Severity Open Risks table
+  // (?riskId=N): auto-open that risk's drawer once, then strip the param so
+  // it doesn't re-trigger on drawer close or refresh.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const riskId = searchParams.get("riskId");
+    if (!riskId) return;
+    openDrawer(Number(riskId));
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("riskId");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const runAction = async (fn: () => Promise<void>, successMsg: string) => {
     if (actionInFlight) return;

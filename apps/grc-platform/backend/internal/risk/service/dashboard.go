@@ -26,7 +26,9 @@ import (
 
 // DashboardService assembles the risk dashboard payload.
 type DashboardService interface {
-	Summary(ctx context.Context) (*model.DashboardSummary, error)
+	// Summary builds the dashboard payload, optionally scoped to one
+	// register (nil = all registers).
+	Summary(ctx context.Context, registerID *int) (*model.DashboardSummary, error)
 }
 
 type dashboardService struct {
@@ -41,24 +43,31 @@ func NewDashboardService(repo repository.DashboardRepository) DashboardService {
 // riskLevelOrder fixes the display order of level-based charts.
 var riskLevelOrder = []string{"HIGH", "MEDIUM", "LOW"}
 
-func (s *dashboardService) Summary(ctx context.Context) (*model.DashboardSummary, error) {
-	counts, err := s.repo.StatusCounts(ctx)
+// statusBucketOrder fixes the x-axis order of each register's status chart.
+var statusBucketOrder = []string{"CLOSED", "REMEDIATE", "ACCEPT", "TRANSFER", "VOID"}
+
+func (s *dashboardService) Summary(ctx context.Context, registerID *int) (*model.DashboardSummary, error) {
+	counts, err := s.repo.StatusCounts(ctx, registerID)
 	if err != nil {
 		return nil, err
 	}
-	facts, err := s.repo.OpenRiskFacts(ctx)
+	facts, err := s.repo.OpenRiskFacts(ctx, registerID)
 	if err != nil {
 		return nil, err
 	}
-	certCounts, err := s.repo.CertTagCounts(ctx)
+	statusFacts, err := s.repo.RegisterStatusFacts(ctx, registerID)
 	if err != nil {
 		return nil, err
 	}
-	repeatedRows, err := s.repo.RepeatedComplianceRisks(ctx)
+	certCounts, err := s.repo.CertTagCounts(ctx, registerID)
 	if err != nil {
 		return nil, err
 	}
-	highRisks, err := s.repo.HighRisks(ctx)
+	repeatedRows, err := s.repo.RepeatedComplianceRisks(ctx, registerID)
+	if err != nil {
+		return nil, err
+	}
+	highRisks, err := s.repo.HighRisks(ctx, registerID)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +81,7 @@ func (s *dashboardService) Summary(ctx context.Context) (*model.DashboardSummary
 		LevelCounts:             buildLevelCounts(facts),
 		OrgHeatmap:              buildHeatmap(facts),
 		CertDistribution:        buildCertDistribution(certCounts),
-		Registers:               buildRegisterBlocks(facts),
+		Registers:               buildRegisterBlocks(facts, statusFacts),
 		RepeatedComplianceRisks: buildRepeatedRisks(repeatedRows),
 		HighRisks:               highRisks,
 	}, nil
@@ -168,11 +177,15 @@ func buildCertDistribution(counts []model.RegisterCertCount) []model.RegisterCer
 }
 
 // buildRegisterBlocks groups facts into one dashboard section per register.
-func buildRegisterBlocks(facts []model.OpenRiskFact) []model.RegisterAnalytics {
+// statusFacts (open + closed) is the superset that determines which
+// registers appear and their order; facts (open-only) supplements OpenCount
+// and the heatmap, which stay open-scoped.
+func buildRegisterBlocks(facts []model.OpenRiskFact, statusFacts []model.RegisterStatusFact) []model.RegisterAnalytics {
 	blocks := map[int]*model.RegisterAnalytics{}
-	grouped := map[int][]model.OpenRiskFact{}
 	var order []int
-	for _, f := range facts {
+
+	statusGrouped := map[int][]model.RegisterStatusFact{}
+	for _, f := range statusFacts {
 		if _, ok := blocks[f.RegisterID]; !ok {
 			blocks[f.RegisterID] = &model.RegisterAnalytics{
 				RegisterID:   f.RegisterID,
@@ -180,6 +193,11 @@ func buildRegisterBlocks(facts []model.OpenRiskFact) []model.RegisterAnalytics {
 			}
 			order = append(order, f.RegisterID)
 		}
+		statusGrouped[f.RegisterID] = append(statusGrouped[f.RegisterID], f)
+	}
+
+	grouped := map[int][]model.OpenRiskFact{}
+	for _, f := range facts {
 		blocks[f.RegisterID].OpenCount += f.Count
 		grouped[f.RegisterID] = append(grouped[f.RegisterID], f)
 	}
@@ -188,34 +206,33 @@ func buildRegisterBlocks(facts []model.OpenRiskFact) []model.RegisterAnalytics {
 	for _, id := range order {
 		b := blocks[id]
 		b.Heatmap = buildHeatmap(grouped[id])
-		b.LevelCounts = buildLevelCounts(grouped[id])
-		b.LevelTreatments = buildLevelTreatments(grouped[id])
+		b.StatusLevels = buildStatusLevels(statusGrouped[id])
 		out = append(out, *b)
 	}
 	return out
 }
 
-// buildLevelTreatments collapses one register's facts into level × treatment
-// counts ordered HIGH → LOW.
-func buildLevelTreatments(facts []model.OpenRiskFact) []model.RegisterLevelTreatmentCount {
-	type key struct{ level, strategy string }
+// buildStatusLevels collapses one register's status facts into bucket ×
+// level counts, ordered by statusBucketOrder then HIGH → LOW.
+func buildStatusLevels(facts []model.RegisterStatusFact) []model.RegisterStatusLevelCount {
+	type key struct{ bucket, level string }
 	counts := map[key]int{}
-	strategyOrder := map[string][]string{}
+	colors := map[string]string{}
 	for _, f := range facts {
-		k := key{f.RiskLevel, f.TreatmentStrategy}
-		if _, seen := counts[k]; !seen {
-			strategyOrder[f.RiskLevel] = append(strategyOrder[f.RiskLevel], f.TreatmentStrategy)
-		}
-		counts[k] += f.Count
+		counts[key{f.Bucket, f.RiskLevel}] += f.Count
+		colors[f.RiskLevel] = f.ColorCode
 	}
-	var out []model.RegisterLevelTreatmentCount
-	for _, level := range riskLevelOrder {
-		for _, strategy := range strategyOrder[level] {
-			out = append(out, model.RegisterLevelTreatmentCount{
-				RiskLevel:         level,
-				TreatmentStrategy: strategy,
-				Count:             counts[key{level, strategy}],
-			})
+	var out []model.RegisterStatusLevelCount
+	for _, bucket := range statusBucketOrder {
+		for _, level := range riskLevelOrder {
+			if n, ok := counts[key{bucket, level}]; ok {
+				out = append(out, model.RegisterStatusLevelCount{
+					Bucket:    bucket,
+					RiskLevel: level,
+					ColorCode: colors[level],
+					Count:     n,
+				})
+			}
 		}
 	}
 	return out
