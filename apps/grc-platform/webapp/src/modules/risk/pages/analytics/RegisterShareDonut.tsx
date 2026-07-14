@@ -18,7 +18,7 @@ import { PieChart } from "@wso2/oxygen-ui-charts-react";
 import { Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { RegisterShare } from "../../api/riskApi";
-import { buildCertColorMap } from "../dashboard/constants";
+import { buildRegisterColorMap } from "../dashboard/constants";
 
 interface RegisterShareDonutProps {
   data: RegisterShare[] | null;
@@ -37,7 +37,7 @@ export default function RegisterShareDonut({ data }: RegisterShareDonutProps): J
     );
   }
 
-  const colorMap = buildCertColorMap(data.map((d) => d.register_name));
+  const colorMap = buildRegisterColorMap(data.map((d) => d.register_name));
   const rows = data.map((d) => ({ name: d.register_name, value: d.count }));
 
   return (

@@ -410,11 +410,26 @@ export default function RiskRegisters(): JSX.Element {
 
   const loadRisks = useCallback(async () => {
     const seq = ++loadSeqRef.current;
+    const statuses = getStatuses();
+    // getStatuses() returns [] both when no Status filter is selected (no
+    // restriction) and when the selected Status values are disjoint from the
+    // current tab/approvedFilter scope (genuinely zero matches). fetchRisks
+    // treats an empty array as "no filter" and omits the statuses param
+    // entirely, which the backend then reads as "no restriction" — silently
+    // returning risks from every workflow status instead of none. Short-
+    // circuit the disjoint case here rather than hitting the server.
+    if (statuses.length === 0 && filters.status.length > 0) {
+      setRisks([]);
+      setTotal(0);
+      setListError("");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setListError("");
     try {
       const result = await fetchRisks(authFetch, {
-        statuses: getStatuses(),
+        statuses,
         team_id: filters.teamId.length ? filters.teamId : undefined,
         level: filters.level.length ? filters.level : undefined,
         search: filters.search || undefined,

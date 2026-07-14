@@ -109,6 +109,15 @@ func (s *analyticsService) Summary(ctx context.Context, registerID *int) (*model
 	if aging == nil {
 		aging = []model.AgingRiskItem{}
 	}
+	if complianceShares == nil {
+		complianceShares = []model.ComplianceShare{}
+	}
+	if treatmentShares == nil {
+		treatmentShares = []model.TreatmentShare{}
+	}
+	if funnel == nil {
+		funnel = []model.WorkflowStageCount{}
+	}
 
 	return &model.AnalyticsSummary{
 		KPIs:                 *kpis,
