@@ -164,10 +164,16 @@ export interface RiskDetail {
 
 export interface ListRisksParams {
   statuses?: string[];
-  team_id?: number;
-  level?: string;
+  team_id?: number[];
+  level?: string[];
   search?: string;
-  risk_type?: string;
+  risk_type?: string[];
+  owner_id?: number[];
+  submitted_from?: string;
+  submitted_to?: string;
+  due_from?: string;
+  due_to?: string;
+  due_overdue?: boolean;
   offset?: number;
   limit?: number;
 }
@@ -480,10 +486,16 @@ export async function fetchRisks(
 ): Promise<RiskListPage> {
   const q = new URLSearchParams();
   if (params.statuses?.length) q.set("statuses", params.statuses.join(","));
-  if (params.team_id) q.set("team_id", String(params.team_id));
-  if (params.level) q.set("level", params.level);
+  if (params.team_id?.length) q.set("team_id", params.team_id.join(","));
+  if (params.level?.length) q.set("level", params.level.join(","));
   if (params.search) q.set("search", params.search);
-  if (params.risk_type) q.set("risk_type", params.risk_type);
+  if (params.risk_type?.length) q.set("risk_type", params.risk_type.join(","));
+  if (params.owner_id?.length) q.set("owner_id", params.owner_id.join(","));
+  if (params.submitted_from) q.set("submitted_from", params.submitted_from);
+  if (params.submitted_to) q.set("submitted_to", params.submitted_to);
+  if (params.due_from) q.set("due_from", params.due_from);
+  if (params.due_to) q.set("due_to", params.due_to);
+  if (params.due_overdue) q.set("due_overdue", "true");
   if (params.offset !== undefined) q.set("offset", String(params.offset));
   if (params.limit !== undefined) q.set("limit", String(params.limit));
   const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks?${q}`);

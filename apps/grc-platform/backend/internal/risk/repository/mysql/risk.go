@@ -238,6 +238,11 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 	return &model.CreateRiskResponse{ID: riskID, RiskCode: riskCode}, nil
 }
 
+// placeholders returns n comma-separated `?` marks for a SQL IN (...) clause.
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
 func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter) (*model.RiskListPage, error) {
 	query := `
 		SELECT r.id, r.risk_code, r.risk_title,
@@ -263,29 +268,58 @@ func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter)
 	var where []string
 
 	if len(filter.Statuses) > 0 {
-		placeholders := strings.Repeat("?,", len(filter.Statuses))
-		placeholders = placeholders[:len(placeholders)-1]
-		where = append(where, "r.workflow_status IN ("+placeholders+")")
+		where = append(where, "r.workflow_status IN ("+placeholders(len(filter.Statuses))+")")
 		for _, s := range filter.Statuses {
 			args = append(args, s)
 		}
 	}
-	if filter.TeamID > 0 {
-		where = append(where, "r.source_register_id = ?")
-		args = append(args, filter.TeamID)
+	if len(filter.TeamIDs) > 0 {
+		where = append(where, "r.source_register_id IN ("+placeholders(len(filter.TeamIDs))+")")
+		for _, id := range filter.TeamIDs {
+			args = append(args, id)
+		}
 	}
-	if filter.Level != "" {
-		where = append(where, "rs.risk_level = ?")
-		args = append(args, filter.Level)
+	if len(filter.Levels) > 0 {
+		where = append(where, "rs.risk_level IN ("+placeholders(len(filter.Levels))+")")
+		for _, l := range filter.Levels {
+			args = append(args, l)
+		}
 	}
 	if filter.Search != "" {
 		where = append(where, "(r.risk_code LIKE ? OR r.risk_title LIKE ?)")
 		like := "%" + filter.Search + "%"
 		args = append(args, like, like)
 	}
-	if filter.RiskType != "" {
-		where = append(where, "r.risk_type = ?")
-		args = append(args, filter.RiskType)
+	if len(filter.RiskTypes) > 0 {
+		where = append(where, "r.risk_type IN ("+placeholders(len(filter.RiskTypes))+")")
+		for _, t := range filter.RiskTypes {
+			args = append(args, t)
+		}
+	}
+	if len(filter.OwnerIDs) > 0 {
+		where = append(where, "r.owner_id IN ("+placeholders(len(filter.OwnerIDs))+")")
+		for _, id := range filter.OwnerIDs {
+			args = append(args, id)
+		}
+	}
+	if filter.SubmittedFrom != "" {
+		where = append(where, "r.created_at >= ?")
+		args = append(args, filter.SubmittedFrom+" 00:00:00")
+	}
+	if filter.SubmittedTo != "" {
+		where = append(where, "r.created_at <= ?")
+		args = append(args, filter.SubmittedTo+" 23:59:59")
+	}
+	if filter.DueFrom != "" {
+		where = append(where, "r.implementation_date >= ?")
+		args = append(args, filter.DueFrom)
+	}
+	if filter.DueTo != "" {
+		where = append(where, "r.implementation_date <= ?")
+		args = append(args, filter.DueTo)
+	}
+	if filter.DueOverdueOnly {
+		where = append(where, "r.implementation_date IS NOT NULL AND r.implementation_date < CURDATE()")
 	}
 
 	if len(where) > 0 {
