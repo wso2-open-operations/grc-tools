@@ -25,13 +25,16 @@ interface CsvExportButtonProps {
 }
 
 function escapeCsv(value: unknown): string {
-  const s = value == null ? "" : String(value);
+  const raw = value == null ? "" : String(value);
+  // Neutralize formula injection: a leading =, +, -, @, tab, or CR is
+  // interpreted as a formula by Excel/Sheets when the CSV is opened.
+  const s = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function section(title: string, rows: Record<string, unknown>[]): string {
+function section<T extends object>(title: string, rows: T[]): string {
   if (rows.length === 0) return `${title}\n(no data)\n`;
-  const headers = Object.keys(rows[0]);
+  const headers = Object.keys(rows[0]) as (keyof T)[];
   const lines = [
     title,
     headers.join(","),
@@ -47,13 +50,13 @@ function buildCsv(data: AnalyticsSummary): string {
       { metric: "Avg. Days to Close", value: data.kpis.avg_days_to_close ?? "" },
       { metric: "Avg. Effective Score", value: data.kpis.avg_effective_score ?? "" },
     ]),
-    section("Risk Trend Over Time", data.trend as unknown as Record<string, unknown>[]),
-    section("Risk Level Distribution Over Time", data.level_distribution as unknown as Record<string, unknown>[]),
-    section("Risks by Register", (data.register_shares ?? []) as unknown as Record<string, unknown>[]),
-    section("Compliance Reference Distribution", data.compliance_distribution as unknown as Record<string, unknown>[]),
-    section("Risk Treatment Strategies", data.treatment_mix as unknown as Record<string, unknown>[]),
-    section("Workflow Status Funnel", data.workflow_funnel as unknown as Record<string, unknown>[]),
-    section("Aging Open Risks", data.aging_risks as unknown as Record<string, unknown>[]),
+    section("Risk Trend Over Time", data.trend),
+    section("Risk Level Distribution Over Time", data.level_distribution),
+    section("Risks by Register", data.register_shares ?? []),
+    section("Compliance Reference Distribution", data.compliance_distribution),
+    section("Risk Treatment Strategies", data.treatment_mix),
+    section("Workflow Status Funnel", data.workflow_funnel),
+    section("Aging Open Risks", data.aging_risks),
   ];
   return parts.join("\n");
 }

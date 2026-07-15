@@ -588,7 +588,7 @@ export async function fetchAnalytics(
   registerId?: number,
 ): Promise<AnalyticsSummary> {
   const qs = registerId ? `?register_id=${registerId}` : "";
-  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/analytics/summary${qs}`);
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/analytics/summary${qs}`);
   return handleResponse<AnalyticsSummary>(res);
 }
 

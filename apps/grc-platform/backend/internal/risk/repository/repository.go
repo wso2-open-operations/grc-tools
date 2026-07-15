@@ -106,7 +106,7 @@ type ComplianceReferenceRepository interface {
 }
 
 // AnalyticsRepository provides the aggregated read queries behind
-// GET /api/v1/analytics/summary. Every method accepts an optional
+// GET /api/v1/risks/analytics/summary. Every method accepts an optional
 // registerID (nil = all registers) to scope its result to the page's
 // register filter. All methods exclude CANCELLED risks.
 type AnalyticsRepository interface {
@@ -127,6 +127,9 @@ type AnalyticsRepository interface {
 	// LevelDistribution returns, per month since `since` × effective level,
 	// the count of risks identified that month.
 	LevelDistribution(ctx context.Context, registerID *int, since string) ([]model.MonthLevelCount, error)
+	// LevelReference returns every distinct risk level defined in risk_score,
+	// ordered by severity (highest first), with its reference color.
+	LevelReference(ctx context.Context) ([]model.RiskLevelRef, error)
 	// IdentifiedTrendByRegister returns, per month since `since` × register,
 	// the count of risks identified that month.
 	IdentifiedTrendByRegister(ctx context.Context, registerID *int, since string) ([]model.MonthRegisterCount, error)

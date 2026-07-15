@@ -187,6 +187,29 @@ func (a *analyticsRepository) LevelDistribution(ctx context.Context, registerID 
 	return out, rows.Err()
 }
 
+func (a *analyticsRepository) LevelReference(ctx context.Context) ([]model.RiskLevelRef, error) {
+	rows, err := a.db.QueryContext(ctx, `
+		SELECT risk_level, MIN(color_code)
+		FROM risk_score
+		GROUP BY risk_level
+		ORDER BY MAX(risk_rating) DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("analytics level reference: %w", err)
+	}
+	defer rows.Close()
+
+	var out []model.RiskLevelRef
+	for rows.Next() {
+		var l model.RiskLevelRef
+		if err := rows.Scan(&l.RiskLevel, &l.ColorCode); err != nil {
+			return nil, fmt.Errorf("scan level reference row: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 func (a *analyticsRepository) IdentifiedTrendByRegister(ctx context.Context, registerID *int, since string) ([]model.MonthRegisterCount, error) {
 	clause, filterArgs := registerFilter(registerID)
 	args := append([]any{model.StatusCancelled, since}, filterArgs...)

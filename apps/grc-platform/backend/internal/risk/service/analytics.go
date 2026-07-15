@@ -70,6 +70,10 @@ func (s *analyticsService) Summary(ctx context.Context, registerID *int) (*model
 	if err != nil {
 		return nil, err
 	}
+	levelRef, err := s.repo.LevelReference(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	var registerShares []model.RegisterShare
 	var identifiedByRegister, closedByRegister []model.MonthRegisterCount
@@ -122,7 +126,7 @@ func (s *analyticsService) Summary(ctx context.Context, registerID *int) (*model
 	return &model.AnalyticsSummary{
 		KPIs:                 *kpis,
 		Trend:                buildTrend(months, identified, closed),
-		LevelDistribution:    buildLevelDistribution(months, levelRows),
+		LevelDistribution:    buildLevelDistribution(months, levelRows, levelRef),
 		IdentifiedByRegister: identifiedByRegister,
 		ClosedByRegister:     closedByRegister,
 		RegisterShares:       registerShares,
@@ -178,25 +182,28 @@ func buildTrend(months []string, identified []model.MonthScoreStat, closed []mod
 }
 
 // buildLevelDistribution zero-fills every month × level combination so the
-// stacked bar chart always renders a full 12-month, 3-level grid.
-func buildLevelDistribution(months []string, rows []model.MonthLevelCount) []model.MonthLevelCount {
+// stacked bar chart always renders a full grid across the trailing window.
+// The level set and reference color come from levelRef (sourced from
+// risk_score), not a hardcoded list, so a level added to risk_score appears
+// automatically instead of being silently dropped.
+func buildLevelDistribution(months []string, rows []model.MonthLevelCount, levelRef []model.RiskLevelRef) []model.MonthLevelCount {
 	type key struct{ month, level string }
 	counts := map[key]model.MonthLevelCount{}
 	for _, r := range rows {
 		counts[key{r.Month, r.RiskLevel}] = r
 	}
 
-	out := make([]model.MonthLevelCount, 0, len(months)*len(riskLevelOrder))
+	out := make([]model.MonthLevelCount, 0, len(months)*len(levelRef))
 	for _, month := range months {
-		for _, level := range riskLevelOrder {
-			if r, ok := counts[key{month, level}]; ok {
+		for _, level := range levelRef {
+			if r, ok := counts[key{month, level.RiskLevel}]; ok {
 				out = append(out, r)
 				continue
 			}
 			out = append(out, model.MonthLevelCount{
 				Month:     month,
-				RiskLevel: level,
-				ColorCode: levelFallbackColor(level),
+				RiskLevel: level.RiskLevel,
+				ColorCode: level.ColorCode,
 				Count:     0,
 			})
 		}
@@ -235,17 +242,6 @@ func buildTrendByRegister(months []string, rows []model.MonthRegisterCount) []mo
 		}
 	}
 	return out
-}
-
-func levelFallbackColor(level string) string {
-	switch level {
-	case "HIGH":
-		return "#FF0000"
-	case "MEDIUM":
-		return "#FF9900"
-	default:
-		return "#00B050"
-	}
 }
 
 func firstOfMonth(t time.Time) time.Time {

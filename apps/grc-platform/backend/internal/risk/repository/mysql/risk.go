@@ -594,6 +594,9 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 	if err != nil {
 		return fmt.Errorf("fetch current risk for update: %w", err)
 	}
+	if curStatus.String == model.StatusClosed {
+		return &apierror.Error{StatusCode: http.StatusConflict, Body: "risk is closed and can no longer be edited"}
+	}
 
 	// Gross score and reassessment date are full-edit-only: ignore them once a
 	// risk owner has approved the risk at least once.

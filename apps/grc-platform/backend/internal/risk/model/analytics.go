@@ -16,7 +16,7 @@
 
 package model
 
-// AnalyticsSummary is the full payload for GET /api/v1/analytics/summary.
+// AnalyticsSummary is the full payload for GET /api/v1/risks/analytics/summary.
 // It is the "over time" and cross-cutting companion to DashboardSummary's
 // point-in-time snapshot — charts here intentionally avoid duplicating what
 // the dashboard already shows.
@@ -65,13 +65,23 @@ type TrendPoint struct {
 }
 
 // MonthLevelCount is one stacked segment of the "Risk Level Distribution Over
-// Time" chart (x = month, stack = HIGH/MEDIUM/LOW). Always covers the
-// trailing 12 months × all three levels, zero-filled where absent.
+// Time" chart (x = month, stack = one segment per level defined in
+// risk_score). Always covers the trailing 12 months × every level, zero-filled
+// where absent.
 type MonthLevelCount struct {
 	Month     string `json:"month"`
 	RiskLevel string `json:"risk_level"`
 	ColorCode string `json:"color_code"`
 	Count     int    `json:"count"`
+}
+
+// RiskLevelRef is one distinct risk level defined in the risk_score reference
+// table, ordered by severity (highest first), with its reference color. Used
+// to drive the emitted level set for level-based charts instead of a
+// hardcoded list, so a level added to risk_score is picked up automatically.
+type RiskLevelRef struct {
+	RiskLevel string
+	ColorCode string
 }
 
 // MonthRegisterCount is one line-point of the "Risks Identified by Source
