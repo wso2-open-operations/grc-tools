@@ -40,7 +40,10 @@ func NewDashboardService(repo repository.DashboardRepository) DashboardService {
 	return &dashboardService{repo: repo}
 }
 
-// riskLevelOrder fixes the display order of level-based charts.
+// riskLevelOrder is only referenced by analytics.go now — dashboard.go's own
+// level-based charts source their order from the DB via LevelOrder instead.
+// Left in place because analytics.go's own hardcoded-level-list fix already
+// landed on a separate branch and will replace this usage on merge.
 var riskLevelOrder = []string{"HIGH", "MEDIUM", "LOW"}
 
 // statusBucketOrder fixes the x-axis order of each register's status chart.
@@ -74,14 +77,18 @@ func (s *dashboardService) Summary(ctx context.Context, registerID *int) (*model
 	if highRisks == nil {
 		highRisks = []model.HighRiskItem{}
 	}
+	levelOrder, err := s.repo.LevelOrder(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	return &model.DashboardSummary{
 		Summary:                 *counts,
 		TreatmentByRegister:     buildTreatmentByRegister(facts),
-		LevelCounts:             buildLevelCounts(facts),
+		LevelCounts:             buildLevelCounts(facts, levelOrder),
 		OrgHeatmap:              buildHeatmap(facts),
 		CertDistribution:        buildCertDistribution(certCounts),
-		Registers:               buildRegisterBlocks(facts, statusFacts),
+		Registers:               buildRegisterBlocks(facts, statusFacts, levelOrder),
 		RepeatedComplianceRisks: buildRepeatedRisks(repeatedRows),
 		HighRisks:               highRisks,
 	}, nil
@@ -111,16 +118,18 @@ func buildTreatmentByRegister(facts []model.OpenRiskFact) []model.RegisterTreatm
 	return out
 }
 
-// buildLevelCounts collapses facts into per-level totals ordered HIGH → LOW.
-func buildLevelCounts(facts []model.OpenRiskFact) []model.RiskLevelCount {
+// buildLevelCounts collapses facts into per-level totals, ordered by
+// levelOrder (severity, highest first — sourced from risk_score so a level
+// added there is picked up automatically instead of being silently dropped).
+func buildLevelCounts(facts []model.OpenRiskFact, levelOrder []string) []model.RiskLevelCount {
 	counts := map[string]int{}
 	colors := map[string]string{}
 	for _, f := range facts {
 		counts[f.RiskLevel] += f.Count
 		colors[f.RiskLevel] = f.ColorCode
 	}
-	out := make([]model.RiskLevelCount, 0, len(riskLevelOrder))
-	for _, level := range riskLevelOrder {
+	out := make([]model.RiskLevelCount, 0, len(levelOrder))
+	for _, level := range levelOrder {
 		if n, ok := counts[level]; ok {
 			out = append(out, model.RiskLevelCount{RiskLevel: level, ColorCode: colors[level], Count: n})
 		}
@@ -180,7 +189,7 @@ func buildCertDistribution(counts []model.RegisterCertCount) []model.RegisterCer
 // statusFacts (open + closed) is the superset that determines which
 // registers appear and their order; facts (open-only) supplements OpenCount
 // and the heatmap, which stay open-scoped.
-func buildRegisterBlocks(facts []model.OpenRiskFact, statusFacts []model.RegisterStatusFact) []model.RegisterAnalytics {
+func buildRegisterBlocks(facts []model.OpenRiskFact, statusFacts []model.RegisterStatusFact, levelOrder []string) []model.RegisterAnalytics {
 	blocks := map[int]*model.RegisterAnalytics{}
 	var order []int
 
@@ -206,15 +215,15 @@ func buildRegisterBlocks(facts []model.OpenRiskFact, statusFacts []model.Registe
 	for _, id := range order {
 		b := blocks[id]
 		b.Heatmap = buildHeatmap(grouped[id])
-		b.StatusLevels = buildStatusLevels(statusGrouped[id])
+		b.StatusLevels = buildStatusLevels(statusGrouped[id], levelOrder)
 		out = append(out, *b)
 	}
 	return out
 }
 
 // buildStatusLevels collapses one register's status facts into bucket ×
-// level counts, ordered by statusBucketOrder then HIGH → LOW.
-func buildStatusLevels(facts []model.RegisterStatusFact) []model.RegisterStatusLevelCount {
+// level counts, ordered by statusBucketOrder then levelOrder (severity).
+func buildStatusLevels(facts []model.RegisterStatusFact, levelOrder []string) []model.RegisterStatusLevelCount {
 	type key struct{ bucket, level string }
 	counts := map[key]int{}
 	colors := map[string]string{}
@@ -224,7 +233,7 @@ func buildStatusLevels(facts []model.RegisterStatusFact) []model.RegisterStatusL
 	}
 	var out []model.RegisterStatusLevelCount
 	for _, bucket := range statusBucketOrder {
-		for _, level := range riskLevelOrder {
+		for _, level := range levelOrder {
 			if n, ok := counts[key{bucket, level}]; ok {
 				out = append(out, model.RegisterStatusLevelCount{
 					Bucket:    bucket,

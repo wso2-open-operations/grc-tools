@@ -31,7 +31,7 @@ func TestBuildLevelCounts(t *testing.T) {
 		{RiskLevel: "MEDIUM", ColorCode: "#FF9900", Count: 4},
 	}
 
-	got := buildLevelCounts(facts)
+	got := buildLevelCounts(facts, []string{"HIGH", "MEDIUM", "LOW"})
 	want := []model.RiskLevelCount{
 		{RiskLevel: "HIGH", ColorCode: "#FF0000", Count: 1},
 		{RiskLevel: "MEDIUM", ColorCode: "#FF9900", Count: 4},
@@ -43,7 +43,7 @@ func TestBuildLevelCounts(t *testing.T) {
 }
 
 func TestBuildLevelCountsEmpty(t *testing.T) {
-	got := buildLevelCounts(nil)
+	got := buildLevelCounts(nil, []string{"HIGH", "MEDIUM", "LOW"})
 	if len(got) != 0 {
 		t.Errorf("buildLevelCounts(nil) = %+v, want empty", got)
 	}
@@ -115,7 +115,7 @@ func TestBuildRegisterBlocks(t *testing.T) {
 		{RegisterID: 3, RegisterName: "Ballerina", RiskLevel: "LOW", ColorCode: "#00B050", Bucket: "CLOSED", Count: 2},
 	}
 
-	got := buildRegisterBlocks(facts, statusFacts)
+	got := buildRegisterBlocks(facts, statusFacts, []string{"HIGH", "MEDIUM", "LOW"})
 	if len(got) != 3 {
 		t.Fatalf("buildRegisterBlocks() returned %d blocks, want 3", len(got))
 	}
@@ -161,7 +161,7 @@ func TestBuildStatusLevels(t *testing.T) {
 		{RiskLevel: "MEDIUM", ColorCode: "#FF9900", Bucket: "ACCEPT", Count: 4},
 	}
 
-	got := buildStatusLevels(facts)
+	got := buildStatusLevels(facts, []string{"HIGH", "MEDIUM", "LOW"})
 	want := []model.RegisterStatusLevelCount{
 		{Bucket: "CLOSED", RiskLevel: "LOW", ColorCode: "#00B050", Count: 5},
 		{Bucket: "REMEDIATE", RiskLevel: "HIGH", ColorCode: "#FF0000", Count: 1},
@@ -173,7 +173,7 @@ func TestBuildStatusLevels(t *testing.T) {
 }
 
 func TestBuildStatusLevelsEmpty(t *testing.T) {
-	got := buildStatusLevels(nil)
+	got := buildStatusLevels(nil, []string{"HIGH", "MEDIUM", "LOW"})
 	if len(got) != 0 {
 		t.Errorf("buildStatusLevels(nil) = %+v, want empty", got)
 	}

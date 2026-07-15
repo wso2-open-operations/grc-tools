@@ -163,4 +163,7 @@ type DashboardRepository interface {
 	// HighRisks returns open risks whose effective residual level is HIGH,
 	// oldest identified first.
 	HighRisks(ctx context.Context, registerID *int) ([]model.HighRiskItem, error)
+	// LevelOrder returns every distinct risk level defined in risk_score,
+	// ordered by severity (highest first).
+	LevelOrder(ctx context.Context) ([]string, error)
 }

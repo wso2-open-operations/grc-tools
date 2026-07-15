@@ -254,3 +254,26 @@ func (d *dashboardRepository) HighRisks(ctx context.Context, registerID *int) ([
 	}
 	return out, rows.Err()
 }
+
+func (d *dashboardRepository) LevelOrder(ctx context.Context) ([]string, error) {
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT risk_level
+		FROM risk_score
+		GROUP BY risk_level
+		ORDER BY MAX(risk_rating) DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard level order: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var level string
+		if err := rows.Scan(&level); err != nil {
+			return nil, fmt.Errorf("scan level order row: %w", err)
+		}
+		out = append(out, level)
+	}
+	return out, rows.Err()
+}
