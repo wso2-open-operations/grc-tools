@@ -55,3 +55,28 @@ alembic revision --autogenerate -m "..."  # generate a migration from model chan
 ```
 
 New models must be imported in `alembic/env.py` for autogenerate to detect them.
+
+## Tests
+
+Tests exercise the FastAPI app over HTTP (`TestClient`) with `get_current_user`
+and `get_db` overridden — no real Asgardeo or Azure account needed. `get_db` is
+backed by a throwaway **Postgres** database (not SQLite, so Postgres-specific
+column types behave the same as in production); each test runs in its own
+rolled-back transaction. See `tests/conftest.py` for the fixtures.
+
+```bash
+pip install -r requirements.txt -r requirements-test.txt
+
+# start a throwaway test database (any Postgres works; this is one way)
+docker run -d --name evidence-app-test-db \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres \
+  -e POSTGRES_DB=evidence_app_test -p 5433:5432 postgres:16
+
+pytest
+```
+
+By default tests connect to
+`postgresql://postgres:postgres@localhost:5433/evidence_app_test`; override
+with the `TEST_DATABASE_URL` environment variable to point elsewhere. Tables
+are created from the SQLAlchemy models directly (not via Alembic) at the
+start of the test session and dropped at the end.
