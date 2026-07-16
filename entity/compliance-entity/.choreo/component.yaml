@@ -1,0 +1,13 @@
+schemaVersion: 1.2
+
+endpoints:
+  - name: compliance-entity-api
+    displayName: Compliance Entity API
+    service:
+      basePath: /
+      port: 8080
+    type: REST
+
+    networkVisibilities:
+      - Organization
+    schemaFilePath: openapi.yaml

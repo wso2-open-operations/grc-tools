@@ -37,7 +37,7 @@ export default function TreatmentRadial({ data }: TreatmentRadialProps): JSX.Ele
   }
 
   const byStrategy = new Map(data.map((d) => [d.treatment_strategy, d.count]));
-  const rows = TREATMENT_ORDER.map((strategy) => ({
+  const rows = TREATMENT_ORDER.filter((strategy) => strategy !== "UNSPECIFIED").map((strategy) => ({
     name: TREATMENT_LABELS[strategy],
     count: byStrategy.get(strategy) ?? 0,
     fill: TREATMENT_COLORS[strategy],

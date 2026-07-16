@@ -116,6 +116,18 @@ export function buildCertColorMap(certNames: string[]): Map<string, string> {
   return map;
 }
 
+// Maps register names to the same categorical palette, alphabetically, so a
+// register keeps a stable color across the by-register trend charts and
+// across reloads — mirrors buildCertColorMap's assignment rule.
+export function buildRegisterColorMap(registerNames: string[]): Map<string, string> {
+  const sorted = [...new Set(registerNames)].sort((a, b) => a.localeCompare(b));
+  const map = new Map<string, string>();
+  sorted.forEach((name, i) => {
+    map.set(name, i < CERT_PALETTE.length ? CERT_PALETTE[i] : CERT_OVERFLOW_COLOR);
+  });
+  return map;
+}
+
 // Builds the cert-distribution chart's subtitle from whichever certification
 // names are actually present in the current data, so newly added certs show
 // up automatically instead of needing a hardcoded list.

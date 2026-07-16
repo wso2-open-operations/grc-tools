@@ -1,0 +1,114 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package service
+
+import (
+	"context"
+	"strings"
+
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/repository"
+)
+
+type riskActionStepService struct {
+	repo repository.RiskActionStepRepository
+}
+
+// NewRiskActionStepService constructs a RiskActionStepService.
+func NewRiskActionStepService(repo repository.RiskActionStepRepository) RiskActionStepService {
+	return &riskActionStepService{repo: repo}
+}
+
+var validStepStatuses = map[string]bool{
+	"PENDING": true, "IN_PROGRESS": true, "COMPLETED": true,
+}
+
+func (s *riskActionStepService) CreateRiskActionStep(ctx context.Context, planID int, req domain.CreateRiskActionStepRequest) (domain.RiskActionStep, error) {
+	if planID <= 0 {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "planId must be a positive integer"}
+	}
+	if req.StepNo <= 0 {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "stepNo must be a positive integer"}
+	}
+	if req.CreatedBy == "" {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "createdBy is required"}
+	}
+	step, err := s.repo.CreateRiskActionStep(ctx, planID, req)
+	if err != nil {
+		return domain.RiskActionStep{}, err
+	}
+	return *step, nil
+}
+
+func (s *riskActionStepService) GetRiskActionStepByID(ctx context.Context, planID, stepID int) (domain.RiskActionStep, error) {
+	if planID <= 0 {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "planId must be a positive integer"}
+	}
+	if stepID <= 0 {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "stepId must be a positive integer"}
+	}
+	step, err := s.repo.GetRiskActionStepByID(ctx, planID, stepID)
+	if err != nil {
+		return domain.RiskActionStep{}, err
+	}
+	return *step, nil
+}
+
+func (s *riskActionStepService) UpdateRiskActionStep(ctx context.Context, planID, stepID int, req domain.UpdateRiskActionStepRequest) (domain.RiskActionStep, error) {
+	if planID <= 0 {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "planId must be a positive integer"}
+	}
+	if stepID <= 0 {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "stepId must be a positive integer"}
+	}
+	if req.UpdatedBy == "" {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "updatedBy is required"}
+	}
+	if req.Status != nil && !validStepStatuses[strings.ToUpper(*req.Status)] {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "invalid status: " + *req.Status}
+	}
+	step, err := s.repo.UpdateRiskActionStep(ctx, planID, stepID, req)
+	if err != nil {
+		return domain.RiskActionStep{}, err
+	}
+	return *step, nil
+}
+
+func (s *riskActionStepService) DeleteRiskActionStep(ctx context.Context, planID, stepID int) error {
+	if planID <= 0 {
+		return &apierror.ValidationError{Msg: "planId must be a positive integer"}
+	}
+	if stepID <= 0 {
+		return &apierror.ValidationError{Msg: "stepId must be a positive integer"}
+	}
+	return s.repo.DeleteRiskActionStep(ctx, planID, stepID)
+}
+
+func (s *riskActionStepService) ListRiskActionSteps(ctx context.Context, planID int) (domain.ListRiskActionStepsResponse, error) {
+	if planID <= 0 {
+		return domain.ListRiskActionStepsResponse{}, &apierror.ValidationError{Msg: "planId must be a positive integer"}
+	}
+	steps, err := s.repo.ListRiskActionSteps(ctx, planID)
+	if err != nil {
+		return domain.ListRiskActionStepsResponse{}, err
+	}
+	if steps == nil {
+		steps = []domain.RiskActionStep{}
+	}
+	return domain.ListRiskActionStepsResponse{Steps: steps}, nil
+}

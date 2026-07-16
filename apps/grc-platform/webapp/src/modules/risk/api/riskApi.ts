@@ -126,6 +126,9 @@ export interface RiskAssessmentRecord {
   residual_rating: number;
   residual_level: string;
   residual_color_code: string;
+  // Marks a synthetic entry for the risk's gross score, added by the backend
+  // so the log shows the full lineage even though it isn't a real reassessment.
+  is_initial?: boolean;
 }
 
 export interface RiskDetail {
@@ -162,7 +165,13 @@ export interface RiskDetail {
   owner_name: string;
   assigner_name: string;
   compliance_approver_name: string | null;
+  // Original rating from creation; immutable once a risk owner has approved
+  // the risk. Only EditRiskDialog should read this — for display, use
+  // effective_score.
   gross_score: RiskScoreInfo | null;
+  // Current residual score: the latest reassessment's score if one exists,
+  // else gross_score. This is what headers/tables should display.
+  effective_score: RiskScoreInfo | null;
   compliance_references: ComplianceReference[];
   action_plan: ActionPlanDetail | null;
   assessments: RiskAssessmentRecord[];
@@ -170,10 +179,16 @@ export interface RiskDetail {
 
 export interface ListRisksParams {
   statuses?: string[];
-  team_id?: number;
-  level?: string;
+  team_id?: number[];
+  level?: string[];
   search?: string;
-  risk_type?: string;
+  risk_type?: string[];
+  owner_id?: number[];
+  submitted_from?: string;
+  submitted_to?: string;
+  due_from?: string;
+  due_to?: string;
+  due_overdue?: boolean;
   offset?: number;
   limit?: number;
 }
@@ -323,6 +338,12 @@ export interface MonthLevelCount {
   count: number;
 }
 
+export interface MonthRegisterCount {
+  month: string;
+  register_name: string;
+  count: number;
+}
+
 export interface RegisterShare {
   register_name: string;
   count: number;
@@ -359,6 +380,8 @@ export interface AnalyticsSummary {
   kpis: AnalyticsKPIs;
   trend: TrendPoint[];
   level_distribution: MonthLevelCount[];
+  identified_by_register: MonthRegisterCount[] | null;
+  closed_by_register: MonthRegisterCount[] | null;
   register_shares: RegisterShare[] | null;
   compliance_distribution: ComplianceShare[];
   treatment_mix: TreatmentShare[];
@@ -484,10 +507,16 @@ export async function fetchRisks(
 ): Promise<RiskListPage> {
   const q = new URLSearchParams();
   if (params.statuses?.length) q.set("statuses", params.statuses.join(","));
-  if (params.team_id) q.set("team_id", String(params.team_id));
-  if (params.level) q.set("level", params.level);
+  if (params.team_id?.length) q.set("team_id", params.team_id.join(","));
+  if (params.level?.length) q.set("level", params.level.join(","));
   if (params.search) q.set("search", params.search);
-  if (params.risk_type) q.set("risk_type", params.risk_type);
+  if (params.risk_type?.length) q.set("risk_type", params.risk_type.join(","));
+  if (params.owner_id?.length) q.set("owner_id", params.owner_id.join(","));
+  if (params.submitted_from) q.set("submitted_from", params.submitted_from);
+  if (params.submitted_to) q.set("submitted_to", params.submitted_to);
+  if (params.due_from) q.set("due_from", params.due_from);
+  if (params.due_to) q.set("due_to", params.due_to);
+  if (params.due_overdue) q.set("due_overdue", "true");
   if (params.offset !== undefined) q.set("offset", String(params.offset));
   if (params.limit !== undefined) q.set("limit", String(params.limit));
   const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks?${q}`);
@@ -575,7 +604,7 @@ export async function fetchAnalytics(
   registerId?: number,
 ): Promise<AnalyticsSummary> {
   const qs = registerId ? `?register_id=${registerId}` : "";
-  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/analytics/summary${qs}`);
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/risks/analytics/summary${qs}`);
   return handleResponse<AnalyticsSummary>(res);
 }
 

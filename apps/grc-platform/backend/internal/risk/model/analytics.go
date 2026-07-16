@@ -16,7 +16,7 @@
 
 package model
 
-// AnalyticsSummary is the full payload for GET /api/v1/analytics/summary.
+// AnalyticsSummary is the full payload for GET /api/v1/risks/analytics/summary.
 // It is the "over time" and cross-cutting companion to DashboardSummary's
 // point-in-time snapshot — charts here intentionally avoid duplicating what
 // the dashboard already shows.
@@ -27,17 +27,20 @@ package model
 //   - Risk level/score use the effective residual score: the latest
 //     risk_assessment score when one exists, else the gross score.
 //   - RegisterID, when non-nil, scopes every field to that register except
-//     RegisterShares, which is a cross-register comparison and is only
-//     populated when RegisterID is nil (i.e. the "All registers" view).
+//     RegisterShares, IdentifiedByRegister, and ClosedByRegister, which are
+//     cross-register comparisons and are only populated when RegisterID is
+//     nil (i.e. the "All registers" view).
 type AnalyticsSummary struct {
-	KPIs               AnalyticsKPIs        `json:"kpis"`
-	Trend              []TrendPoint         `json:"trend"`
-	LevelDistribution  []MonthLevelCount    `json:"level_distribution"`
-	RegisterShares     []RegisterShare      `json:"register_shares"`
-	ComplianceShares   []ComplianceShare    `json:"compliance_distribution"`
-	TreatmentShares    []TreatmentShare     `json:"treatment_mix"`
-	WorkflowFunnel     []WorkflowStageCount `json:"workflow_funnel"`
-	AgingRisks         []AgingRiskItem      `json:"aging_risks"`
+	KPIs                 AnalyticsKPIs        `json:"kpis"`
+	Trend                []TrendPoint         `json:"trend"`
+	LevelDistribution    []MonthLevelCount    `json:"level_distribution"`
+	IdentifiedByRegister []MonthRegisterCount `json:"identified_by_register"`
+	ClosedByRegister     []MonthRegisterCount `json:"closed_by_register"`
+	RegisterShares       []RegisterShare      `json:"register_shares"`
+	ComplianceShares     []ComplianceShare    `json:"compliance_distribution"`
+	TreatmentShares      []TreatmentShare     `json:"treatment_mix"`
+	WorkflowFunnel       []WorkflowStageCount `json:"workflow_funnel"`
+	AgingRisks           []AgingRiskItem      `json:"aging_risks"`
 }
 
 // AnalyticsKPIs backs the three "Key Risk Metrics" tiles.
@@ -62,13 +65,34 @@ type TrendPoint struct {
 }
 
 // MonthLevelCount is one stacked segment of the "Risk Level Distribution Over
-// Time" chart (x = month, stack = HIGH/MEDIUM/LOW). Always covers the
-// trailing 12 months × all three levels, zero-filled where absent.
+// Time" chart (x = month, stack = one segment per level defined in
+// risk_score). Always covers the trailing 12 months × every level, zero-filled
+// where absent.
 type MonthLevelCount struct {
 	Month     string `json:"month"`
 	RiskLevel string `json:"risk_level"`
 	ColorCode string `json:"color_code"`
 	Count     int    `json:"count"`
+}
+
+// RiskLevelRef is one distinct risk level defined in the risk_score reference
+// table, ordered by severity (highest first), with its reference color. Used
+// to drive the emitted level set for level-based charts instead of a
+// hardcoded list, so a level added to risk_score is picked up automatically.
+type RiskLevelRef struct {
+	RiskLevel string
+	ColorCode string
+}
+
+// MonthRegisterCount is one line-point of the "Risks Identified by Source
+// Register" / "Risks Closed by Source Register" trend charts (x = month,
+// one line per register). Only registers with at least one identified/closed
+// risk in the trailing 12-month window get a line at all; once a register
+// has one, every month is zero-filled so its line spans the full window.
+type MonthRegisterCount struct {
+	Month        string `json:"month"`
+	RegisterName string `json:"register_name"`
+	Count        int    `json:"count"`
 }
 
 // RegisterShare is one slice of the "Risks by Register" comparison donut:

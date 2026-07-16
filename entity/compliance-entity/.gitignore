@@ -1,0 +1,10 @@
+# Local environment — never commit real credentials
+.env
+
+# Build artifacts
+/compliance-entity
+*.out
+*.test
+
+# OS / editor
+.DS_Store

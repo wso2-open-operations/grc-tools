@@ -55,11 +55,3 @@ export const WORKFLOW_STAGE_COLOR = "#2a78d6";
 export const IDENTIFIED_COLOR = "#2a78d6";
 export const CLOSED_TREND_COLOR = "#1baf7a";
 export const AVG_SCORE_COLOR = "#eb6834";
-
-export function formatScore(value: number | null): string {
-  return value == null ? "—" : value.toFixed(1);
-}
-
-export function formatDays(value: number | null): string {
-  return value == null ? "—" : `${Math.round(value)}`;
-}

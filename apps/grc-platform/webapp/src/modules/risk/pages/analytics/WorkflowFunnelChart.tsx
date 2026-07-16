@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { BarChart, YAxis } from "@wso2/oxygen-ui-charts-react";
-import { Typography } from "@wso2/oxygen-ui";
+import { BarChart, CartesianGrid, YAxis } from "@wso2/oxygen-ui-charts-react";
+import { Typography, useColorScheme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { WorkflowStageCount } from "../../api/riskApi";
 import { WORKFLOW_FUNNEL_ORDER, WORKFLOW_STAGE_COLOR, WORKFLOW_STATUS_LABELS } from "./constants";
@@ -40,6 +40,15 @@ const LABEL_AXIS_WIDTH = 200;
 // Management Approval". This also reads naturally as a top-to-bottom
 // pipeline order.
 export default function WorkflowFunnelChart({ data }: WorkflowFunnelChartProps): JSX.Element {
+  // Resolve to a concrete hex per mode rather than theme.palette.text.secondary
+  // (which returns a `var(--mui-...)` reference under CssVarsProvider) —
+  // recharts renders `tick.fill`/`stroke` as plain SVG attributes, which
+  // don't reliably re-render on a var() value the way styled DOM text does,
+  // leaving the label the light-mode color even after switching to dark.
+  const { mode, systemMode } = useColorScheme();
+  const isDark = mode === "dark" || (mode === "system" && systemMode === "dark");
+  const axisColor = isDark ? "#d4d4d4" : "#24292e";
+
   if (data.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
@@ -67,12 +76,14 @@ export default function WorkflowFunnelChart({ data }: WorkflowFunnelChartProps):
       margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
       xAxis={{ show: true }}
       yAxis={{ show: false }}
+      grid={{ show: false }}
     >
+      <CartesianGrid horizontal={false} vertical strokeDasharray="3 3" stroke={axisColor} />
       <YAxis
         type="category"
         dataKey="stage"
         width={LABEL_AXIS_WIDTH}
-        tick={{ fontSize: 11 }}
+        tick={{ fontSize: 11, fill: axisColor }}
         axisLine={false}
         tickLine={false}
       />
