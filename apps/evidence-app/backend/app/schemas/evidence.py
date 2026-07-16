@@ -1,5 +1,7 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from app.storage.blob_storage import get_signed_url
 
 
 class EvidenceCreate(BaseModel):
@@ -18,6 +20,14 @@ class EvidenceFileOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode="after")
+    def _sign_file_url(self) -> "EvidenceFileOut":
+        # Convert the stored blob reference to a fresh signed URL on the way
+        # out. The DB value is untouched — this only runs at serialization
+        # time (see ADR 0003).
+        self.file_url = get_signed_url(self.file_url)
+        return self
+
 
 class EvidenceResponse(BaseModel):
     id: int
@@ -32,3 +42,8 @@ class EvidenceResponse(BaseModel):
     files: list[EvidenceFileOut] = []
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _sign_file_url(self) -> "EvidenceResponse":
+        self.file_url = get_signed_url(self.file_url)
+        return self

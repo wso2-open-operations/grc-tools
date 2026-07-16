@@ -1,10 +1,5 @@
-import io
-import mimetypes
-
-from azure.storage.blob import BlobServiceClient
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 
 from app.api.routes import products, frameworks, controls, evidence, submissions, agent, usage, me
 from app.config import settings
@@ -20,20 +15,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_storage_client = BlobServiceClient.from_connection_string(
-    settings.AZURE_STORAGE_CONNECTION_STRING
-)
-
-
-@app.get("/uploads/{filename}")
-def serve_blob_file(filename: str):
-    blob = _storage_client.get_blob_client(
-        container=settings.AZURE_STORAGE_CONTAINER, blob=filename
-    )
-    data = blob.download_blob().readall()
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    return StreamingResponse(io.BytesIO(data), media_type=content_type)
-
+# The unauthenticated GET /uploads/{filename} route that used to stream blobs
+# straight out of private storage has been removed — evidence files are now
+# served via short-lived signed Azure URLs generated at read time
+# (app/storage/blob_storage.py:get_signed_url). See ADR 0003.
 
 app.include_router(products.router, prefix="/api")
 app.include_router(frameworks.router, prefix="/api")

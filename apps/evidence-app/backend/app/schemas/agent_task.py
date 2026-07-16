@@ -1,6 +1,8 @@
 from __future__ import annotations
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from app.storage.blob_storage import get_signed_url
 
 
 class TaskCreate(BaseModel):
@@ -38,6 +40,24 @@ class TaskOut(BaseModel):
     resume_requested: bool = False
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def _sign_screenshot_urls(self) -> "TaskOut":
+        # `result["screenshots"]` (set by the runner via POST .../result)
+        # carries the same stored `"/uploads/{blob_name}"` references as
+        # Evidence — sign each on the way out, same as ADR 0003 elsewhere.
+        screenshots = self.result.get("screenshots") if self.result else None
+        if screenshots:
+            self.result = {
+                **self.result,
+                "screenshots": [
+                    {**shot, "file_url": get_signed_url(shot["file_url"])}
+                    if isinstance(shot, dict) and shot.get("file_url")
+                    else shot
+                    for shot in screenshots
+                ],
+            }
+        return self
 
 
 class TaskProgress(BaseModel):
