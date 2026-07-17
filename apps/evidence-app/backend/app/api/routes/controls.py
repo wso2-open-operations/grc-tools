@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.auth import User, get_current_user
 from app.database import get_db
@@ -75,7 +76,19 @@ def delete_control(control_id: int, db: Session = Depends(get_db), user: User = 
         file_names.extend({ef.file_name for ef in ev.files})
         file_names.append(ev.file_name)
     db.delete(control)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # An Agent Task still points at this Control (agent_tasks.control_id
+        # is a plain FK with no ON DELETE rule, so Postgres refuses). Nothing
+        # clears that reference once a task finishes, so this holds even for
+        # completed/cancelled tasks. Turn the refusal into a clean 409 rather
+        # than letting it surface as an unhandled server error.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This control is still referenced by one or more agent tasks and cannot be deleted.",
+        )
     for name in file_names:
         delete_file(name)
     return Response(status_code=204)

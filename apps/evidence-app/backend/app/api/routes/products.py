@@ -80,7 +80,20 @@ def delete_product(product_id: int, db: Session = Depends(get_db), user: User = 
         raise HTTPException(status_code=404, detail="Product not found")
     file_names = _collect_evidence_files(product)
     db.delete(product)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Deleting a Product cascades down through its Frameworks and Controls,
+        # and an Agent Task may still point at one of those Controls
+        # (agent_tasks.control_id is a plain FK with no ON DELETE rule, so
+        # Postgres refuses). Nothing clears that reference once a task
+        # finishes. Turn the refusal into a clean 409 rather than letting it
+        # surface as an unhandled server error.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A control under this product is still referenced by one or more agent tasks, so it cannot be deleted.",
+        )
     for name in file_names:
         delete_file(name)
     return Response(status_code=204)
