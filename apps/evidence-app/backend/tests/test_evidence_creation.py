@@ -21,6 +21,33 @@ from app.storage.blob_storage import get_signed_url
 from tests.conftest import make_control, uploaded_blob_names
 
 
+def _evidence_request_with_raw_filename(fields: dict[str, str], filename: str, content: bytes) -> tuple[bytes, str]:
+    """Builds a raw `multipart/form-data` body for `POST /api/evidence` with
+    the file part's `filename` attribute set to exactly `filename`,
+    including the empty string.
+
+    `httpx`'s own `files=` parameter can't produce this: it omits the
+    `filename` attribute entirely for any falsy value, which changes what's
+    being sent on the wire — Starlette then treats the part as a plain
+    string field rather than an upload, and FastAPI rejects it with its own
+    422 before the request ever reaches `create_evidence`. Sending an
+    explicit but empty `filename=""` is what a real non-browser client
+    (the Runner, curl, a script) with a filename-handling bug would
+    actually put on the wire, and it is what reaches `save_file`.
+    """
+    boundary = "----EvidenceAppTestBoundary"
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
+        for name, value in fields.items()
+    ]
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f'Content-Type: image/png\r\n\r\n'
+    )
+    body = "".join(parts).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
 def test_create_evidence_end_to_end(db_session, engineer_client, engineer_user):
     """The request succeeds, the Evidence, its Evidence File and its
     Submission all exist, and the uploaded file is really fetchable —
@@ -206,3 +233,63 @@ def test_retry_after_a_failed_creation_produces_exactly_one_record(
     fetch = httpx.get(retry_response.json()["file_url"])
     assert fetch.status_code == 200
     assert fetch.content == b"second attempt, succeeds"
+
+
+def test_create_evidence_with_no_filename_is_a_bad_request(db_session, engineer_client):
+    """A caller that uploads a file with no name at all gets a clear,
+    actionable client error rather than an opaque server error, and nothing
+    is uploaded to storage for a request that was rejected before any
+    upload happened.
+
+    A real browser file input always attaches a name, so this only shows up
+    from a non-browser client (the Runner, curl, a script) that built its
+    request incorrectly — an empty `filename` on the wire, sent explicitly
+    via `_evidence_request_with_raw_filename` since `httpx`'s own `files=`
+    can't produce it (see that helper's docstring).
+    """
+    control = make_control(db_session)
+    blobs_before = uploaded_blob_names()
+    body, content_type = _evidence_request_with_raw_filename(
+        {"title": "Console screenshot", "control_id": str(control.id)},
+        filename="",
+        content=b"nameless bytes",
+    )
+
+    response = engineer_client.post(
+        "/api/evidence",
+        content=body,
+        headers={"Content-Type": content_type},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Uploaded file must have a filename"
+
+    assert db_session.query(Evidence).count() == 0
+    assert db_session.query(EvidenceFile).count() == 0
+    assert db_session.query(Submission).count() == 0
+    assert uploaded_blob_names() == blobs_before
+
+
+def test_create_evidence_with_an_unusual_but_present_filename_is_unaffected(
+    db_session, engineer_client
+):
+    """A present filename that just happens to be unusual — no extension,
+    or a trailing dot — is a real name the client chose, not a missing one.
+    It is stored and served exactly like any other upload, unaffected by
+    the no-filename rejection covered above."""
+    control = make_control(db_session)
+
+    for filename, content in (
+        ("screenshot", b"no extension in the filename"),
+        ("screenshot.", b"trailing dot in the filename"),
+    ):
+        response = engineer_client.post(
+            "/api/evidence",
+            data={"title": "Console screenshot", "control_id": str(control.id)},
+            files={"file": (filename, content, "image/png")},
+        )
+
+        assert response.status_code == 201
+        fetch = httpx.get(response.json()["file_url"])
+        assert fetch.status_code == 200
+        assert fetch.content == content

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobSasPermissions, BlobServiceClient, generate_blob_sas
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from app.config import settings
 
@@ -26,7 +26,28 @@ def _get_blob_service() -> BlobServiceClient:
 
 
 def save_file(file: UploadFile) -> tuple[str, str]:
-    """Upload an evidence file to blob storage and return (blob_name, public_url)."""
+    """Upload an evidence file to blob storage and return (blob_name, public_url).
+
+    Rejects a file with no name at all (`filename` is `None` or empty
+    string) as a bad request rather than storing it. The stored blob name
+    is always a fresh UUID; the client's filename is only ever consulted
+    for its extension, so a present-but-unusual name (no extension, a
+    trailing dot) still works unchanged. A *missing* name is different: a
+    browser file input always attaches one, so in practice this only
+    happens with a non-browser client (the Runner, curl, a script) that
+    built its request incorrectly. Silently storing it under a generated,
+    extensionless name would hide that mistake rather than surface it, so
+    it is rejected instead, the same way this app already rejects other
+    malformed input up front rather than accepting or masking it.
+
+    Checked before any network call, so a rejected upload never puts a
+    blob into storage that would then need cleaning up.
+    """
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file must have a filename",
+        )
     extension = Path(file.filename).suffix
     unique_name = f"{uuid.uuid4()}{extension}"
     blob = _get_blob_service().get_blob_client(
