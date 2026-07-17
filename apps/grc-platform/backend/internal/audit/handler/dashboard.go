@@ -18,11 +18,13 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	auditservice "github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type dashboardHandler struct {
@@ -30,6 +32,9 @@ type dashboardHandler struct {
 }
 
 func (h *dashboardHandler) getDashboard(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	user := auth.FromContext(r.Context())
 
 	f := model.DashboardFilter{}
@@ -45,4 +50,42 @@ func (h *dashboardHandler) getDashboard(w http.ResponseWriter, r *http.Request) 
 	}
 
 	response.WriteJSONValue(w, http.StatusOK, data)
+}
+
+func (h *dashboardHandler) getWorkQueue(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
+	user := auth.FromContext(r.Context())
+
+	f := model.DashboardFilter{}
+	if user != nil {
+		f.Roles = user.Groups
+		f.UserEmail = user.Email
+	}
+
+	q := r.URL.Query()
+	tab := model.WorkQueueTab(q.Get("tab"))
+	if tab == "" {
+		tab = model.WorkQueueTabActionItems
+	}
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page <= 0 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	p, err := h.svc.GetWorkQueuePage(r.Context(), f, tab, page, limit)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+
+	response.WriteJSONValue(w, http.StatusOK, p)
 }

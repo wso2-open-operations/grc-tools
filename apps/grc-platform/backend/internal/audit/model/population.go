@@ -20,3 +20,13 @@ package model
 // AuditPopulation represents a data population sample for a control.
 // TODO: add fields based on `audit_population` in audit_schema.sql
 type AuditPopulation struct{}
+
+// PopulationSubmitResult is returned by the Evidence Portal population submit
+// endpoint (§3.5.3) once uploaded blobs are recorded and the round advances.
+type PopulationSubmitResult struct {
+	PopulationID int    `json:"populationId"`
+	ControlID    int    `json:"controlId"`
+	Status       string `json:"status"`
+	FolderPath   string `json:"folderPath"`
+	FileCount    int    `json:"fileCount"`
+}

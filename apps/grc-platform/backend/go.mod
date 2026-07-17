@@ -1,4 +1,4 @@
-module github.com/wso2-open-operations/grc-platform/backend
+module github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend
 
 go 1.23.0
 

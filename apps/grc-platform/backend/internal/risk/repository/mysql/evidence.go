@@ -20,8 +20,8 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 )
 
 type riskEvidenceRepository struct{ db *sql.DB }
@@ -41,7 +41,7 @@ func (r *riskEvidenceRepository) Create(ctx context.Context, riskID int, fileNam
 	return nil, errNotImplemented
 }
 
-func (r *riskEvidenceRepository) Delete(ctx context.Context, evidenceID int) error {
-	// TODO: DELETE FROM risk_evidence WHERE id = ?
+func (r *riskEvidenceRepository) Delete(ctx context.Context, riskID, evidenceID int, byUserID string) error {
+	// TODO: DELETE FROM risk_evidence WHERE id = ? AND risk_id = ? (byUserID for audit trail)
 	return errNotImplemented
 }

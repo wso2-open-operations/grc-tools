@@ -85,6 +85,11 @@ type ControlService interface {
 	UpdateControl(ctx context.Context, auditID, controlID int, req domain.UpdateControlRequest) (domain.AuditControl, error)
 	DeleteControl(ctx context.Context, auditID, controlID int) error
 	ListAssignedForEvidence(ctx context.Context, userEmail string) (domain.ListAssignedControlsResponse, error)
+	// GetEvidenceAssignment confirms userEmail is assigned to an actionable control
+	// and returns its audit id (for server-side folder-path derivation).
+	GetEvidenceAssignment(ctx context.Context, userEmail string, controlID int) (domain.EvidenceAssignmentResponse, error)
+	// FindActivePopulation returns the active population round for an OE control.
+	FindActivePopulation(ctx context.Context, controlID int) (domain.ActivePopulationResponse, error)
 }
 
 // EvidenceService defines operations on audit_evidence and audit_evidence_file.
@@ -212,4 +217,5 @@ type RiskChangeLogService interface {
 // DashboardService defines the read query for the audit dashboard.
 type DashboardService interface {
 	Get(ctx context.Context, req domain.AuditDashboardRequest) (*domain.DashboardData, error)
+	GetWorkQueuePage(ctx context.Context, req domain.WorkQueueRequest) (*domain.WorkQueuePage, error)
 }

@@ -20,7 +20,7 @@ package handler
 import (
 	"net/http"
 
-	userentity "github.com/wso2-open-operations/grc-platform/backend/internal/user"
+	userentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user"
 )
 
 // Deps holds dependencies for shared user handlers.
@@ -30,6 +30,5 @@ type Deps struct {
 
 // RegisterRoutes mounts shared user routes onto mux.
 func RegisterRoutes(mux *http.ServeMux, deps Deps) {
-	mux.HandleFunc("GET /api/v1/me/permissions", handleGetMyPermissions)
 	mux.HandleFunc("GET /api/v1/users", handleListUsers(deps.Users))
 }

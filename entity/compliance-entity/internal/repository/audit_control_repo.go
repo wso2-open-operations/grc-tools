@@ -37,7 +37,19 @@ type ControlRepository interface {
 	UpdateControl(ctx context.Context, auditID, controlID int, req domain.UpdateControlRequest) (*domain.AuditControl, error)
 	DeleteControl(ctx context.Context, auditID, controlID int) error
 	ListAssignedForEvidence(ctx context.Context, userEmail string) ([]domain.AssignedControlForEvidence, error)
+	// GetEvidenceAssignment returns the control's audit id when userEmail's team is
+	// assigned to it and it is currently actionable, else sql.ErrNoRows.
+	GetEvidenceAssignment(ctx context.Context, userEmail string, controlID int) (int, error)
+	// FindActivePopulation returns the active audit_population id for an OE control
+	// (status PENDING or COMPLIANCE_REJECTED), else sql.ErrNoRows.
+	FindActivePopulation(ctx context.Context, controlID int) (int, error)
 }
+
+// evidenceActionableStatuses lists the control statuses for which a team member
+// may still submit (population or evidence). Kept as a single source of truth for
+// both ListAssignedForEvidence and GetEvidenceAssignment.
+const evidenceActionableStatuses = `'POPULATION_PENDING','POPULATION_NEED_CLARIFICATION',
+		'EVIDENCE_PENDING','EVIDENCE_NEED_CLARIFICATION','SUBMITTED_SAMPLE'`
 
 type controlRepo struct{ db *sql.DB }
 
@@ -45,17 +57,29 @@ type controlRepo struct{ db *sql.DB }
 func NewControlRepository(db *sql.DB) ControlRepository { return &controlRepo{db: db} }
 
 // ListAssignedForEvidence returns the active-audit controls whose team the user
-// belongs to and whose status requires evidence submission.
+// belongs to and whose status requires action (population or evidence), enriched
+// with audit/product/framework so the Evidence Portal can render each control in
+// one call. Definition columns resolve from the framework template via COALESCE.
 func (r *controlRepo) ListAssignedForEvidence(ctx context.Context, userEmail string) ([]domain.AssignedControlForEvidence, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT a.id, a.name, c.id, c.control_number, c.description, c.status
+		SELECT a.id, a.name, p.name AS product, f.name AS framework,
+		       DATE_FORMAT(a.period_start,'%Y-%m-%d'), DATE_FORMAT(a.period_end,'%Y-%m-%d'),
+		       c.id,
+		       COALESCE(fc.control_number,       c.control_number)       AS control_number,
+		       COALESCE(fc.description,          c.description)          AS description,
+		       COALESCE(fc.evidence_requirement, c.evidence_requirement) AS evidence_requirement,
+		       COALESCE(fc.requirement_type,     c.requirement_type)     AS requirement_type,
+		       c.status, DATE_FORMAT(c.due_date,'%Y-%m-%d') AS due_date
 		FROM audit_control c
-		JOIN audit      a ON a.id = c.audit_id
-		JOIN audit_team t ON t.id = c.team_id
+		LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
+		JOIN audit           a ON a.id = c.audit_id
+		JOIN audit_product   p ON p.id = a.product_id
+		JOIN audit_framework f ON f.id = a.framework_id
+		JOIN audit_team      t ON t.id = c.team_id
 		JOIN `+"`user`"+` u ON u.audit_team_id = t.id
 		WHERE u.email = ?
 		  AND a.status = 'ACTIVE'
-		  AND c.status IN ('EVIDENCE_PENDING','EVIDENCE_NEED_CLARIFICATION','SUBMITTED_SAMPLE')
+		  AND c.status IN (`+evidenceActionableStatuses+`)
 		ORDER BY a.id, c.control_number`, userEmail)
 	if err != nil {
 		return nil, fmt.Errorf("control.ListAssignedForEvidence: %w", err)
@@ -65,13 +89,61 @@ func (r *controlRepo) ListAssignedForEvidence(ctx context.Context, userEmail str
 	out := []domain.AssignedControlForEvidence{}
 	for rows.Next() {
 		var ac domain.AssignedControlForEvidence
-		if err := rows.Scan(&ac.AuditID, &ac.AuditName, &ac.ControlID, &ac.ControlNumber, &ac.Description, &ac.Status); err != nil {
+		var evidenceReq, dueDate sql.NullString
+		if err := rows.Scan(
+			&ac.AuditID, &ac.AuditName, &ac.Product, &ac.Framework,
+			&ac.PeriodStart, &ac.PeriodEnd,
+			&ac.ControlID, &ac.ControlNumber, &ac.Description,
+			&evidenceReq, &ac.RequirementType, &ac.Status, &dueDate,
+		); err != nil {
 			return nil, fmt.Errorf("control.ListAssignedForEvidence scan: %w", err)
 		}
-		ac.BaseFolderPath = fmt.Sprintf("audits/%d/controls/%d/evidence/", ac.AuditID, ac.ControlID)
+		if evidenceReq.Valid {
+			ac.EvidenceRequirement = &evidenceReq.String
+		}
+		if dueDate.Valid {
+			ac.DueDate = &dueDate.String
+		}
 		out = append(out, ac)
 	}
 	return out, rows.Err()
+}
+
+// GetEvidenceAssignment returns the control's audit id when the user's team is
+// assigned to it and it is currently actionable. Returning the audit id lets the
+// GRC Backend both (a) confirm assignment and (b) derive the audit for folder-path
+// binding from the DB, so the client never supplies it. Not found → sql.ErrNoRows.
+func (r *controlRepo) GetEvidenceAssignment(ctx context.Context, userEmail string, controlID int) (int, error) {
+	var auditID int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT c.audit_id
+		FROM audit_control c
+		JOIN audit      a ON a.id = c.audit_id
+		JOIN audit_team t ON t.id = c.team_id
+		JOIN `+"`user`"+` u ON u.audit_team_id = t.id
+		WHERE u.email = ? AND c.id = ?
+		  AND a.status = 'ACTIVE'
+		  AND c.status IN (`+evidenceActionableStatuses+`)
+		LIMIT 1`, userEmail, controlID).Scan(&auditID)
+	if err != nil {
+		return 0, err
+	}
+	return auditID, nil
+}
+
+// FindActivePopulation returns the active population round for an OE control:
+// PENDING (first submission) or COMPLIANCE_REJECTED (need clarification, re-upload).
+// Not found (no active population / DESIGN control) → sql.ErrNoRows.
+func (r *controlRepo) FindActivePopulation(ctx context.Context, controlID int) (int, error) {
+	var populationID int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id FROM audit_population
+		WHERE control_id = ? AND status IN ('PENDING','COMPLIANCE_REJECTED')
+		ORDER BY id DESC LIMIT 1`, controlID).Scan(&populationID)
+	if err != nil {
+		return 0, err
+	}
+	return populationID, nil
 }
 
 const controlSelectCols = `
@@ -90,14 +162,23 @@ const controlSelectCols = `
   DATE_FORMAT(c.due_date, '%Y-%m-%d') AS due_date,
   c.status, c.control_source,
   (c.due_date IS NOT NULL AND c.due_date < CURDATE() AND c.status != 'COMPLETE') AS is_overdue,
-  c.created_at, c.updated_at`
+  c.created_at, c.updated_at,
+  p.description                        AS population_description,
+  p.comments                           AS population_comments,
+  DATE_FORMAT(p.due_date, '%Y-%m-%d')  AS population_due_date,
+  u_pop_owner.display_name             AS population_owner_name,
+  pop_team.name                        AS population_team_name`
 
 const controlFromClause = `
 FROM audit_control c
 LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
 LEFT JOIN ` + "`user`" + ` u_owner ON u_owner.id = c.owner_id
 LEFT JOIN audit_team t            ON t.id          = c.team_id
-LEFT JOIN ` + "`user`" + ` u_aud   ON u_aud.id     = c.auditor_id`
+LEFT JOIN ` + "`user`" + ` u_aud   ON u_aud.id     = c.auditor_id
+LEFT JOIN audit_population p      ON p.control_id  = c.id
+    AND p.id = (SELECT MIN(id) FROM audit_population WHERE control_id = c.id)
+LEFT JOIN ` + "`user`" + ` u_pop_owner ON u_pop_owner.id = p.owner_id
+LEFT JOIN audit_team pop_team         ON pop_team.id     = p.team_id`
 
 func (r *controlRepo) SearchControls(ctx context.Context, auditID int, req domain.SearchControlsRequest) ([]domain.AuditControl, int, error) {
 	where, args := buildControlFilters("WHERE c.audit_id = ?", []any{auditID}, req)
@@ -357,6 +438,22 @@ func (r *controlRepo) UpdateControl(ctx context.Context, auditID, controlID int,
 	sets := []string{}
 	args := []any{}
 
+	if req.Description != nil {
+		sets = append(sets, "description = ?")
+		args = append(args, *req.Description)
+	}
+	if req.ControlType != nil {
+		sets = append(sets, "control_type = ?")
+		args = append(args, *req.ControlType)
+	}
+	if req.Scope != nil {
+		sets = append(sets, "scope = ?")
+		args = append(args, *req.Scope)
+	}
+	if req.EvidenceRequirement != nil {
+		sets = append(sets, "evidence_requirement = ?")
+		args = append(args, *req.EvidenceRequirement)
+	}
 	if req.OwnerID != nil {
 		sets = append(sets, "owner_id = ?")
 		args = append(args, *req.OwnerID)
@@ -420,6 +517,7 @@ func scanControl(s scanner) (*domain.AuditControl, error) {
 	var c domain.AuditControl
 	var frameworkControlID, templateVersion, ownerID, teamID, auditorID sql.NullInt64
 	var evidenceReq, ownerName, teamName, auditorName, dueDate sql.NullString
+	var popDescription, popComments, popDueDate, popOwnerName, popTeamName sql.NullString
 	err := s.Scan(
 		&c.ID, &c.AuditID,
 		&frameworkControlID,
@@ -432,6 +530,7 @@ func scanControl(s scanner) (*domain.AuditControl, error) {
 		&dueDate,
 		&c.Status, &c.ControlSource, &c.IsOverdue,
 		&c.CreatedOn, &c.UpdatedOn,
+		&popDescription, &popComments, &popDueDate, &popOwnerName, &popTeamName,
 	)
 	if err != nil {
 		return nil, err
@@ -459,6 +558,11 @@ func scanControl(s scanner) (*domain.AuditControl, error) {
 	c.AuditorID = nullIntPtr(auditorID)
 	c.AuditorName = nullStrPtr(auditorName)
 	c.DueDate = nullStrPtr(dueDate)
+	c.PopulationDescription = nullStrPtr(popDescription)
+	c.PopulationComments = nullStrPtr(popComments)
+	c.PopulationDueDate = nullStrPtr(popDueDate)
+	c.PopulationOwnerName = nullStrPtr(popOwnerName)
+	c.PopulationTeamName = nullStrPtr(popTeamName)
 	return &c, nil
 }
 

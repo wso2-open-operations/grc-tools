@@ -18,18 +18,22 @@ package service
 
 import (
 	"context"
-	"io"
+	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/file"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
 )
 
-// PopulationService defines business operations for OE control population files.
+// PopulationService defines the OE-control population submission flow used by the
+// Evidence Portal. File uploads reuse EvidenceService.UploadFile (phase-agnostic
+// blob write); this service records the uploaded blobs and advances the round.
 type PopulationService interface {
-	List(ctx context.Context, controlID int) ([]*model.AuditPopulation, error)
-	Upload(ctx context.Context, controlID int, fileName, contentType string, content io.Reader, createdBy string) (*model.AuditPopulation, error)
-	Delete(ctx context.Context, controlID, populationID int, byUserID string) error
+	// SubmitPopulation records every blob at folderPath as a POPULATION file on the
+	// population round and advances it to SUBMITTED. The caller (handler) advances
+	// the control to POPULATION_INTERNAL_REVIEW afterwards.
+	SubmitPopulation(ctx context.Context, controlID, populationID int, folderPath, submittedBy string) (*model.PopulationSubmitResult, error)
 }
 
 type populationService struct {
@@ -37,21 +41,40 @@ type populationService struct {
 	storage *file.Service
 }
 
+// NewPopulationService constructs a PopulationService.
 func NewPopulationService(repo repository.PopulationRepository, storage *file.Service) PopulationService {
 	return &populationService{repo: repo, storage: storage}
 }
 
-func (s *populationService) List(ctx context.Context, controlID int) ([]*model.AuditPopulation, error) {
-	// TODO: delegate to repo
-	return nil, nil
-}
+func (s *populationService) SubmitPopulation(ctx context.Context, controlID, populationID int, folderPath, submittedBy string) (*model.PopulationSubmitResult, error) {
+	blobs, err := s.storage.ListBlobs(ctx, folderPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(blobs) == 0 {
+		return nil, &apierror.Error{
+			StatusCode: http.StatusUnprocessableEntity,
+			Body:       "no files found at the specified folderPath — upload files first",
+		}
+	}
 
-func (s *populationService) Upload(ctx context.Context, controlID int, fileName, contentType string, content io.Reader, createdBy string) (*model.AuditPopulation, error) {
-	// TODO: upload file via storage.Upload, upsert population row + evidence_file row via repo
-	return nil, nil
-}
+	for _, blob := range blobs {
+		ct := blob.ContentType
+		sz := blob.Size
+		if err := s.repo.AddFile(ctx, populationID, "POPULATION", blob.FileName(), blob.Name, &ct, &sz, submittedBy); err != nil {
+			return nil, err
+		}
+	}
 
-func (s *populationService) Delete(ctx context.Context, controlID, populationID int, byUserID string) error {
-	// TODO: fetch population, delete blob via storage.Delete, delete row via repo
-	return nil
+	if err := s.repo.UpdateStatus(ctx, populationID, "SUBMITTED", submittedBy); err != nil {
+		return nil, err
+	}
+
+	return &model.PopulationSubmitResult{
+		PopulationID: populationID,
+		ControlID:    controlID,
+		Status:       "SUBMITTED",
+		FolderPath:   folderPath,
+		FileCount:    len(blobs),
+	}, nil
 }

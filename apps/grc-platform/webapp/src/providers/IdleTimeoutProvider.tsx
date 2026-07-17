@@ -17,7 +17,7 @@
 import { useIdleTimer } from "react-idle-timer";
 import { useState, type JSX, type ReactNode } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import SessionWarningDialog from "@components/SessionWarningDialog";
+import SessionWarningDialog from "@components/session-warning/SessionWarningDialog";
 import {
   IDLE_TIMEOUT_MS,
   IDLE_PROMPT_BEFORE_MS,
@@ -37,6 +37,8 @@ interface IdleTimeoutProviderProps {
  * @param {IdleTimeoutProviderProps} props - children.
  * @returns {JSX.Element} Children wrapped with idle timeout behavior.
  */
+const isMockAuth = window.config?.GRC_PLATFORM_MOCK_AUTH === true;
+
 export default function IdleTimeoutProvider({
   children,
 }: IdleTimeoutProviderProps): JSX.Element {
@@ -44,8 +46,12 @@ export default function IdleTimeoutProvider({
   const { signOut, isSignedIn, isLoading } = useAsgardeo();
   const logger = useLogger();
 
+  // In mock mode Asgardeo is bypassed so isSignedIn is always false; treat the
+  // user as signed in so the idle dialog still fires.
+  const effectivelySignedIn = isMockAuth || (isSignedIn && !isLoading);
+
   const onPrompt = () => {
-    if (isSignedIn && !isLoading) {
+    if (effectivelySignedIn) {
       setSessionWarningOpen(true);
     }
   };
@@ -67,7 +73,7 @@ export default function IdleTimeoutProvider({
     // Enforce logout when the full timeout is reached (warning ignored), so an
     // unattended session is not left authenticated.
     onIdle: () => {
-      if (isSignedIn && !isLoading) {
+      if (effectivelySignedIn) {
         void handleLogout();
       }
     },

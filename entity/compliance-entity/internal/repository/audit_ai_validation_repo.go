@@ -38,15 +38,15 @@ func NewAIValidationRepository(db *sql.DB) AIValidationRepository { return &aiVa
 func (r *aiValidationRepo) CreateValidation(ctx context.Context, evidenceID int, req domain.CreateAuditAIValidationLogRequest) (*domain.AuditAIValidationLog, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO audit_ai_validation_log
-		 (evidence_id, control_id, result, gaps_found, summary, confidence_score, created_by, updated_by)
+		 (evidence_id, control_id, result, gaps_found, feedback, summary, confidence_score, created_by)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		evidenceID,
 		req.ControlID,
 		req.Result,
 		nullableString(req.GapsFound),
+		nullableString(req.Feedback),
 		nullableString(req.Summary),
 		nullableFloat(req.ConfidenceScore),
-		nullableString(&req.CreatedBy),
 		nullableString(&req.CreatedBy),
 	)
 	if err != nil {
@@ -58,16 +58,16 @@ func (r *aiValidationRepo) CreateValidation(ctx context.Context, evidenceID int,
 
 func (r *aiValidationRepo) getValidationByID(ctx context.Context, id int64) (*domain.AuditAIValidationLog, error) {
 	return scanAIValidation(r.db.QueryRowContext(ctx,
-		`SELECT id, evidence_id, control_id, result, gaps_found, summary,
+		`SELECT id, evidence_id, control_id, result, gaps_found, feedback, summary,
 		        confidence_score, created_by, created_at
 		 FROM audit_ai_validation_log WHERE id = ?`, id))
 }
 
 func (r *aiValidationRepo) ListValidationsByEvidence(ctx context.Context, evidenceID int) ([]domain.AuditAIValidationLog, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, evidence_id, control_id, result, gaps_found, summary,
+		`SELECT id, evidence_id, control_id, result, gaps_found, feedback, summary,
 		        confidence_score, created_by, created_at
-		 FROM audit_ai_validation_log WHERE evidence_id = ? ORDER BY created_at DESC`,
+		 FROM audit_ai_validation_log WHERE evidence_id = ? ORDER BY id DESC`,
 		evidenceID)
 	if err != nil {
 		return nil, fmt.Errorf("ai_validation.List: %w", err)
@@ -87,17 +87,20 @@ func (r *aiValidationRepo) ListValidationsByEvidence(ctx context.Context, eviden
 
 func scanAIValidation(s scanner) (*domain.AuditAIValidationLog, error) {
 	var l domain.AuditAIValidationLog
-	var gaps, summary, createdBy sql.NullString
+	var gaps, feedback, summary, createdBy sql.NullString
 	var confidence sql.NullFloat64
 	err := s.Scan(
 		&l.ID, &l.EvidenceID, &l.ControlID, &l.Result,
-		&gaps, &summary, &confidence, &createdBy, &l.CreatedOn,
+		&gaps, &feedback, &summary, &confidence, &createdBy, &l.CreatedOn,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if gaps.Valid {
 		l.GapsFound = &gaps.String
+	}
+	if feedback.Valid {
+		l.Feedback = &feedback.String
 	}
 	if summary.Valid {
 		l.Summary = &summary.String

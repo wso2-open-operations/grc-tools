@@ -18,23 +18,38 @@ import { UserMenu } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import { useState, useEffect } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import { LogOut } from "@wso2/oxygen-ui-icons-react";
+import { LogOut, UserRound } from "@wso2/oxygen-ui-icons-react";
 import { useLogger } from "@hooks/useLogger";
+import UserProfileModal from "./UserProfileModal";
 
 const isMockAuth = window.config?.GRC_PLATFORM_MOCK_AUTH === true;
 
 function MockUserProfile(): JSX.Element {
+  const [profileOpen, setProfileOpen] = useState(false);
+
   return (
-    <UserMenu>
-      <UserMenu.Trigger name="Dev User" />
-      <UserMenu.Header name="Dev User" email="dev@localhost" />
-      <UserMenu.Divider />
-      <UserMenu.Logout
-        icon={<LogOut size={18} />}
-        label="Log out"
-        onClick={() => {}}
+    <>
+      <UserMenu>
+        <UserMenu.Trigger name="Dev User" />
+        <UserMenu.Header name="Dev User" email="dev@localhost" />
+        <UserMenu.Divider />
+        <UserMenu.Item
+          icon={<UserRound size={18} />}
+          label="Profile"
+          onClick={() => setProfileOpen(true)}
+        />
+        <UserMenu.Divider />
+        <UserMenu.Logout
+          icon={<LogOut size={18} />}
+          label="Log out"
+          onClick={() => {}}
+        />
+      </UserMenu>
+      <UserProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
       />
-    </UserMenu>
+    </>
   );
 }
 
@@ -43,6 +58,7 @@ export default function UserProfile(): JSX.Element {
   const logger = useLogger();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [profileOpen, setProfileOpen] = useState(false);
 
   useEffect(() => {
     if (isMockAuth || !isSignedIn) {
@@ -55,13 +71,21 @@ export default function UserProfile(): JSX.Element {
       .then((token) => {
         const given = token?.given_name ?? "";
         const family = token?.family_name ?? "";
+        const email = token?.email ?? "";
+        const emailPrefix = email.split("@")[0];
+        const emailFallback = emailPrefix
+          .split(/[._-]/)
+          .filter(Boolean)
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(" ");
         const resolved =
           [given, family].filter(Boolean).join(" ") ||
           (token as Record<string, string>)?.username ||
+          emailFallback ||
           token?.sub ||
           "";
         setName(resolved);
-        setEmail(token?.email ?? "");
+        setEmail(email);
       })
       .catch((error) => {
         setName("");
@@ -87,15 +111,27 @@ export default function UserProfile(): JSX.Element {
   const displayEmail = email || " ";
 
   return (
-    <UserMenu>
-      <UserMenu.Trigger name={displayName} />
-      <UserMenu.Header name={displayName} email={displayEmail} />
-      <UserMenu.Divider />
-      <UserMenu.Logout
-        icon={<LogOut size={18} />}
-        label="Log out"
-        onClick={handleLogout}
+    <>
+      <UserMenu>
+        <UserMenu.Trigger name={displayName} />
+        <UserMenu.Header name={displayName} email={displayEmail} />
+        <UserMenu.Divider />
+        <UserMenu.Item
+          icon={<UserRound size={18} />}
+          label="Profile"
+          onClick={() => setProfileOpen(true)}
+        />
+        <UserMenu.Divider />
+        <UserMenu.Logout
+          icon={<LogOut size={18} />}
+          label="Log out"
+          onClick={handleLogout}
+        />
+      </UserMenu>
+      <UserProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
       />
-    </UserMenu>
+    </>
   );
 }

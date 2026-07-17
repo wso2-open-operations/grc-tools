@@ -35,3 +35,7 @@ func NewDashboardService(repo repository.DashboardRepository) DashboardService {
 func (s *dashboardService) Get(ctx context.Context, req domain.AuditDashboardRequest) (*domain.DashboardData, error) {
 	return s.repo.Get(ctx, req)
 }
+
+func (s *dashboardService) GetWorkQueuePage(ctx context.Context, req domain.WorkQueueRequest) (*domain.WorkQueuePage, error) {
+	return s.repo.GetWorkQueuePage(ctx, req)
+}

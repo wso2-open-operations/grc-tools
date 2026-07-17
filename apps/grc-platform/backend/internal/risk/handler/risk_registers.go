@@ -21,10 +21,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 // requireUserEmail extracts the caller's email and writes a 401 when the

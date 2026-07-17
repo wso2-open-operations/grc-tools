@@ -2360,6 +2360,109 @@ paths:
                 $ref: '#/components/schemas/DashboardData'
         '400': *id001
         '500': *id002
+  /audit/work-queue/search:
+    post:
+      tags:
+      - Audit Dashboard
+      summary: Paginated work-queue items for the authenticated user
+      operationId: getWorkQueuePage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkQueueRequest'
+      responses:
+        '200':
+          description: Paginated work-queue page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkQueuePage'
+        '400': *id001
+        '500': *id002
+  /audit-controls/{controlId}/evidence-assignment:
+    get:
+      tags:
+      - Audit Controls
+      summary: Check whether a user is assigned to a control for evidence submission
+      description: >
+        Returns the derived audit ID when the user (identified by email) is assigned
+        to this control for either the population or evidence phase. 404 when not assigned.
+      operationId: getEvidenceAssignment
+      parameters:
+      - name: controlId
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: email
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Authenticated user's email
+      responses:
+        '200':
+          description: User is assigned; contains the derived audit ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceAssignmentResponse'
+        '400': *id001
+        '404': *id003
+        '500': *id002
+  /audit-controls/{controlId}/active-population:
+    get:
+      tags:
+      - Audit Controls
+      summary: Get the active population round for an OE control
+      description: >
+        Returns the population ID in PENDING or COMPLIANCE_REJECTED status.
+        404 when no active population exists (e.g. DESIGN controls or all rounds complete).
+      operationId: getActivePopulation
+      parameters:
+      - name: controlId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Active population ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivePopulationResponse'
+        '400': *id001
+        '404': *id003
+        '500': *id002
+  /evidence-files/{fileId}/content:
+    get:
+      tags:
+      - Audit Evidence
+      summary: Stream the raw bytes of an evidence file
+      description: >
+        Returns the file's binary content with the stored Content-Type header.
+        Only available when Azure Blob Storage is configured. Consumed by the
+        AI validation MCP server.
+      operationId: getEvidenceFileContent
+      parameters:
+      - name: fileId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: File bytes with appropriate Content-Type
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404': *id003
+        '500': *id002
 components:
   parameters:
     IntId:
@@ -3878,3 +3981,51 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DashboardControlItem'
+    WorkQueueRequest:
+      type: object
+      required:
+      - roles
+      - userEmail
+      properties:
+        roles:
+          type: array
+          items:
+            type: string
+        userEmail:
+          type: string
+        tab:
+          type: string
+          enum: [action-items, due-soon, overdue]
+          default: action-items
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 25
+    WorkQueuePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardControlItem'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+    EvidenceAssignmentResponse:
+      type: object
+      properties:
+        auditId:
+          type: integer
+    ActivePopulationResponse:
+      type: object
+      properties:
+        populationId:
+          type: integer

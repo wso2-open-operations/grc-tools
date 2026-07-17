@@ -20,22 +20,31 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
-// validStatuses is the set of allowed control status transitions the API accepts directly.
+// validStatuses is the set of allowed control status transitions the API accepts
+// directly. It mirrors the audit_control.status ENUM in audit_schema.sql exactly
+// (12 statuses) — keep in sync with the schema.
 var validStatuses = map[string]bool{
-	"POPULATION_PENDING":           true,
-	"POPULATION_INTERNAL_REVIEW":   true,
-	"POPULATION_UNDER_VALIDATION":  true,
+	// OE — population phase
+	"POPULATION_PENDING":            true,
+	"POPULATION_INTERNAL_REVIEW":    true,
+	"POPULATION_UNDER_VALIDATION":   true,
 	"POPULATION_NEED_CLARIFICATION": true,
-	"SUBMITTED_SAMPLE":             true,
-	"EVIDENCE_PENDING":             true,
-	"EVIDENCE_INTERNAL_REVIEW":     true,
-	"EVIDENCE_UNDER_VALIDATION":    true,
-	"COMPLETE":                     true,
+	"POPULATION_COMPLETE":           true,
+	// OE — sample phase
+	"AWAITING_SAMPLE":  true,
+	"SUBMITTED_SAMPLE": true,
+	// Evidence phase
+	"EVIDENCE_PENDING":            true,
+	"EVIDENCE_INTERNAL_REVIEW":    true,
+	"EVIDENCE_UNDER_VALIDATION":   true,
+	"EVIDENCE_NEED_CLARIFICATION": true,
+	// Terminal
+	"COMPLETE": true,
 }
 
 // ControlService defines business operations for audit controls.
@@ -47,6 +56,13 @@ type ControlService interface {
 	Update(ctx context.Context, auditID, controlID int, req model.UpdateControlRequest, updatedBy string) error
 	UpdateStatus(ctx context.Context, auditID, controlID int, req model.UpdateStatusRequest, updatedBy string) error
 	Delete(ctx context.Context, auditID, controlID int) error
+	GetAssignedForEvidence(ctx context.Context, userEmail string) ([]*model.AssignedControlForEvidence, error)
+	// AssignedAuditID returns the audit id for controlID when userEmail's team is
+	// assigned and the control is actionable; found=false means not assigned.
+	AssignedAuditID(ctx context.Context, userEmail string, controlID int) (auditID int, found bool, err error)
+	// ActivePopulationID returns the active population round id for an OE control;
+	// found=false means no active population (e.g. a DESIGN control).
+	ActivePopulationID(ctx context.Context, controlID int) (populationID int, found bool, err error)
 }
 
 type controlService struct {
@@ -113,6 +129,15 @@ func (s *controlService) UpdateStatus(ctx context.Context, auditID, controlID in
 	if c == nil {
 		return &apierror.Error{StatusCode: http.StatusNotFound, Body: "control not found"}
 	}
+	// TODO(status-workflow): enforce the control status TRANSITION rules here.
+	// Above only checks that req.Status is a valid enum value — a caller can still
+	// jump straight to any status (e.g. EVIDENCE_PENDING -> COMPLETE) and skip
+	// internal review + auditor validation. The current status is already loaded in
+	// `c.Status`, so add: if the move c.Status -> req.Status is not allowed, return
+	// 422 "invalid status transition". Reuse the same transition map implemented in
+	// compliance-entity/internal/service/audit_control_service.go (allowedControlTransitions
+	// / isValidControlTransition) so both layers agree. (This is the live enforcement
+	// point until the backend is migrated to call the compliance entity.)
 	return s.repo.UpdateStatus(ctx, auditID, controlID, req.Status, req.Comment, updatedBy)
 }
 
@@ -127,12 +152,28 @@ func (s *controlService) Delete(ctx context.Context, auditID, controlID int) err
 	return s.repo.Delete(ctx, auditID, controlID)
 }
 
+func (s *controlService) GetAssignedForEvidence(ctx context.Context, userEmail string) ([]*model.AssignedControlForEvidence, error) {
+	return s.repo.ListAssignedForEvidence(ctx, userEmail)
+}
+
+func (s *controlService) AssignedAuditID(ctx context.Context, userEmail string, controlID int) (int, bool, error) {
+	return s.repo.AssignedAuditID(ctx, userEmail, controlID)
+}
+
+func (s *controlService) ActivePopulationID(ctx context.Context, controlID int) (int, bool, error) {
+	return s.repo.ActivePopulationID(ctx, controlID)
+}
+
 func validateAddRequest(req model.AddControlRequest) error {
-	if req.ControlNumber == "" {
-		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "controlNumber is required"}
-	}
-	if req.Description == "" {
-		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "description is required"}
+	// Framework-linked controls omit controlNumber/description; the entity resolves
+	// them from the template via COALESCE. Skip those checks for that path.
+	if req.FrameworkControlID == nil {
+		if req.ControlNumber == "" {
+			return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "controlNumber is required"}
+		}
+		if req.Description == "" {
+			return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "description is required"}
+		}
 	}
 	if req.RequirementType != "DESIGN" && req.RequirementType != "OE" {
 		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "requirementType must be DESIGN or OE"}

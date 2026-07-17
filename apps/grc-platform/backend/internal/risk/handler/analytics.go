@@ -20,9 +20,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 // handleAnalyticsSummary serves GET /api/v1/risks/analytics/summary.

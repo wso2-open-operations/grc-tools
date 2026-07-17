@@ -48,3 +48,19 @@ func (h *DashboardHandler) GetDashboard(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(data)
 }
+
+// GetWorkQueuePage handles POST /audit/work-queue/search.
+// Body: { roles, userEmail, tab, page, limit }.
+func (h *DashboardHandler) GetWorkQueuePage(w http.ResponseWriter, r *http.Request) {
+	var req domain.WorkQueueRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	page, err := h.svc.GetWorkQueuePage(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(page)
+}

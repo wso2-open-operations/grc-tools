@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"net/http"
 
-	riskservice "github.com/wso2-open-operations/grc-platform/backend/internal/risk/service"
+	riskservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/service"
 )
 
 // Deps holds all service dependencies for Risk Hub handlers.

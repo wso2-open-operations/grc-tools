@@ -20,10 +20,10 @@ import { GlobalStyles, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { AsgardeoProvider } from "@asgardeo/react";
-import { themeConfig } from "@config/themeConfig";
 import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { authConfig } from "@config/authConfig";
+import { ThemePreferenceProvider, useThemePreference } from "@context/theme/ThemePreferenceContext";
 
 /**
  * Custom retry function for React Query.
@@ -66,6 +66,26 @@ const queryClient: QueryClient = new QueryClient({
   },
 });
 
+function ThemedApp(): JSX.Element {
+  const { theme } = useThemePreference();
+  return (
+    <OxygenUIThemeProvider theme={theme}>
+      <GlobalStyles
+        styles={{
+          "html, body, #root": {
+            width: "100%",
+            maxWidth: "100vw",
+            overflowX: "clip",
+          },
+        }}
+      />
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </OxygenUIThemeProvider>
+  );
+}
+
 export default function AppWithConfig(): JSX.Element {
   return (
     <AsgardeoProvider
@@ -87,20 +107,9 @@ export default function AppWithConfig(): JSX.Element {
     >
       <BrowserRouter>
         <LoggerProvider config={loggerConfig}>
-          <OxygenUIThemeProvider theme={themeConfig}>
-            <GlobalStyles
-              styles={{
-                "html, body, #root": {
-                  width: "100%",
-                  maxWidth: "100vw",
-                  overflowX: "clip",
-                },
-              }}
-            />
-            <QueryClientProvider client={queryClient}>
-              <App />
-            </QueryClientProvider>
-          </OxygenUIThemeProvider>
+          <ThemePreferenceProvider>
+            <ThemedApp />
+          </ThemePreferenceProvider>
         </LoggerProvider>
       </BrowserRouter>
     </AsgardeoProvider>

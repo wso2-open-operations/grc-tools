@@ -63,7 +63,7 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 
 	dataArgs := append(append([]any{}, args...), req.Pagination.Limit, req.Pagination.Offset)
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, email, display_name, audit_team_id, risk_team_id, status, created_at, updated_at "+
+		"SELECT id, email, display_name, user_type, audit_team_id, risk_team_id, status, created_at, updated_at "+
 			"FROM `user` "+where+" ORDER BY display_name LIMIT ? OFFSET ?",
 		dataArgs...)
 	if err != nil {
@@ -84,7 +84,7 @@ func (r *userRepo) SearchUsers(ctx context.Context, req domain.SearchUsersReques
 
 func (r *userRepo) GetUserByID(ctx context.Context, id int) (*domain.User, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, email, display_name, audit_team_id, risk_team_id, status, created_at, updated_at FROM `user` WHERE id = ?", id)
+		"SELECT id, email, display_name, user_type, audit_team_id, risk_team_id, status, created_at, updated_at FROM `user` WHERE id = ?", id)
 	u, err := scanUser(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("user %d not found", id)}
@@ -97,7 +97,7 @@ func (r *userRepo) GetUserByID(ctx context.Context, id int) (*domain.User, error
 
 func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*domain.User, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, email, display_name, audit_team_id, risk_team_id, status, created_at, updated_at FROM `user` WHERE email = ?", email)
+		"SELECT id, email, display_name, user_type, audit_team_id, risk_team_id, status, created_at, updated_at FROM `user` WHERE email = ?", email)
 	u, err := scanUser(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("user with email %q not found", email)}
@@ -113,9 +113,13 @@ func (r *userRepo) CreateUser(ctx context.Context, req domain.CreateUserRequest)
 	if status == "" {
 		status = "ACTIVE"
 	}
+	userType := req.UserType
+	if userType == "" {
+		userType = "INTERNAL"
+	}
 	res, err := r.db.ExecContext(ctx,
-		"INSERT INTO `user` (email, display_name, audit_team_id, risk_team_id, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		req.Email, req.DisplayName, nullableInt(req.AuditTeamID), nullableInt(req.RiskTeamID), status, req.CreatedBy, req.CreatedBy)
+		"INSERT INTO `user` (email, display_name, user_type, audit_team_id, risk_team_id, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		req.Email, req.DisplayName, userType, nullableInt(req.AuditTeamID), nullableInt(req.RiskTeamID), status, req.CreatedBy, req.CreatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("user.Create: %w", err)
 	}
@@ -139,6 +143,10 @@ func (r *userRepo) UpdateUser(ctx context.Context, id int, req domain.UpdateUser
 		sets = append(sets, "risk_team_id = ?")
 		args = append(args, *req.RiskTeamID)
 	}
+	if req.UserType != nil {
+		sets = append(sets, "user_type = ?")
+		args = append(args, *req.UserType)
+	}
 	if req.Status != nil {
 		sets = append(sets, "status = ?")
 		args = append(args, *req.Status)
@@ -157,7 +165,7 @@ func (r *userRepo) UpdateUser(ctx context.Context, id int, req domain.UpdateUser
 func scanUser(s scanner) (*domain.User, error) {
 	var u domain.User
 	var auditTeamID, riskTeamID sql.NullInt64
-	if err := s.Scan(&u.ID, &u.Email, &u.DisplayName, &auditTeamID, &riskTeamID, &u.Status, &u.CreatedOn, &u.UpdatedOn); err != nil {
+	if err := s.Scan(&u.ID, &u.Email, &u.DisplayName, &u.UserType, &auditTeamID, &riskTeamID, &u.Status, &u.CreatedOn, &u.UpdatedOn); err != nil {
 		return nil, err
 	}
 	if auditTeamID.Valid {

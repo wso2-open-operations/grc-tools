@@ -19,35 +19,58 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
-	Port              string
-	DB                DBConfig
-	Auth              AuthConfig
-	Azure             AzureConfig
-	CORSAllowedOrigin string
+	Port                    string
+	DB                      DBConfig
+	Auth                    AuthConfig
+	ComplianceEntityBaseURL string
+	CORSAllowedOrigin       string
+	AIValidation            AIValidationConfig
+}
+
+// AIValidationConfig configures the fire-and-forget trigger to the AI Validation
+// Agent. When Enabled is false the backend never contacts the agent.
+type AIValidationConfig struct {
+	Enabled      bool
+	AgentBaseURL string
+	AgentAPIKey  string
 }
 
 type DBConfig struct {
 	DSN string
 }
 
-type AuthConfig struct {
-	JWKSEndpoint          string
-	Issuer                string
-	Audience              string
-	ClockSkew             time.Duration
-	TokenValidatorEnabled bool
+// Auth scope values classify what an IdP's tokens are allowed to reach.
+// A full-scope token (IdP-1, the GRC web app) can reach the whole API; an
+// evidence-app-scoped token (IdP-2, the Evidence Portal) is restricted to
+// /api/v1/evidence-app/* and capped at the evidence-app privilege ceiling.
+const (
+	ScopeFull        = "full"
+	ScopeEvidenceApp = "evidence-app"
+)
+
+// IdPConfig describes one trusted identity provider (Asgardeo organization).
+// Tokens are validated against the matching issuer's JWKS/audience only.
+type IdPConfig struct {
+	Issuer       string
+	JWKSEndpoint string
+	Audience     string
+	Scope        string            // ScopeFull | ScopeEvidenceApp
+	GroupRoleMap map[string]string // external group -> GRC role name; nil = identity map
 }
 
-// AzureConfig holds Azure Blob Storage credentials used for evidence file uploads.
-type AzureConfig struct {
-	StorageAccountName string
-	StorageAccountKey  string
-	ContainerName      string
+type AuthConfig struct {
+	// IdPs holds every trusted issuer. IdP-1 (index 0) is the GRC web app; IdP-2,
+	// when configured, is the Evidence Portal. Empty when TokenValidatorEnabled is
+	// false (local dev decodes tokens without verification).
+	IdPs                  []IdPConfig
+	ClockSkew             time.Duration
+	TokenValidatorEnabled bool
 }
 
 // Load reads configuration from environment variables.
@@ -62,16 +85,11 @@ func Load() (Config, error) {
 		TokenValidatorEnabled: tokenValidatorEnabled,
 	}
 	if tokenValidatorEnabled {
-		var err error
-		if authCfg.JWKSEndpoint, err = mustEnv("AUTH_JWKS_ENDPOINT"); err != nil {
+		idps, err := loadIdPs()
+		if err != nil {
 			return Config{}, err
 		}
-		if authCfg.Issuer, err = mustEnv("AUTH_ISSUER"); err != nil {
-			return Config{}, err
-		}
-		if authCfg.Audience, err = mustEnv("AUTH_AUDIENCE"); err != nil {
-			return Config{}, err
-		}
+		authCfg.IdPs = idps
 	}
 
 	dsn, err := mustEnv("DB_DSN")
@@ -84,14 +102,80 @@ func Load() (Config, error) {
 		DB: DBConfig{
 			DSN: dsn,
 		},
-		Auth: authCfg,
-		Azure: AzureConfig{
-			StorageAccountName: os.Getenv("AZURE_STORAGE_ACCOUNT_NAME"),
-			StorageAccountKey:  os.Getenv("AZURE_STORAGE_ACCOUNT_KEY"),
-			ContainerName:      os.Getenv("AZURE_STORAGE_CONTAINER"),
+		Auth:                    authCfg,
+		ComplianceEntityBaseURL: envOrDefault("COMPLIANCE_ENTITY_BASE_URL", "http://localhost:8081"),
+		CORSAllowedOrigin:       envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
+		AIValidation: AIValidationConfig{
+			Enabled:      os.Getenv("AI_VALIDATION_ENABLED") == "true",
+			AgentBaseURL: envOrDefault("AI_AGENT_BASE_URL", "http://localhost:8090"),
+			AgentAPIKey:  os.Getenv("AI_AGENT_API_KEY"),
 		},
-		CORSAllowedOrigin: envOrDefault("CORS_ALLOWED_ORIGIN", "http://localhost:3000"),
 	}, nil
+}
+
+// loadIdPs builds the trusted-issuer list from the environment. IdP-1 (the GRC
+// web app) is always required. IdP-2 (the Evidence Portal) is optional — it is
+// appended only when AUTH_ISSUER_2 is set, so single-IdP deployments are
+// unchanged. When AUTH_ISSUER_2 is set, all of its companion vars are required
+// (fail fast), and its group→role map is parsed from AUTH_GROUP_ROLE_MAP_2.
+func loadIdPs() ([]IdPConfig, error) {
+	idp1 := IdPConfig{Scope: ScopeFull}
+	var err error
+	if idp1.JWKSEndpoint, err = mustEnv("AUTH_JWKS_ENDPOINT"); err != nil {
+		return nil, err
+	}
+	if idp1.Issuer, err = mustEnv("AUTH_ISSUER"); err != nil {
+		return nil, err
+	}
+	if idp1.Audience, err = mustEnv("AUTH_AUDIENCE"); err != nil {
+		return nil, err
+	}
+	idps := []IdPConfig{idp1}
+
+	if os.Getenv("AUTH_ISSUER_2") == "" {
+		return idps, nil // single-IdP deployment
+	}
+
+	idp2 := IdPConfig{Scope: ScopeEvidenceApp}
+	if idp2.Issuer, err = mustEnv("AUTH_ISSUER_2"); err != nil {
+		return nil, err
+	}
+	if idp2.JWKSEndpoint, err = mustEnv("AUTH_JWKS_ENDPOINT_2"); err != nil {
+		return nil, err
+	}
+	if idp2.Audience, err = mustEnv("AUTH_AUDIENCE_2"); err != nil {
+		return nil, err
+	}
+	rawMap, err := mustEnv("AUTH_GROUP_ROLE_MAP_2")
+	if err != nil {
+		return nil, err
+	}
+	if idp2.GroupRoleMap, err = parseGroupRoleMap(rawMap); err != nil {
+		return nil, err
+	}
+	return append(idps, idp2), nil
+}
+
+// parseGroupRoleMap parses a comma-separated list of ext=grc pairs
+// (e.g. "grc_evidence_submitter=audit_internal_team,other=role") into a map.
+func parseGroupRoleMap(raw string) (map[string]string, error) {
+	m := make(map[string]string)
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		ext, grc, ok := strings.Cut(pair, "=")
+		ext, grc = strings.TrimSpace(ext), strings.TrimSpace(grc)
+		if !ok || ext == "" || grc == "" {
+			return nil, fmt.Errorf("invalid AUTH_GROUP_ROLE_MAP_2 entry %q: want ext=grc", pair)
+		}
+		m[ext] = grc
+	}
+	if len(m) == 0 {
+		return nil, fmt.Errorf("AUTH_GROUP_ROLE_MAP_2 must contain at least one ext=grc pair")
+	}
+	return m, nil
 }
 
 func mustEnv(key string) (string, error) {

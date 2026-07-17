@@ -127,6 +127,10 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 		mux.HandleFunc("GET /files", fileH.DownloadFile)
 		mux.HandleFunc("GET /files/list", fileH.ListFiles)
 		mux.HandleFunc("DELETE /files", fileH.DeleteFile)
+		// Evidence file bytes by id (no client-supplied paths) — consumed by
+		// the AI validation MCP server.
+		fileContentH := handler.NewEvidenceFileContentHandler(evidenceSvc, store)
+		mux.HandleFunc("GET /evidence-files/{fileId}/content", fileContentH.GetContent)
 	}
 
 	// Users
@@ -173,7 +177,12 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 
 	// Controls (cross-audit search; nested CRUD under audits)
 	mux.HandleFunc("POST /audit/dashboard/search", dashboardH.GetDashboard)
+	mux.HandleFunc("POST /audit/work-queue/search", dashboardH.GetWorkQueuePage)
 	mux.HandleFunc("GET /controls/assigned-for-evidence", controlH.ListAssignedForEvidence)
+	// Evidence Portal proxy support: resource-level assignment check (returns the
+	// derived audit id) and active-population lookup for OE controls.
+	mux.HandleFunc("GET /audit-controls/{controlId}/evidence-assignment", controlH.GetEvidenceAssignment)
+	mux.HandleFunc("GET /audit-controls/{controlId}/active-population", controlH.GetActivePopulation)
 	mux.HandleFunc("POST /controls/search", controlH.SearchControlsGlobal)
 	mux.HandleFunc("POST /audits/{auditId}/controls/search", controlH.SearchControls)
 	mux.HandleFunc("POST /audits/{auditId}/controls/bulk", controlH.BulkCreateControls)

@@ -23,9 +23,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/middleware"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/middleware"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 // UserInfo re-exports the middleware type so handlers don't need to import middleware directly.
@@ -64,6 +64,29 @@ func HasPrivilege(ctx context.Context, priv string) bool {
 func RequirePrivilege(ctx context.Context, w http.ResponseWriter, priv string) bool {
 	if HasPrivilege(ctx, priv) {
 		return true
+	}
+
+	response.WriteError(
+		w,
+		http.StatusForbidden,
+		response.ErrMsgForbidden,
+	)
+
+	return false
+}
+
+// RequireAnyPrivilege writes a 403 JSON response and returns false when the
+// user holds none of the given privileges. Use it for dual-audience routes
+// (e.g. an advisory hint visible to both submitters and reviewers):
+//
+//	if !auth.RequireAnyPrivilege(r.Context(), w, privilege.SubmitEvidence, privilege.ReviewEvidence) {
+//	    return
+//	}
+func RequireAnyPrivilege(ctx context.Context, w http.ResponseWriter, privs ...string) bool {
+	for _, p := range privs {
+		if HasPrivilege(ctx, p) {
+			return true
+		}
 	}
 
 	response.WriteError(

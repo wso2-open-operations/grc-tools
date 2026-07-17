@@ -32,7 +32,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/config"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type contextKey string
@@ -44,19 +45,46 @@ type UserInfo struct {
 	Subject string
 	Email   string
 	Groups  []string // Asgardeo role/group claims
+	Issuer  string   // the token's verified issuer (iss)
+	Scope   string   // the matched IdP's scope: config.ScopeFull | config.ScopeEvidenceApp
 }
 
 // Config holds JWT validation settings loaded from environment variables.
 type Config struct {
-	JWKSEndpoint          string
-	Issuer                string
-	Audience              string
+	// IdPs is the set of trusted issuers. Empty when TokenValidatorEnabled is false.
+	IdPs                  []config.IdPConfig
 	ClockSkew             time.Duration
 	TokenValidatorEnabled bool
 	// PrivilegeStore resolves role→privilege mappings after JWT validation.
 	// When nil, privilege checking is skipped and HasPrivilege always returns true.
 	// Set to nil for local dev (TokenValidatorEnabled=false); always set in production.
 	PrivilegeStore *privilege.Store
+	// TestKeyFuncs maps issuer → jwt.Keyfunc, bypassing JWKS cache construction.
+	// Never set in production; used by unit tests to inject pre-built key functions.
+	TestKeyFuncs map[string]jwt.Keyfunc
+}
+
+// evidenceAppPrivilegeCeiling is the single source of truth for what an
+// evidence-app-scoped token (IdP-2) may ever do, no matter what groups it carries
+// or how AUTH_GROUP_ROLE_MAP_2 is (mis)configured. Resolved privileges are
+// intersected with this set for evidence-app tokens.
+var evidenceAppPrivilegeCeiling = map[string]bool{privilege.SubmitEvidence: true}
+
+// intersectCeiling drops any privilege not permitted by the ceiling.
+func intersectCeiling(privs, ceiling map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(privs))
+	for p := range privs {
+		if ceiling[p] {
+			out[p] = true
+		}
+	}
+	return out
+}
+
+// idpRuntime pairs a configured IdP with its JWKS-backed key function.
+type idpRuntime struct {
+	cfg     config.IdPConfig
+	keyFunc jwt.Keyfunc
 }
 
 type jwtClaims struct {
@@ -192,23 +220,38 @@ func rsaPublicKeyFromJWK(nB64, eB64 string) (*rsa.PublicKey, error) {
 // When TokenValidatorEnabled is false the token is only decoded without signature
 // verification — for local development only.
 func Auth(cfg Config) func(http.Handler) http.Handler {
-	var keyFunc jwt.Keyfunc
+	// Build one JWKS-backed key function per trusted issuer (reusing the shared
+	// jwksCache). Indexed by issuer so extractUserInfo can select the right IdP
+	// from the token's iss claim.
+	idps := make(map[string]idpRuntime, len(cfg.IdPs))
 	if cfg.TokenValidatorEnabled {
-		u, parseErr := url.Parse(cfg.JWKSEndpoint)
-		if parseErr != nil || u.Scheme != "https" {
-			panic("auth: JWKS endpoint must use https, got: " + cfg.JWKSEndpoint)
-		}
-		cache, err := newJWKSCache(context.Background(), cfg.JWKSEndpoint)
-		if err != nil {
-			panic("auth: failed to initialise JWKS from " + cfg.JWKSEndpoint + ": " + err.Error())
-		}
-		keyFunc = func(token *jwt.Token) (interface{}, error) {
-			kid, _ := token.Header["kid"].(string)
-			key, ok := cache.lookup(kid)
-			if !ok {
-				return nil, fmt.Errorf("key %q not found in JWKS", kid)
+		for _, idp := range cfg.IdPs {
+			if kf, ok := cfg.TestKeyFuncs[idp.Issuer]; ok {
+				// Test override: skip JWKS cache and HTTPS requirement.
+				idps[idp.Issuer] = idpRuntime{cfg: idp, keyFunc: kf}
+				continue
 			}
-			return key, nil
+			u, parseErr := url.Parse(idp.JWKSEndpoint)
+			if parseErr != nil || u.Scheme != "https" {
+				panic("auth: JWKS endpoint must use https, got: " + idp.JWKSEndpoint)
+			}
+			cache, err := newJWKSCache(context.Background(), idp.JWKSEndpoint)
+			if err != nil {
+				panic("auth: failed to initialise JWKS from " + idp.JWKSEndpoint + ": " + err.Error())
+			}
+			// Capture cache per iteration for the closure.
+			c := cache
+			idps[idp.Issuer] = idpRuntime{
+				cfg: idp,
+				keyFunc: func(token *jwt.Token) (interface{}, error) {
+					kid, _ := token.Header["kid"].(string)
+					key, ok := c.lookup(kid)
+					if !ok {
+						return nil, fmt.Errorf("key %q not found in JWKS", kid)
+					}
+					return key, nil
+				},
+			}
 		}
 	}
 
@@ -225,7 +268,7 @@ func Auth(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			info, err := extractUserInfo(tokenStr, cfg, keyFunc)
+			info, idp, err := extractUserInfo(tokenStr, cfg, idps)
 			if err != nil {
 				slog.ErrorContext(r.Context(), "auth: token validation failed", "err", err)
 				writeAuthError(w, "You are not authorized to perform this action. Please try again.")
@@ -234,12 +277,32 @@ func Auth(cfg Config) func(http.Handler) http.Handler {
 
 			ctx := context.WithValue(r.Context(), userInfoKey, info)
 			if cfg.PrivilegeStore != nil {
-				privs := cfg.PrivilegeStore.Resolve(info.Groups)
+				privs := cfg.PrivilegeStore.Resolve(mapGroups(info.Groups, idp))
+				// Cap evidence-app-scoped tokens at the ceiling, independent of config.
+				if idp != nil && idp.Scope == config.ScopeEvidenceApp {
+					privs = intersectCeiling(privs, evidenceAppPrivilegeCeiling)
+				}
 				ctx = privilege.WithContext(ctx, privs)
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// mapGroups applies an IdP's group→role map (dropping unmapped groups) so an
+// external IdP's group names never leak directly into GRC role resolution. When
+// the IdP has no map (nil), or in local dev (idp nil), groups pass through as-is.
+func mapGroups(groups []string, idp *config.IdPConfig) []string {
+	if idp == nil || idp.GroupRoleMap == nil {
+		return groups
+	}
+	mapped := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if role, ok := idp.GroupRoleMap[g]; ok {
+			mapped = append(mapped, role)
+		}
+	}
+	return mapped
 }
 
 // UserInfoFromContext retrieves the authenticated user from the context.
@@ -263,34 +326,61 @@ func bearerToken(r *http.Request) string {
 	return after
 }
 
-func extractUserInfo(tokenStr string, cfg Config, keyFunc jwt.Keyfunc) (*UserInfo, error) {
-	var c jwtClaims
-
+// extractUserInfo validates the token and returns the caller's identity plus the
+// IdP that issued it (nil in local-dev mode). In production it selects the IdP by
+// the token's iss claim: an unknown issuer is rejected with the same generic error
+// as any other invalid token, so the set of configured issuers is not leaked.
+func extractUserInfo(tokenStr string, cfg Config, idps map[string]idpRuntime) (*UserInfo, *config.IdPConfig, error) {
 	if !cfg.TokenValidatorEnabled {
-		_, _, err := new(jwt.Parser).ParseUnverified(tokenStr, &c)
-		if err != nil {
-			return nil, fmt.Errorf("decode token: %w", err)
+		// Local dev: decode without signature verification. No IdP selection.
+		var c jwtClaims
+		if _, _, err := new(jwt.Parser).ParseUnverified(tokenStr, &c); err != nil {
+			return nil, nil, fmt.Errorf("decode token: %w", err)
 		}
-	} else {
-		token, err := jwt.ParseWithClaims(tokenStr, &c, keyFunc,
-			jwt.WithIssuer(cfg.Issuer),
-			jwt.WithAudience(cfg.Audience),
-			jwt.WithLeeway(cfg.ClockSkew),
-			jwt.WithExpirationRequired(),
-			jwt.WithValidMethods([]string{"RS256"}),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("validate token: %w", err)
+		sub, err := c.GetSubject()
+		if err != nil || sub == "" {
+			return nil, nil, fmt.Errorf("token missing sub claim")
 		}
-		if !token.Valid {
-			return nil, fmt.Errorf("invalid token")
-		}
+		return &UserInfo{Subject: sub, Email: c.Email, Groups: c.Groups, Issuer: c.Issuer}, nil, nil
+	}
+
+	// Read the issuer from the unverified token only to pick the IdP; nothing else
+	// from this parse is trusted.
+	var probe jwtClaims
+	if _, _, err := new(jwt.Parser).ParseUnverified(tokenStr, &probe); err != nil {
+		return nil, nil, fmt.Errorf("decode token: %w", err)
+	}
+	rt, ok := idps[probe.Issuer]
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown issuer")
+	}
+
+	var c jwtClaims
+	token, err := jwt.ParseWithClaims(tokenStr, &c, rt.keyFunc,
+		jwt.WithIssuer(rt.cfg.Issuer),
+		jwt.WithAudience(rt.cfg.Audience),
+		jwt.WithLeeway(cfg.ClockSkew),
+		jwt.WithExpirationRequired(),
+		jwt.WithValidMethods([]string{"RS256"}),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("validate token: %w", err)
+	}
+	if !token.Valid {
+		return nil, nil, fmt.Errorf("invalid token")
 	}
 
 	sub, err := c.GetSubject()
 	if err != nil || sub == "" {
-		return nil, fmt.Errorf("token missing sub claim")
+		return nil, nil, fmt.Errorf("token missing sub claim")
 	}
 
-	return &UserInfo{Subject: sub, Email: c.Email, Groups: c.Groups}, nil
+	idpCfg := rt.cfg
+	return &UserInfo{
+		Subject: sub,
+		Email:   c.Email,
+		Groups:  c.Groups,
+		Issuer:  rt.cfg.Issuer,
+		Scope:   rt.cfg.Scope,
+	}, &idpCfg, nil
 }

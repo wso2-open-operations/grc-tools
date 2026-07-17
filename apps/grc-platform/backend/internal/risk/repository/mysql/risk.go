@@ -24,9 +24,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 )
 
 type riskRepository struct{ db *sql.DB }
@@ -643,7 +643,7 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 						curSteps = append(curSteps, s)
 					}
 				}
-				stepRows.Close()
+				_ = stepRows.Close()
 				if len(curSteps) != len(req.ActionSteps) {
 					stepsChanged = true
 				} else {
@@ -755,12 +755,12 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 		for idRows.Next() {
 			var stepID int
 			if err = idRows.Scan(&stepID); err != nil {
-				idRows.Close()
+				_ = idRows.Close()
 				return fmt.Errorf("scan existing step id: %w", err)
 			}
 			existing[stepID] = true
 		}
-		idRows.Close()
+		_ = idRows.Close()
 		if err = idRows.Err(); err != nil {
 			return fmt.Errorf("iterate existing step ids: %w", err)
 		}

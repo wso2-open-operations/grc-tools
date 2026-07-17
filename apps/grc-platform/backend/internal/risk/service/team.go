@@ -19,8 +19,8 @@ package service
 import (
 	"context"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 )
 
 // TeamService defines business operations for risk teams.

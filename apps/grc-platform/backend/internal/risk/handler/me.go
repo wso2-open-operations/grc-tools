@@ -20,20 +20,21 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	sharedauth "github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	sharedauth "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type privilegesResponse struct {
 	Privileges []string `json:"privileges"`
+	AllowAll   bool     `json:"allowAll,omitempty"`
 }
 
 // handleGetMyPrivileges serves GET /api/v1/me/privileges.
 // Returns the resolved privilege list for the authenticated user (union of all
 // their roles' privileges via the role_privilege DB table).
-// In production (TokenValidatorEnabled=true) the privilege store is always loaded,
-// so privs is never nil here. An empty list means the user has no assigned roles.
+// When no privilege store is configured (TokenValidatorEnabled=false local dev),
+// privs is nil and we return allowAll=true — matching HasPrivilege's allow-all behaviour.
 func (d *Deps) handleGetMyPrivileges(w http.ResponseWriter, r *http.Request) {
 	info := sharedauth.FromContext(r.Context())
 	if info == nil {
@@ -42,6 +43,12 @@ func (d *Deps) handleGetMyPrivileges(w http.ResponseWriter, r *http.Request) {
 	}
 
 	privs := privilege.FromContext(r.Context())
+	if privs == nil {
+		// No privilege store — local dev allow-all mode. Signal the frontend to grant everything.
+		response.WriteJSONValue(w, http.StatusOK, privilegesResponse{AllowAll: true})
+		return
+	}
+
 	names := make([]string, 0, len(privs))
 	for p := range privs {
 		names = append(names, p)

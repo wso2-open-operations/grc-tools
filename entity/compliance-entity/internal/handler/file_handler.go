@@ -22,22 +22,44 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/service"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/storage"
 )
 
-// validBlobPath enforces the allowed Azure Blob layout. The pattern is fully
-// anchored (^ … $) and restricts each segment to a safe character set so that
-// dot-dot sequences, query separators (#, ?), and percent-signs cannot appear.
-// Dot-dot is additionally rejected explicitly because the character set allows
-// individual dots: "report..final.pdf" is fine; ".." as a traversal segment is not.
-var validBlobPath = regexp.MustCompile(`^audits/\d+/controls/\d+/evidence/[A-Za-z0-9._ -]+(/[A-Za-z0-9._ -]+)*$`)
+// validBlobPath enforces the allowed Azure Blob layouts (defense in depth: even a
+// buggy or compromised backend cannot write outside these trees). The pattern is
+// fully anchored (^ … $) and each numeric segment is digits-only; the final
+// filename segment may contain any character except "/" (real filenames with
+// parentheses, @, commas, +, etc.). Backslash and ".." are rejected explicitly
+// in guardBlobPath. Every current caller of Upload/Read/Delete is enumerated here:
+//   - audit evidence:   audits/{auditId}/controls/{controlId}/evidence/{sessionTs}/{file}
+//   - audit population:  audits/{auditId}/controls/{controlId}/population/{populationId}/{file}
+//   - risk evidence:     risks/{riskId}/evidence/{ts}/{file}
+var validBlobPath = regexp.MustCompile(
+	`^(?:audits/\d+/controls/\d+/(?:evidence|population)/\d+/[^/]+` +
+		`|risks/\d+/evidence/\d+/[^/]+)$`)
+
+// validBlobPrefix permits the folder prefixes used for listing (they end in "/"):
+//   - audits/{auditId}/controls/{controlId}/evidence/{sessionTs}/
+//   - audits/{auditId}/controls/{controlId}/population/{populationId}/
+var validBlobPrefix = regexp.MustCompile(`^audits/\d+/controls/\d+/(?:evidence|population)/\d+/?$`)
 
 func guardBlobPath(path string) bool {
-	return !strings.Contains(path, "..") && validBlobPath.MatchString(path)
+	return !strings.Contains(path, "..") &&
+		!strings.Contains(path, `\`) &&
+		validBlobPath.MatchString(path)
+}
+
+// guardBlobPrefix validates a folder prefix for listing.
+func guardBlobPrefix(prefix string) bool {
+	return !strings.Contains(prefix, "..") &&
+		!strings.Contains(prefix, `\`) &&
+		validBlobPrefix.MatchString(prefix)
 }
 
 // maxFileUploadBytes caps a single proxied file upload; the GRC Backend already
@@ -68,7 +90,7 @@ func (h *FileHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !guardBlobPath(blobName) {
-		apierror.WriteJSON(w, http.StatusBadRequest, "blobName must be within the audits/{id}/controls/{id}/evidence/ path")
+		apierror.WriteJSON(w, http.StatusBadRequest, "blobName must be within an allowed storage layout")
 		return
 	}
 	f, header, err := r.FormFile("file")
@@ -106,7 +128,7 @@ func (h *FileHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !guardBlobPath(blobName) {
-		apierror.WriteJSON(w, http.StatusBadRequest, "path must be within the audits/{id}/controls/{id}/evidence/ path")
+		apierror.WriteJSON(w, http.StatusBadRequest, "path must be within an allowed storage layout")
 		return
 	}
 	data, contentType, err := h.storage.ReadBlob(r.Context(), blobName)
@@ -131,8 +153,8 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		apierror.WriteJSON(w, http.StatusBadRequest, "prefix is required")
 		return
 	}
-	if !guardBlobPath(prefix) {
-		apierror.WriteJSON(w, http.StatusBadRequest, "prefix must be within the audits/{id}/controls/{id}/evidence/ path")
+	if !guardBlobPrefix(prefix) {
+		apierror.WriteJSON(w, http.StatusBadRequest, "prefix must be within an allowed storage layout")
 		return
 	}
 	items, err := h.storage.ListBlobs(r.Context(), prefix)
@@ -154,6 +176,56 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(domain.ListFilesResponse{Files: out})
 }
 
+// EvidenceFileContentHandler streams one evidence file's bytes by fileId
+// (GET /evidence-files/{fileId}/content). fileId-keyed by design: callers (the
+// AI validation MCP server) never construct blob paths, so there is no
+// path-injection surface — the stored file_path is looked up server-side and
+// still passes the blob-path guard as defense in depth.
+type EvidenceFileContentHandler struct {
+	evidence service.EvidenceService
+	storage  *storage.Service
+}
+
+// NewEvidenceFileContentHandler constructs an EvidenceFileContentHandler.
+func NewEvidenceFileContentHandler(evidence service.EvidenceService, s *storage.Service) *EvidenceFileContentHandler {
+	return &EvidenceFileContentHandler{evidence: evidence, storage: s}
+}
+
+// GetContent handles GET /evidence-files/{fileId}/content.
+func (h *EvidenceFileContentHandler) GetContent(w http.ResponseWriter, r *http.Request) {
+	fileID, err := strconv.Atoi(r.PathValue("fileId"))
+	if err != nil {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "fileId must be a positive integer"})
+		return
+	}
+	f, err := h.evidence.GetEvidenceFileByID(r.Context(), fileID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	if !guardBlobPath(f.FilePath) {
+		apierror.WriteJSON(w, http.StatusConflict, "stored file path is outside the allowed evidence layout")
+		return
+	}
+	data, contentType, err := h.storage.ReadBlob(r.Context(), f.FilePath)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	if contentType == "" && f.FileType != nil {
+		contentType = *f.FileType
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-File-Name", filepath.Base(f.FileName))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(f.FileName)+"\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data) // #nosec G705 -- blob served with nosniff + attachment disposition, browser won't execute it inline
+}
+
 // DeleteFile handles DELETE /files?path=<blobName>.
 func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 	blobName := r.URL.Query().Get("path")
@@ -162,7 +234,7 @@ func (h *FileHandler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !guardBlobPath(blobName) {
-		apierror.WriteJSON(w, http.StatusBadRequest, "path must be within the audits/{id}/controls/{id}/evidence/ path")
+		apierror.WriteJSON(w, http.StatusBadRequest, "path must be within an allowed storage layout")
 		return
 	}
 	if err := h.storage.Delete(r.Context(), blobName); err != nil {

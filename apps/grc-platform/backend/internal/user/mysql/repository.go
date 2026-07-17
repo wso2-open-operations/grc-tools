@@ -21,14 +21,14 @@ import (
 	"database/sql"
 	"fmt"
 
-    "github.com/wso2-open-operations/grc-platform/backend/internal/user"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user"
 )
 
 type repository struct{ db *sql.DB }
 
 // NewRepository creates a MySQL-backed user.Repository.
 func NewRepository(db *sql.DB) user.Repository {
-    return &repository{db: db}
+	return &repository{db: db}
 }
 
 func (r *repository) GetByEmail(ctx context.Context, email string) (*user.User, error) {
@@ -62,8 +62,8 @@ func (r *repository) GetByID(ctx context.Context, id int) (*user.User, error) {
 }
 
 func (r *repository) Upsert(ctx context.Context, email, displayName string) (*user.User, error) {
-    // TODO: INSERT ... ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)
-    return nil, nil
+	// TODO: INSERT ... ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)
+	return nil, nil
 }
 
 func (r *repository) List(ctx context.Context) ([]*user.User, error) {

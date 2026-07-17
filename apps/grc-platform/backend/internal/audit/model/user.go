@@ -19,10 +19,11 @@ package model
 
 // UserRef is a lightweight user record returned by GET /api/v1/audit/users.
 // Used to populate owner/auditor dropdowns in the UI.
-// When Asgardeo SCIM2 is integrated, profileUrl will be populated from the Asgardeo response.
+
 type UserRef struct {
 	ID          int     `json:"id"`
 	DisplayName string  `json:"displayName"`
 	Email       string  `json:"email"`
+	UserType    string  `json:"userType"` // INTERNAL | EXTERNAL
 	ProfileURL  *string `json:"profileUrl"`
 }

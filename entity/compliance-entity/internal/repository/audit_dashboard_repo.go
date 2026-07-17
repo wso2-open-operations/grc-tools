@@ -28,6 +28,7 @@ import (
 // DashboardRepository aggregates the audit dashboard from the audit tables.
 type DashboardRepository interface {
 	Get(ctx context.Context, req domain.AuditDashboardRequest) (*domain.DashboardData, error)
+	GetWorkQueuePage(ctx context.Context, req domain.WorkQueueRequest) (*domain.WorkQueuePage, error)
 }
 
 type dashboardRepo struct{ db *sql.DB }
@@ -102,7 +103,8 @@ func (r *dashboardRepo) Get(ctx context.Context, req domain.AuditDashboardReques
 
 	// Team completion.
 	teamRows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-		SELECT COALESCE(t.name,'Unassigned'), COUNT(*), SUM(c.status='COMPLETE')
+		SELECT COALESCE(t.name,'Unassigned'), COUNT(*), SUM(c.status='COMPLETE'),
+		       SUM(c.due_date IS NOT NULL AND c.due_date < CURDATE() AND c.status != 'COMPLETE')
 		FROM audit_control c JOIN audit a ON a.id = c.audit_id
 		LEFT JOIN audit_team t ON t.id = c.team_id %s
 		GROUP BY c.team_id, t.name ORDER BY COUNT(*) DESC LIMIT 10`, baseWhere), args...) // #nosec G201
@@ -113,12 +115,34 @@ func (r *dashboardRepo) Get(ctx context.Context, req domain.AuditDashboardReques
 	teamCompletion := []domain.TeamCompletion{}
 	for teamRows.Next() {
 		var tc domain.TeamCompletion
-		if err := teamRows.Scan(&tc.Team, &tc.Total, &tc.Completed); err != nil {
+		if err := teamRows.Scan(&tc.Team, &tc.Total, &tc.Completed, &tc.Overdue); err != nil {
 			return nil, err
 		}
 		teamCompletion = append(teamCompletion, tc)
 	}
 	if err := teamRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Per-team status breakdown — feeds the dashboard's team drill-down.
+	teamStatusRows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT COALESCE(t.name,'Unassigned'), c.status, COUNT(*)
+		FROM audit_control c JOIN audit a ON a.id = c.audit_id
+		LEFT JOIN audit_team t ON t.id = c.team_id %s
+		GROUP BY c.team_id, t.name, c.status`, baseWhere), args...) // #nosec G201
+	if err != nil {
+		return nil, err
+	}
+	defer teamStatusRows.Close()
+	teamStatusDist := []domain.TeamStatusCount{}
+	for teamStatusRows.Next() {
+		var ts domain.TeamStatusCount
+		if err := teamStatusRows.Scan(&ts.Team, &ts.Status, &ts.Count); err != nil {
+			return nil, err
+		}
+		teamStatusDist = append(teamStatusDist, ts)
+	}
+	if err := teamStatusRows.Err(); err != nil {
 		return nil, err
 	}
 
@@ -145,6 +169,14 @@ func (r *dashboardRepo) Get(ctx context.Context, req domain.AuditDashboardReques
 	if err != nil {
 		return nil, err
 	}
+	dueSoonItems, err := r.queryDueSoonItems(ctx, req, baseWhere, args)
+	if err != nil {
+		return nil, err
+	}
+	totalActionItems, err := r.queryActionItemsCount(ctx, req, baseWhere, args)
+	if err != nil {
+		return nil, err
+	}
 	overdueControls, err := r.queryOverdueControls(ctx, baseWhere, args)
 	if err != nil {
 		return nil, err
@@ -159,12 +191,14 @@ func (r *dashboardRepo) Get(ctx context.Context, req domain.AuditDashboardReques
 		Stats: domain.DashboardStats{
 			TotalControls: totalControls, CompletedControls: completedControls,
 			OverdueControls: overdueCount, EvidenceRequiredControls: evidenceReqCount,
-			CompletionPercent: completionPct,
+			CompletionPercent: completionPct, TotalActionItems: totalActionItems,
 		},
-		StatusDistribution: statusDist,
-		TeamCompletion:     teamCompletion,
-		ActionItems:        actionItems,
-		OverdueControls:    overdueControls,
+		StatusDistribution:     statusDist,
+		TeamCompletion:         teamCompletion,
+		TeamStatusDistribution: teamStatusDist,
+		ActionItems:            actionItems,
+		DueSoonItems:           dueSoonItems,
+		OverdueControls:        overdueControls,
 	}, nil
 }
 
@@ -195,7 +229,92 @@ func (r *dashboardRepo) queryAuditStats(ctx context.Context) (domain.AuditStats,
 	return s, rows.Err()
 }
 
+func (r *dashboardRepo) actionItemsStatusFilter(role string) (string, bool) {
+	switch role {
+	case domain.RoleInternalTeam:
+		return "c.status IN ('EVIDENCE_PENDING','SUBMITTED_SAMPLE','EVIDENCE_NEED_CLARIFICATION','POPULATION_PENDING','POPULATION_NEED_CLARIFICATION')", true
+	case domain.RoleComplianceAdmin, domain.RoleComplianceTeam:
+		return "c.status IN ('EVIDENCE_INTERNAL_REVIEW','POPULATION_INTERNAL_REVIEW')", true
+	case domain.RoleExternalAuditor:
+		return "c.status IN ('EVIDENCE_UNDER_VALIDATION','POPULATION_UNDER_VALIDATION','POPULATION_COMPLETE','AWAITING_SAMPLE')", true
+	case domain.RoleManagement:
+		return "", false
+	default:
+		return "c.status IN ('EVIDENCE_INTERNAL_REVIEW','POPULATION_INTERNAL_REVIEW')", true
+	}
+}
+
 func (r *dashboardRepo) queryActionItems(ctx context.Context, req domain.AuditDashboardRequest, baseWhere string, scopeArgs []any) ([]domain.DashboardControlItem, error) {
+	statusFilter, ok := r.actionItemsStatusFilter(req.PrimaryRole())
+	if !ok {
+		return []domain.DashboardControlItem{}, nil
+	}
+	q := fmt.Sprintf(`
+		SELECT c.id, c.audit_id, a.name,
+		       COALESCE(c.control_number, fc.control_number, ''),
+		       COALESCE(c.description, fc.description, ''),
+		       c.status,
+		       COALESCE(DATE_FORMAT(c.due_date,'%%Y-%%m-%%d'),''),
+		       COALESCE(t.name,''),
+		       COALESCE(u.display_name,'')
+		FROM audit_control c JOIN audit a ON a.id = c.audit_id
+		LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
+		LEFT JOIN audit_team t ON t.id = c.team_id
+		LEFT JOIN `+"`user`"+` u ON u.id = c.owner_id
+		%s AND %s ORDER BY c.due_date ASC, c.id ASC LIMIT 100`, baseWhere, statusFilter) // #nosec G201
+	rows, err := r.db.QueryContext(ctx, q, scopeArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.DashboardControlItem{}
+	for rows.Next() {
+		var item domain.DashboardControlItem
+		if err := rows.Scan(&item.ControlID, &item.AuditID, &item.AuditName, &item.ControlNumber, &item.Description, &item.Status, &item.DueDate, &item.Team, &item.ProcessOwner); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *dashboardRepo) queryDueSoonItems(ctx context.Context, req domain.AuditDashboardRequest, baseWhere string, scopeArgs []any) ([]domain.DashboardControlItem, error) {
+	statusFilter, ok := r.actionItemsStatusFilter(req.PrimaryRole())
+	if !ok {
+		return []domain.DashboardControlItem{}, nil
+	}
+	q := fmt.Sprintf(`
+		SELECT c.id, c.audit_id, a.name,
+		       COALESCE(c.control_number, fc.control_number, ''),
+		       COALESCE(c.description, fc.description, ''),
+		       c.status,
+		       COALESCE(DATE_FORMAT(c.due_date,'%%Y-%%m-%%d'),''),
+		       COALESCE(t.name,''),
+		       COALESCE(u.display_name,'')
+		FROM audit_control c JOIN audit a ON a.id = c.audit_id
+		LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
+		LEFT JOIN audit_team t ON t.id = c.team_id
+		LEFT JOIN `+"`user`"+` u ON u.id = c.owner_id
+		%s AND %s AND c.due_date IS NOT NULL
+		AND c.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+		ORDER BY c.due_date ASC, c.id ASC LIMIT 500`, baseWhere, statusFilter) // #nosec G201
+	rows, err := r.db.QueryContext(ctx, q, scopeArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.DashboardControlItem{}
+	for rows.Next() {
+		var item domain.DashboardControlItem
+		if err := rows.Scan(&item.ControlID, &item.AuditID, &item.AuditName, &item.ControlNumber, &item.Description, &item.Status, &item.DueDate, &item.Team, &item.ProcessOwner); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *dashboardRepo) queryActionItemsCount(ctx context.Context, req domain.AuditDashboardRequest, baseWhere string, scopeArgs []any) (int, error) {
 	var statusFilter string
 	switch req.PrimaryRole() {
 	case domain.RoleInternalTeam:
@@ -205,33 +324,141 @@ func (r *dashboardRepo) queryActionItems(ctx context.Context, req domain.AuditDa
 	case domain.RoleExternalAuditor:
 		statusFilter = "c.status IN ('EVIDENCE_UNDER_VALIDATION','POPULATION_UNDER_VALIDATION','POPULATION_COMPLETE','AWAITING_SAMPLE')"
 	case domain.RoleManagement:
-		return []domain.DashboardControlItem{}, nil
+		return 0, nil
 	default:
 		statusFilter = "c.status IN ('EVIDENCE_INTERNAL_REVIEW','POPULATION_INTERNAL_REVIEW')"
 	}
 	q := fmt.Sprintf(`
-		SELECT c.id, c.audit_id, a.name,
-		       COALESCE(c.control_number, fc.control_number, ''),
-		       COALESCE(c.description, fc.description, ''),
-		       c.status,
-		       COALESCE(DATE_FORMAT(c.due_date,'%%Y-%%m-%%d'),'')
-		FROM audit_control c JOIN audit a ON a.id = c.audit_id
-		LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
-		%s AND %s ORDER BY c.due_date ASC, c.id ASC LIMIT 20`, baseWhere, statusFilter) // #nosec G201
-	rows, err := r.db.QueryContext(ctx, q, scopeArgs...)
+		SELECT COUNT(*) FROM audit_control c JOIN audit a ON a.id = c.audit_id
+		%s AND %s`, baseWhere, statusFilter) // #nosec G201
+	var count int
+	if err := r.db.QueryRowContext(ctx, q, scopeArgs...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// GetWorkQueuePage returns a single paginated page of work-queue items.
+func (r *dashboardRepo) GetWorkQueuePage(ctx context.Context, req domain.WorkQueueRequest) (*domain.WorkQueuePage, error) {
+	// Resolve scope the same way as the dashboard.
+	dashReq := domain.AuditDashboardRequest{Roles: req.Roles, UserEmail: req.UserEmail}
+	scope, args, err := r.resolveScope(ctx, dashReq)
+	if err != nil {
+		return nil, err
+	}
+	baseWhere := "WHERE a.status = 'ACTIVE'" + scope
+
+	limit := req.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	page := req.Page
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	var items []domain.DashboardControlItem
+	var total int
+
+	switch req.Tab {
+	case domain.WorkQueueTabActionItems:
+		statusFilter, ok := r.actionItemsStatusFilter(req.PrimaryRole())
+		if !ok {
+			return &domain.WorkQueuePage{Items: []domain.DashboardControlItem{}, Total: 0, Page: page, Limit: limit}, nil
+		}
+		// count
+		cq := fmt.Sprintf(`SELECT COUNT(*) FROM audit_control c JOIN audit a ON a.id = c.audit_id %s AND %s`, baseWhere, statusFilter) // #nosec G201
+		if err := r.db.QueryRowContext(ctx, cq, args...).Scan(&total); err != nil {
+			return nil, err
+		}
+		// page
+		q := fmt.Sprintf(`
+			SELECT c.id, c.audit_id, a.name,
+			       COALESCE(c.control_number, fc.control_number, ''),
+			       COALESCE(c.description, fc.description, ''),
+			       c.status,
+			       COALESCE(DATE_FORMAT(c.due_date,'%%Y-%%m-%%d'),''),
+			       COALESCE(t.name,''),
+			       COALESCE(u.display_name,'')
+			FROM audit_control c JOIN audit a ON a.id = c.audit_id
+			LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
+			LEFT JOIN audit_team t ON t.id = c.team_id
+			LEFT JOIN `+"`user`"+` u ON u.id = c.owner_id
+			%s AND %s ORDER BY c.due_date ASC, c.id ASC LIMIT ? OFFSET ?`, baseWhere, statusFilter) // #nosec G201
+		pageArgs := append(args, limit, offset)
+		items, err = r.scanControlItems(ctx, q, pageArgs)
+
+	case domain.WorkQueueTabDueSoon:
+		statusFilter, ok := r.actionItemsStatusFilter(req.PrimaryRole())
+		if !ok {
+			return &domain.WorkQueuePage{Items: []domain.DashboardControlItem{}, Total: 0, Page: page, Limit: limit}, nil
+		}
+		dueSoonWhere := fmt.Sprintf(`%s AND %s AND c.due_date IS NOT NULL AND c.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)`, baseWhere, statusFilter) // #nosec G201
+		cq := fmt.Sprintf(`SELECT COUNT(*) FROM audit_control c JOIN audit a ON a.id = c.audit_id %s`, dueSoonWhere)                                                          // #nosec G201
+		if err := r.db.QueryRowContext(ctx, cq, args...).Scan(&total); err != nil {
+			return nil, err
+		}
+		q := fmt.Sprintf(`
+			SELECT c.id, c.audit_id, a.name,
+			       COALESCE(c.control_number, fc.control_number, ''),
+			       COALESCE(c.description, fc.description, ''),
+			       c.status,
+			       COALESCE(DATE_FORMAT(c.due_date,'%%Y-%%m-%%d'),''),
+			       COALESCE(t.name,''),
+			       COALESCE(u.display_name,'')
+			FROM audit_control c JOIN audit a ON a.id = c.audit_id
+			LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
+			LEFT JOIN audit_team t ON t.id = c.team_id
+			LEFT JOIN `+"`user`"+` u ON u.id = c.owner_id
+			%s ORDER BY c.due_date ASC, c.id ASC LIMIT ? OFFSET ?`, dueSoonWhere) // #nosec G201
+		pageArgs := append(args, limit, offset)
+		items, err = r.scanControlItems(ctx, q, pageArgs)
+
+	default: // overdue
+		overdueWhere := fmt.Sprintf(`%s AND c.due_date IS NOT NULL AND c.due_date < CURDATE() AND c.status != 'COMPLETE'`, baseWhere) // #nosec G201
+		cq := fmt.Sprintf(`SELECT COUNT(*) FROM audit_control c JOIN audit a ON a.id = c.audit_id %s`, overdueWhere)                  // #nosec G201
+		if err := r.db.QueryRowContext(ctx, cq, args...).Scan(&total); err != nil {
+			return nil, err
+		}
+		q := fmt.Sprintf(`
+			SELECT c.id, c.audit_id, a.name,
+			       COALESCE(c.control_number, fc.control_number, ''),
+			       COALESCE(c.description, fc.description, ''),
+			       c.status,
+			       DATE_FORMAT(c.due_date,'%%Y-%%m-%%d'),
+			       COALESCE(t.name,''),
+			       COALESCE(u.display_name,'')
+			FROM audit_control c JOIN audit a ON a.id = c.audit_id
+			LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
+			LEFT JOIN audit_team t ON t.id = c.team_id
+			LEFT JOIN `+"`user`"+` u ON u.id = c.owner_id
+			%s ORDER BY c.due_date ASC LIMIT ? OFFSET ?`, overdueWhere) // #nosec G201
+		pageArgs := append(args, limit, offset)
+		items, err = r.scanControlItems(ctx, q, pageArgs)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return &domain.WorkQueuePage{Items: items, Total: total, Page: page, Limit: limit}, nil
+}
+
+func (r *dashboardRepo) scanControlItems(ctx context.Context, q string, args []any) ([]domain.DashboardControlItem, error) {
+	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []domain.DashboardControlItem{}
+	list := []domain.DashboardControlItem{}
 	for rows.Next() {
 		var item domain.DashboardControlItem
-		if err := rows.Scan(&item.ControlID, &item.AuditID, &item.AuditName, &item.ControlNumber, &item.Description, &item.Status, &item.DueDate); err != nil {
+		if err := rows.Scan(&item.ControlID, &item.AuditID, &item.AuditName, &item.ControlNumber, &item.Description, &item.Status, &item.DueDate, &item.Team, &item.ProcessOwner); err != nil {
 			return nil, err
 		}
-		items = append(items, item)
+		list = append(list, item)
 	}
-	return items, rows.Err()
+	return list, rows.Err()
 }
 
 func (r *dashboardRepo) queryOverdueControls(ctx context.Context, baseWhere string, scopeArgs []any) ([]domain.DashboardControlItem, error) {
@@ -240,11 +467,15 @@ func (r *dashboardRepo) queryOverdueControls(ctx context.Context, baseWhere stri
 		       COALESCE(c.control_number, fc.control_number, ''),
 		       COALESCE(c.description, fc.description, ''),
 		       c.status,
-		       DATE_FORMAT(c.due_date,'%%Y-%%m-%%d')
+		       DATE_FORMAT(c.due_date,'%%Y-%%m-%%d'),
+		       COALESCE(t.name,''),
+		       COALESCE(u.display_name,'')
 		FROM audit_control c JOIN audit a ON a.id = c.audit_id
 		LEFT JOIN audit_framework_control fc ON fc.id = c.framework_control_id
+		LEFT JOIN audit_team t ON t.id = c.team_id
+		LEFT JOIN `+"`user`"+` u ON u.id = c.owner_id
 		%s AND c.due_date IS NOT NULL AND c.due_date < CURDATE() AND c.status != 'COMPLETE'
-		ORDER BY c.due_date ASC LIMIT 20`, baseWhere) // #nosec G201
+		ORDER BY c.due_date ASC LIMIT 100`, baseWhere) // #nosec G201
 	rows, err := r.db.QueryContext(ctx, q, scopeArgs...)
 	if err != nil {
 		return nil, err
@@ -253,7 +484,7 @@ func (r *dashboardRepo) queryOverdueControls(ctx context.Context, baseWhere stri
 	list := []domain.DashboardControlItem{}
 	for rows.Next() {
 		var item domain.DashboardControlItem
-		if err := rows.Scan(&item.ControlID, &item.AuditID, &item.AuditName, &item.ControlNumber, &item.Description, &item.Status, &item.DueDate); err != nil {
+		if err := rows.Scan(&item.ControlID, &item.AuditID, &item.AuditName, &item.ControlNumber, &item.Description, &item.Status, &item.DueDate, &item.Team, &item.ProcessOwner); err != nil {
 			return nil, err
 		}
 		list = append(list, item)
