@@ -23,9 +23,10 @@ internal delete function was called.
 import httpx
 
 from app.models.evidence import Evidence
+from app.models.evidence_file import EvidenceFile
 from app.storage.blob_storage import delete_file, get_signed_url
 
-from tests.conftest import build_evidence, make_control
+from tests.conftest import build_evidence, make_control, upload_blob
 
 
 def _assert_all_blobs_gone(file_names: list[str]) -> None:
@@ -33,10 +34,56 @@ def _assert_all_blobs_gone(file_names: list[str]) -> None:
         assert httpx.get(get_signed_url(file_name)).status_code == 404
 
 
+def _build_evidence_with_distinct_legacy_primary(
+    db_session, *files: tuple[str, bytes], control_id: int
+) -> tuple[Evidence, list[EvidenceFile], str]:
+    """Like `build_evidence`, but the legacy `Evidence.file_name` points at
+    its own, separately-uploaded blob rather than the first Evidence File's.
+
+    `build_evidence` always makes the primary and the first Evidence File
+    share a blob, so a cascade that walks only the Evidence File list --
+    never touching `Evidence.file_name` at all -- still happens to remove
+    that blob as a side effect and passes anyway. Seeding a primary blob
+    that isn't in the Evidence File list at all is what actually exercises
+    the legacy-reference collection each cascade route does alongside its
+    Evidence File walk (see e.g. `controls.py`'s `file_names.append(ev.file_name)`).
+
+    Returns (evidence, evidence_files, legacy_primary_blob_name).
+    """
+    legacy_primary_name, legacy_primary_url = upload_blob(
+        "legacy-primary.png", b"legacy primary screenshot, not in the file list"
+    )
+    uploads = [upload_blob(name, content) for name, content in files]
+
+    evidence = Evidence(
+        title="Console screenshot",
+        file_name=legacy_primary_name,
+        file_url=legacy_primary_url,
+        control_id=control_id,
+        created_by="engineer@example.com",
+    )
+    db_session.add(evidence)
+    db_session.flush()
+
+    evidence_files = [
+        EvidenceFile(evidence_id=evidence.id, file_name=file_name, file_url=file_url, sort_order=i)
+        for i, (file_name, file_url) in enumerate(uploads)
+    ]
+    for ef in evidence_files:
+        db_session.add(ef)
+    db_session.commit()
+
+    db_session.refresh(evidence)
+    for ef in evidence_files:
+        db_session.refresh(ef)
+
+    return evidence, evidence_files, legacy_primary_name
+
+
 def test_deleting_a_product_removes_every_evidence_file_beneath_it(db_session, admin_client):
     control = make_control(db_session)
     product_id = control.framework.product_id
-    evidence, files = build_evidence(
+    evidence, files, legacy_primary_name = _build_evidence_with_distinct_legacy_primary(
         db_session,
         ("first.png", b"first screenshot"),
         ("second.png", b"second screenshot"),
@@ -49,13 +96,16 @@ def test_deleting_a_product_removes_every_evidence_file_beneath_it(db_session, a
     assert response.status_code == 204
 
     _assert_all_blobs_gone(file_names)
+    # The legacy primary is a distinct blob from every Evidence File above --
+    # proves the cascade collects it too, not just the Evidence File list.
+    _assert_all_blobs_gone([legacy_primary_name])
     assert db_session.query(Evidence).filter(Evidence.id == evidence.id).count() == 0
 
 
 def test_deleting_a_framework_removes_every_evidence_file_beneath_it(db_session, admin_client):
     control = make_control(db_session)
     framework_id = control.framework_id
-    evidence, files = build_evidence(
+    evidence, files, legacy_primary_name = _build_evidence_with_distinct_legacy_primary(
         db_session,
         ("first.png", b"first screenshot"),
         ("second.png", b"second screenshot"),
@@ -68,12 +118,13 @@ def test_deleting_a_framework_removes_every_evidence_file_beneath_it(db_session,
     assert response.status_code == 204
 
     _assert_all_blobs_gone(file_names)
+    _assert_all_blobs_gone([legacy_primary_name])
     assert db_session.query(Evidence).filter(Evidence.id == evidence.id).count() == 0
 
 
 def test_deleting_a_control_removes_every_evidence_file_beneath_it(db_session, admin_client):
     control = make_control(db_session)
-    evidence, files = build_evidence(
+    evidence, files, legacy_primary_name = _build_evidence_with_distinct_legacy_primary(
         db_session,
         ("first.png", b"first screenshot"),
         ("second.png", b"second screenshot"),
@@ -86,6 +137,7 @@ def test_deleting_a_control_removes_every_evidence_file_beneath_it(db_session, a
     assert response.status_code == 204
 
     _assert_all_blobs_gone(file_names)
+    _assert_all_blobs_gone([legacy_primary_name])
     assert db_session.query(Evidence).filter(Evidence.id == evidence.id).count() == 0
 
 
