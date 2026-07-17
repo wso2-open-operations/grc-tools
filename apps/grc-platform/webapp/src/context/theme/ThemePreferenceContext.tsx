@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { createContext, useContext, useState, type JSX } from "react";
-import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
+import { useState, type JSX } from "react";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 import { themes, THEME_OPTIONS, isThemeKey, themeConfig } from "@config/themeConfig";
+import { ThemePreferenceContext } from "./useThemePreference";
 
 const STORAGE_KEY = "grc-platform-theme";
 
@@ -27,20 +28,6 @@ function resolveInitialKey(): string {
   if (fromConfig && isThemeKey(fromConfig)) return fromConfig;
   return "acrylicOrange";
 }
-
-interface ThemePreferenceContextValue {
-  themeKey: string;
-  theme: OxygenTheme;
-  options: { key: string; label: string }[];
-  setThemeKey: (key: string) => void;
-}
-
-const ThemePreferenceContext = createContext<ThemePreferenceContextValue>({
-  themeKey: "acrylicOrange",
-  theme: themeConfig,
-  options: THEME_OPTIONS,
-  setThemeKey: () => undefined,
-});
 
 export function ThemePreferenceProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const [themeKey, setThemeKeyState] = useState<string>(resolveInitialKey);
@@ -58,8 +45,4 @@ export function ThemePreferenceProvider({ children }: { children: React.ReactNod
       {children}
     </ThemePreferenceContext.Provider>
   );
-}
-
-export function useThemePreference(): ThemePreferenceContextValue {
-  return useContext(ThemePreferenceContext);
 }

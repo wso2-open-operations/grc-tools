@@ -23,7 +23,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Palette, Check } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type MouseEvent, useState } from "react";
-import { useThemePreference } from "@context/theme/ThemePreferenceContext";
+import { useThemePreference } from "@context/theme/useThemePreference";
 import { isThemeKey } from "@config/themeConfig";
 
 export default function ThemeSelect(): JSX.Element {
