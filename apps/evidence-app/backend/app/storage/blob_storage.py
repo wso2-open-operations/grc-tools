@@ -14,6 +14,25 @@ from app.config import settings
 # mid-view, short enough that a leaked link is quickly useless.
 SIGNED_URL_EXPIRY_MINUTES = 15
 
+# Largest evidence upload `save_file` will accept, in bytes. Both the
+# Engineer upload path and the Runner (screenshots) only ever produce a
+# single image, so 15 MB comfortably covers a high-resolution screenshot
+# while still bounding how much any one upload can cost in storage and
+# request time.
+MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB
+
+# Content types `save_file` will accept, deliberately an allow-list rather
+# than a deny-list (OWASP File Upload Cheat Sheet): evidence and screenshots
+# are always images, so only the image types the app actually expects are
+# let through, instead of trying to enumerate every dangerous type that
+# must be blocked.
+ALLOWED_UPLOAD_CONTENT_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+}
+
 _blob_service: BlobServiceClient | None = None
 
 
@@ -41,20 +60,44 @@ def save_file(file: UploadFile) -> tuple[str, str]:
     it is rejected instead, the same way this app already rejects other
     malformed input up front rather than accepting or masking it.
 
-    Checked before any network call, so a rejected upload never puts a
-    blob into storage that would then need cleaning up.
+    Also rejects, before any network call, a content type outside the image
+    allow-list, or actual bytes over `MAX_UPLOAD_SIZE_BYTES` -- so a
+    rejected upload never puts a blob into storage that would then need
+    cleaning up. The size check reads the stream itself rather than
+    trusting a client-supplied `Content-Length` header, which can lie or be
+    absent; it reads at most one byte past the cap, so an oversized upload
+    is caught without ever buffering the whole thing into memory.
     """
     if not file.filename:
         raise HTTPException(
             status_code=400,
             detail="Uploaded file must have a filename",
         )
+    if file.content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported file type: {file.content_type or 'unknown'!r}. "
+                f"Allowed types: {', '.join(sorted(ALLOWED_UPLOAD_CONTENT_TYPES))}"
+            ),
+        )
+
+    contents = file.file.read(MAX_UPLOAD_SIZE_BYTES + 1)
+    if len(contents) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "Uploaded file exceeds the "
+                f"{MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB limit"
+            ),
+        )
+
     extension = Path(file.filename).suffix
     unique_name = f"{uuid.uuid4()}{extension}"
     blob = _get_blob_service().get_blob_client(
         container=settings.AZURE_STORAGE_CONTAINER, blob=unique_name
     )
-    blob.upload_blob(file.file, overwrite=True)
+    blob.upload_blob(contents, overwrite=True)
     return unique_name, f"/uploads/{unique_name}"
 
 

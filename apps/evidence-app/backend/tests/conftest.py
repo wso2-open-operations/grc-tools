@@ -75,6 +75,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
+from starlette.datastructures import Headers
 
 from app.auth import User, get_current_user
 from app.config import settings
@@ -393,8 +394,19 @@ def make_control(db_session) -> Control:
 
 def upload_blob(name: str, content: bytes) -> tuple[str, str]:
     """Puts a real blob into the test container and returns
-    (file_name, file_url) — what `save_file` returns for a real upload."""
-    return save_file(UploadFile(file=io.BytesIO(content), filename=name))
+    (file_name, file_url) — what `save_file` returns for a real upload.
+
+    Sets a real image `Content-Type` header: `save_file` allow-lists image
+    content types, and every real caller of this helper is standing in for
+    an actual image upload, so this matches what a genuine request would
+    put on the wire rather than weakening the allow-list to fit the test."""
+    return save_file(
+        UploadFile(
+            file=io.BytesIO(content),
+            filename=name,
+            headers=Headers({"content-type": "image/png"}),
+        )
+    )
 
 
 def build_evidence(
