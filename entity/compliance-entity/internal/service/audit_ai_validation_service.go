@@ -34,7 +34,10 @@ func NewAIValidationService(repo repository.AIValidationRepository) AIValidation
 	return &aiValidationService{repo: repo}
 }
 
-var validAIResults = map[string]bool{"PASS": true, "FAIL": true, "UNCERTAIN": true}
+// PASS/FAIL/UNCERTAIN are verdicts; PENDING/ERROR are lifecycle rows written
+// by the async validation agent (append-only — a terminal row is appended
+// later rather than updating the PENDING one).
+var validAIResults = map[string]bool{"PASS": true, "FAIL": true, "UNCERTAIN": true, "PENDING": true, "ERROR": true}
 
 func (s *aiValidationService) CreateValidation(ctx context.Context, evidenceID int, req domain.CreateAuditAIValidationLogRequest) (domain.AuditAIValidationLog, error) {
 	if evidenceID <= 0 {
@@ -45,7 +48,7 @@ func (s *aiValidationService) CreateValidation(ctx context.Context, evidenceID i
 	}
 	req.Result = strings.ToUpper(req.Result)
 	if !validAIResults[req.Result] {
-		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "invalid result: " + req.Result + " (must be PASS, FAIL, or UNCERTAIN)"}
+		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "invalid result: " + req.Result + " (must be PASS, FAIL, UNCERTAIN, PENDING, or ERROR)"}
 	}
 	if req.CreatedBy == "" {
 		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "createdBy is required"}

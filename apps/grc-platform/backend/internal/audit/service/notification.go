@@ -18,9 +18,10 @@ package service
 
 import (
 	"context"
+	"errors"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // NotificationService defines business operations for audit notifications.
@@ -37,12 +38,14 @@ func NewNotificationService(repo repository.NotificationRepository) Notification
 	return &notificationService{repo: repo}
 }
 
+var errNotImplemented = errors.New("not implemented")
+
 func (s *notificationService) List(ctx context.Context, recipientID int) ([]*model.AuditNotification, error) {
 	// TODO: delegate to repo, filter by recipient_id
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (s *notificationService) MarkRead(ctx context.Context, id, recipientID int) error {
 	// TODO: verify notification belongs to recipientID, set is_read=true via repo
-	return nil
+	return errNotImplemented
 }

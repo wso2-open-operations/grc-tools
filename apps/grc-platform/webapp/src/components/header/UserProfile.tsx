@@ -16,59 +16,143 @@
 
 import { UserMenu } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import { LogOut } from "@wso2/oxygen-ui-icons-react";
+import { LogOut, UserRound } from "@wso2/oxygen-ui-icons-react";
 import { useLogger } from "@hooks/useLogger";
+import { useAuthApiClient } from "@hooks/useAuthApiClient";
+import { BACKEND_BASE_URL } from "@config/apiConfig";
+import UserProfileModal from "./UserProfileModal";
+
+interface MyProfile {
+  first_name: string;
+  last_name: string;
+  thumbnail_url: string;
+}
 
 const isMockAuth = window.config?.GRC_PLATFORM_MOCK_AUTH === true;
 
 function MockUserProfile(): JSX.Element {
+  const [profileOpen, setProfileOpen] = useState(false);
+
   return (
-    <UserMenu>
-      <UserMenu.Trigger name="Dev User" />
-      <UserMenu.Header name="Dev User" email="dev@localhost" />
-      <UserMenu.Divider />
-      <UserMenu.Logout
-        icon={<LogOut size={18} />}
-        label="Log out"
-        onClick={() => {}}
+    <>
+      <UserMenu>
+        <UserMenu.Trigger name="Dev User" />
+        <UserMenu.Header name="Dev User" email="dev@localhost" />
+        <UserMenu.Divider />
+        <UserMenu.Item
+          icon={<UserRound size={18} />}
+          label="Profile"
+          onClick={() => setProfileOpen(true)}
+        />
+        <UserMenu.Divider />
+        <UserMenu.Logout
+          icon={<LogOut size={18} />}
+          label="Log out"
+          onClick={() => {}}
+        />
+      </UserMenu>
+      <UserProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
       />
-    </UserMenu>
+    </>
   );
 }
 
 export default function UserProfile(): JSX.Element {
   const { signOut, isLoading, isSignedIn, getDecodedIdToken } = useAsgardeo();
+  const authFetch = useAuthApiClient();
   const logger = useLogger();
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  // Real name/picture from Asgardeo's own given_name/family_name/picture
+  // claims — empty today because this org's application isn't configured
+  // to release them (confirmed by decoding the raw ID token), but once
+  // that's fixed in the Asgardeo Console, these take priority automatically
+  // with no further code changes, matching how e.g. the leave app gets its
+  // real Google-sourced photo through the same claims.
+  const [asgardeoName, setAsgardeoName] = useState("");
+  const [asgardeoPicture, setAsgardeoPicture] = useState<string | null>(null);
+  // Decent guess derived from the email prefix (e.g. "asel.fernando" ->
+  // "Asel Fernando"), used when neither Asgardeo nor hr_entity have a name.
+  const [emailDerivedName, setEmailDerivedName] = useState("");
+  // Last-resort fallback if nothing else has a name — the raw
+  // username/subject identifier, not a real display name.
+  const [desperateFallbackName, setDesperateFallbackName] = useState("");
+  const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  // Both effects below key on isSignedIn (a primitive) only, and guard with
+  // a ref, deliberately excluding getDecodedIdToken/authFetch/logger from
+  // their dependency arrays — those come from the Asgardeo SDK hook and
+  // aren't guaranteed to be reference-stable across renders, which was
+  // retriggering these effects (and their network calls) continuously.
+  // Same pattern digiops-hr apps use to fetch employee profile data once.
+  const hasFetchedIdentityRef = useRef(false);
+  const hasFetchedProfileRef = useRef(false);
 
   useEffect(() => {
     if (isMockAuth || !isSignedIn) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clear stale identity when user signs out
-      setName("");
       setEmail("");
+      setAsgardeoName("");
+      setAsgardeoPicture(null);
+      setEmailDerivedName("");
+      setDesperateFallbackName("");
+      setProfile(null);
+      hasFetchedIdentityRef.current = false;
+      hasFetchedProfileRef.current = false;
       return;
     }
+    if (hasFetchedIdentityRef.current) return;
+    hasFetchedIdentityRef.current = true;
     getDecodedIdToken()
       .then((token) => {
         const given = token?.given_name ?? "";
         const family = token?.family_name ?? "";
-        const resolved =
-          [given, family].filter(Boolean).join(" ") ||
-          (token as Record<string, string>)?.username ||
-          token?.sub ||
-          "";
-        setName(resolved);
-        setEmail(token?.email ?? "");
+        const email = token?.email ?? "";
+        const emailPrefix = email.split("@")[0];
+        const emailFallback = emailPrefix
+          .split(/[._-]/)
+          .filter(Boolean)
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(" ");
+        setAsgardeoName([given, family].filter(Boolean).join(" "));
+        setAsgardeoPicture((token as Record<string, string>)?.picture ?? null);
+        setEmailDerivedName(emailFallback);
+        setDesperateFallbackName((token as Record<string, string>)?.username || token?.sub || "");
+        setEmail(email);
       })
       .catch((error) => {
-        setName("");
+        setAsgardeoName("");
+        setAsgardeoPicture(null);
+        setEmailDerivedName("");
+        setDesperateFallbackName("");
         setEmail("");
         logger.error("Failed to decode ID token", error);
       });
-  }, [isSignedIn, getDecodedIdToken, logger]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above hasFetchedIdentityRef
+  }, [isSignedIn]);
+
+  // Fallback name/photo from hr_entity (looked up server-side by the
+  // signed-in user's own email) — used only when Asgardeo doesn't have
+  // given_name/family_name/picture for this user (see asgardeoName's
+  // comment above). hr_entity's own thumbnail is frequently empty too
+  // (PeopleHR-sourced data, not actively maintained), so this is itself
+  // a fallback, not the primary source.
+  useEffect(() => {
+    if (isMockAuth || !isSignedIn || hasFetchedProfileRef.current) return;
+    hasFetchedProfileRef.current = true;
+    authFetch(`${BACKEND_BASE_URL}/api/v1/me/profile`)
+      .then((res) => (res.ok ? (res.json() as Promise<MyProfile>) : null))
+      .then((data) => {
+        if (data) setProfile(data);
+      })
+      .catch((error) => {
+        logger.error("Failed to load HR entity profile", error);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above hasFetchedIdentityRef
+  }, [isSignedIn]);
 
   if (isMockAuth) return <MockUserProfile />;
 
@@ -83,19 +167,37 @@ export default function UserProfile(): JSX.Element {
 
   if (isLoading || !isSignedIn) return <></>;
 
-  const displayName = name || "User";
+  // Priority: Asgardeo's own claims (real name/photo, once the org enables
+  // them for this app) > hr_entity lookup > a decent guess from the email
+  // prefix > raw username/subject as a last resort so something is always
+  // shown rather than a blank menu.
+  const profileName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ");
+  const displayName = asgardeoName || profileName || emailDerivedName || desperateFallbackName || "User";
   const displayEmail = email || " ";
+  const picture = asgardeoPicture || profile?.thumbnail_url || null;
 
   return (
-    <UserMenu>
-      <UserMenu.Trigger name={displayName} />
-      <UserMenu.Header name={displayName} email={displayEmail} />
-      <UserMenu.Divider />
-      <UserMenu.Logout
-        icon={<LogOut size={18} />}
-        label="Log out"
-        onClick={handleLogout}
+    <>
+      <UserMenu>
+        <UserMenu.Trigger name={displayName} avatar={picture} />
+        <UserMenu.Header name={displayName} email={displayEmail} avatar={picture} />
+        <UserMenu.Divider />
+        <UserMenu.Item
+          icon={<UserRound size={18} />}
+          label="Profile"
+          onClick={() => setProfileOpen(true)}
+        />
+        <UserMenu.Divider />
+        <UserMenu.Logout
+          icon={<LogOut size={18} />}
+          label="Log out"
+          onClick={handleLogout}
+        />
+      </UserMenu>
+      <UserProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
       />
-    </UserMenu>
+    </>
   );
 }

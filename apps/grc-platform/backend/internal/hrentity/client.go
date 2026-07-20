@@ -26,6 +26,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,68 +37,118 @@ type Employee struct {
 	FirstName string
 	LastName  string
 	WorkEmail string
+	Thumbnail string
 }
 
 // Client talks to the hr_entity GraphQL service. Pointed at a local mock
 // server during development and the real Choreo-hosted service in
-// production — only the URL changes, the request/response contract is
-// identical either way.
+// production — only the URL (and OAuth2 credentials) change, the
+// request/response contract is identical either way.
+//
+// The real service sits behind Choreo API Management with OAuth2
+// client-credentials auth, so the client fetches and caches its own bearer
+// token, refreshing it once it's within tokenExpiryBuffer of expiring.
 type Client struct {
-	graphqlURL string
-	httpClient *http.Client
+	graphqlURL   string
+	tokenURL     string
+	clientID     string
+	clientSecret string
+	httpClient   *http.Client
+
+	tokenMu     sync.Mutex
+	cachedToken string
+	tokenExpiry time.Time
 }
 
-// NewClient creates a Client for the hr_entity service at graphqlURL.
-func NewClient(graphqlURL string) *Client {
+// tokenExpiryBuffer is subtracted from the token's reported lifetime so a
+// near-expiry token is never handed to an in-flight request.
+const tokenExpiryBuffer = 30 * time.Second
+
+// NewClient creates a Client for the hr_entity service at graphqlURL,
+// authenticating via OAuth2 client-credentials at tokenURL using clientID
+// and clientSecret.
+func NewClient(graphqlURL, tokenURL, clientID, clientSecret string) *Client {
 	return &Client{
-		graphqlURL: graphqlURL,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		graphqlURL:   graphqlURL,
+		tokenURL:     tokenURL,
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		httpClient:   &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
-const employeesQuery = `
-query SearchEmployees($filter: EmployeeFilter, $limit: Int) {
-	employees(filter: $filter, limit: $limit) {
-		firstName
-		lastName
-		workEmail
+type tokenResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+}
+
+// accessToken returns a valid bearer token for the hr_entity service,
+// reusing the cached one until it's close to expiry.
+func (c *Client) accessToken(ctx context.Context) (string, error) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+
+	if c.cachedToken != "" && time.Now().Before(c.tokenExpiry) {
+		return c.cachedToken, nil
 	}
-}`
+
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("build hr entity token request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	httpReq.SetBasicAuth(c.clientID, c.clientSecret)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("call hr entity token endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("hr entity token endpoint returned status %d", resp.StatusCode)
+	}
+
+	var tokenResp tokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return "", fmt.Errorf("decode hr entity token response: %w", err)
+	}
+
+	c.cachedToken = tokenResp.AccessToken
+	c.tokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn)*time.Second - tokenExpiryBuffer)
+	return c.cachedToken, nil
+}
 
 type graphqlRequest struct {
 	Query     string         `json:"query"`
 	Variables map[string]any `json:"variables"`
 }
 
-type graphqlResponse struct {
-	Data struct {
-		Employees []struct {
-			FirstName *string `json:"firstName"`
-			LastName  *string `json:"lastName"`
-			WorkEmail *string `json:"workEmail"`
-		} `json:"employees"`
-	} `json:"data"`
+// graphqlEnvelope is the outer shape of every hr_entity GraphQL response.
+// Data is left raw since its inner shape differs per query.
+type graphqlEnvelope struct {
+	Data   json.RawMessage `json:"data"`
 	Errors []struct {
 		Message string `json:"message"`
 	} `json:"errors"`
 }
 
-// SearchActiveEmployees returns active WSO2 employees whose work email
-// contains emailSearchString, capped at limit results. hr_entity's
-// EmployeeFilter has no name-search field, so matching is by email only.
-func (c *Client) SearchActiveEmployees(ctx context.Context, emailSearchString string, limit int) ([]Employee, error) {
-	body, err := json.Marshal(graphqlRequest{
-		Query: employeesQuery,
-		Variables: map[string]any{
-			"filter": map[string]any{
-				"emailSearchString": emailSearchString,
-				"employeeStatus":    []string{"Active"},
-			},
-			"limit": limit,
-		},
-	})
+// doQuery executes a GraphQL query against hr_entity, handling token
+// attachment, the HTTP round trip, and envelope-level error checking. The
+// caller unmarshals the returned raw Data into whatever shape their query's
+// response has.
+func (c *Client) doQuery(ctx context.Context, query string, variables map[string]any) (json.RawMessage, error) {
+	body, err := json.Marshal(graphqlRequest{Query: query, Variables: variables})
 	if err != nil {
 		return nil, fmt.Errorf("marshal hr entity request: %w", err)
+	}
+
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get hr entity access token: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphqlURL, bytes.NewReader(body))
@@ -103,6 +156,7 @@ func (c *Client) SearchActiveEmployees(ctx context.Context, emailSearchString st
 		return nil, fmt.Errorf("build hr entity request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -114,16 +168,53 @@ func (c *Client) SearchActiveEmployees(ctx context.Context, emailSearchString st
 		return nil, fmt.Errorf("hr entity returned status %d", resp.StatusCode)
 	}
 
-	var gqlResp graphqlResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gqlResp); err != nil {
+	var envelope graphqlEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		return nil, fmt.Errorf("decode hr entity response: %w", err)
 	}
-	if len(gqlResp.Errors) > 0 {
-		return nil, fmt.Errorf("hr entity returned errors: %s", gqlResp.Errors[0].Message)
+	if len(envelope.Errors) > 0 {
+		return nil, fmt.Errorf("hr entity returned errors: %s", envelope.Errors[0].Message)
+	}
+	return envelope.Data, nil
+}
+
+const employeesQuery = `
+query SearchEmployees($filter: EmployeeFilter, $limit: Int) {
+	employees(filter: $filter, limit: $limit) {
+		firstName
+		lastName
+		workEmail
+	}
+}`
+
+// SearchActiveEmployees returns active WSO2 employees whose work email
+// contains emailSearchString, capped at limit results. hr_entity's
+// EmployeeFilter has no name-search field, so matching is by email only.
+func (c *Client) SearchActiveEmployees(ctx context.Context, emailSearchString string, limit int) ([]Employee, error) {
+	data, err := c.doQuery(ctx, employeesQuery, map[string]any{
+		"filter": map[string]any{
+			"emailSearchString": emailSearchString,
+			"employeeStatus":    []string{"Active"},
+		},
+		"limit": limit,
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	employees := make([]Employee, 0, len(gqlResp.Data.Employees))
-	for _, e := range gqlResp.Data.Employees {
+	var result struct {
+		Employees []struct {
+			FirstName *string `json:"firstName"`
+			LastName  *string `json:"lastName"`
+			WorkEmail *string `json:"workEmail"`
+		} `json:"employees"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("decode hr entity employees: %w", err)
+	}
+
+	employees := make([]Employee, 0, len(result.Employees))
+	for _, e := range result.Employees {
 		var emp Employee
 		if e.FirstName != nil {
 			emp.FirstName = *e.FirstName
@@ -137,4 +228,51 @@ func (c *Client) SearchActiveEmployees(ctx context.Context, emailSearchString st
 		employees = append(employees, emp)
 	}
 	return employees, nil
+}
+
+const employeeByEmailQuery = `
+query GetEmployee($email: String!) {
+	employee(email: $email) {
+		firstName
+		lastName
+		employeeThumbnail
+	}
+}`
+
+// GetEmployeeByEmail looks up a single employee's name and profile photo by
+// their exact work email. Used to show the signed-in user's own name/avatar
+// in the account menu — Asgardeo's ID token/userinfo don't carry those
+// claims for this org's application, so hr_entity is the source of truth
+// instead. Returns (nil, nil) if no employee matches.
+func (c *Client) GetEmployeeByEmail(ctx context.Context, email string) (*Employee, error) {
+	data, err := c.doQuery(ctx, employeeByEmailQuery, map[string]any{"email": email})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Employee *struct {
+			FirstName         *string `json:"firstName"`
+			LastName          *string `json:"lastName"`
+			EmployeeThumbnail *string `json:"employeeThumbnail"`
+		} `json:"employee"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("decode hr entity employee: %w", err)
+	}
+	if result.Employee == nil {
+		return nil, nil
+	}
+
+	emp := &Employee{WorkEmail: email}
+	if result.Employee.FirstName != nil {
+		emp.FirstName = *result.Employee.FirstName
+	}
+	if result.Employee.LastName != nil {
+		emp.LastName = *result.Employee.LastName
+	}
+	if result.Employee.EmployeeThumbnail != nil {
+		emp.Thumbnail = *result.Employee.EmployeeThumbnail
+	}
+	return emp, nil
 }

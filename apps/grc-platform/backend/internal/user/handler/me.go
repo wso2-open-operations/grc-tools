@@ -19,21 +19,43 @@ package handler
 import (
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/privilege"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
-type permissionsResponse struct {
-	Permissions []string `json:"permissions"`
+type myProfileResponse struct {
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	ThumbnailURL string `json:"thumbnail_url"`
 }
 
-func handleGetMyPermissions(w http.ResponseWriter, r *http.Request) {
-	privs := privilege.FromContext(r.Context())
+// handleGetMyProfile returns the signed-in user's name and profile photo,
+// looked up from hr_entity by their own email — Asgardeo's ID token/userinfo
+// don't carry name/picture claims for this org's application, so this is
+// the source of truth for the account menu instead.
+func handleGetMyProfile(hrClient *hrentity.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userInfo := auth.FromContext(r.Context())
+		if userInfo == nil || userInfo.Email == "" {
+			response.WriteError(w, http.StatusUnauthorized, response.ErrMsgUnauthorized)
+			return
+		}
 
-	perms := make([]string, 0, len(privs))
-	for p := range privs {
-		perms = append(perms, p)
+		emp, err := hrClient.GetEmployeeByEmail(r.Context(), userInfo.Email)
+		if err != nil {
+			response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+			return
+		}
+		if emp == nil {
+			response.WriteJSONValue(w, http.StatusOK, myProfileResponse{})
+			return
+		}
+
+		response.WriteJSONValue(w, http.StatusOK, myProfileResponse{
+			FirstName:    emp.FirstName,
+			LastName:     emp.LastName,
+			ThumbnailURL: emp.Thumbnail,
+		})
 	}
-
-	response.WriteJSONValue(w, http.StatusOK, permissionsResponse{Permissions: perms})
 }

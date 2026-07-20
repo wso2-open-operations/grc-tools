@@ -20,7 +20,7 @@ package repository
 import (
 	"context"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 )
 
 // RiskRepository is the data-access contract for risk records.
@@ -82,7 +82,7 @@ type ActionPlanRepository interface {
 type RiskEvidenceRepository interface {
 	List(ctx context.Context, riskID int) ([]*model.RiskEvidence, error)
 	Create(ctx context.Context, riskID int, fileName, filePath, note, evidenceType, createdBy string) (*model.RiskEvidence, error)
-	Delete(ctx context.Context, evidenceID int) error
+	Delete(ctx context.Context, riskID, evidenceID int, byUserID string) error
 }
 
 // EscalationRepository is the data-access contract for risk escalations.

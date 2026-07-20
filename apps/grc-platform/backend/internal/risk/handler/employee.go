@@ -20,8 +20,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 )
 
 // minEmployeeSearchQueryLen avoids firing an HR entity lookup (and returning

@@ -81,15 +81,23 @@ func (s *Service) ContainerURL() string {
 }
 
 // BlobURL returns the full HTTPS URL for a blob by its full name within the container.
-// Each path segment is percent-encoded so filenames with #, ?, or % do not truncate
-// or corrupt the URL. The canonical resource for Shared Key auth uses the raw blobName
-// (pre-encoding) which is what Azure expects per the Shared Key specification.
+// Each path segment is percent-encoded so filenames with spaces, parentheses, commas,
+// etc. are safely transmitted. The same encoded path is used in the Shared Key
+// canonical resource so the signature matches what Azure receives in the request URL.
 func (s *Service) BlobURL(blobName string) string {
+	return s.ContainerURL() + "/" + encodeBlobPath(blobName)
+}
+
+// encodeBlobPath percent-encodes each path segment of a blob name, preserving the
+// "/" separators between segments. This is the encoding used in both the request URL
+// and the Shared Key canonical resource — keeping them identical so Azure's
+// signature validation passes for any valid filename.
+func encodeBlobPath(blobName string) string {
 	segments := strings.Split(blobName, "/")
 	for i, seg := range segments {
 		segments[i] = url.PathEscape(seg)
 	}
-	return s.ContainerURL() + "/" + strings.Join(segments, "/")
+	return strings.Join(segments, "/")
 }
 
 // BlobName extracts the blob path from a full blob URL produced by BlobURL.
@@ -122,7 +130,7 @@ func (s *Service) UploadBlob(ctx context.Context, blobName, contentType string, 
 	canonHeaders := "x-ms-blob-type:BlockBlob\n" +
 		"x-ms-date:" + date + "\n" +
 		"x-ms-version:" + azureAPIVersion + "\n"
-	canonResource := fmt.Sprintf("/%s/%s/%s", s.cfg.AccountName, s.cfg.ContainerName, blobName)
+	canonResource := fmt.Sprintf("/%s/%s/%s", s.cfg.AccountName, s.cfg.ContainerName, encodeBlobPath(blobName))
 
 	stringToSign := "PUT\n\n\n" + contentLength + "\n\n" + contentType + "\n\n\n\n\n\n\n" +
 		canonHeaders + canonResource
@@ -160,7 +168,7 @@ func (s *Service) UploadBlob(ctx context.Context, blobName, contentType string, 
 func (s *Service) ReadBlob(ctx context.Context, blobName string) (data []byte, contentType string, err error) {
 	date := time.Now().UTC().Format(http.TimeFormat)
 	canonHeaders := "x-ms-date:" + date + "\n" + "x-ms-version:" + azureAPIVersion + "\n"
-	canonResource := fmt.Sprintf("/%s/%s/%s", s.cfg.AccountName, s.cfg.ContainerName, blobName)
+	canonResource := fmt.Sprintf("/%s/%s/%s", s.cfg.AccountName, s.cfg.ContainerName, encodeBlobPath(blobName))
 
 	stringToSign := "GET\n\n\n\n\n\n\n\n\n\n\n\n" + canonHeaders + canonResource
 
@@ -280,7 +288,7 @@ func (s *Service) listBlobsPage(ctx context.Context, prefix, marker string) ([]B
 func (s *Service) Delete(ctx context.Context, blobName string) error {
 	date := time.Now().UTC().Format(http.TimeFormat)
 	canonHeaders := "x-ms-date:" + date + "\n" + "x-ms-version:" + azureAPIVersion + "\n"
-	canonResource := fmt.Sprintf("/%s/%s/%s", s.cfg.AccountName, s.cfg.ContainerName, blobName)
+	canonResource := fmt.Sprintf("/%s/%s/%s", s.cfg.AccountName, s.cfg.ContainerName, encodeBlobPath(blobName))
 
 	stringToSign := "DELETE\n\n\n\n\n\n\n\n\n\n\n\n" + canonHeaders + canonResource
 

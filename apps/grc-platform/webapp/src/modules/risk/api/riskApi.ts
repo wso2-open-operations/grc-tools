@@ -48,6 +48,7 @@ export interface UserOption {
   id: number;
   display_name: string;
   email: string;
+  risk_team_id: number | null;
 }
 
 // EmployeeOption is a WSO2 employee returned by GET /api/v1/employees/search,
@@ -433,13 +434,28 @@ export async function fetchUsers(authFetch: AuthFetch): Promise<UserOption[]> {
   return handleResponse<UserOption[]>(res);
 }
 
-// searchEmployees looks up active WSO2 employees by email substring, live
+// searchEmployees looks up active employees by email substring, live
 // from the HR entity service (never the GRC platform's own database), for
-// the "Risk Identified By: Employee" Autocomplete.
 export async function searchEmployees(authFetch: AuthFetch, query: string): Promise<EmployeeOption[]> {
   const params = new URLSearchParams({ q: query });
   const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/employees/search?${params}`);
   return handleResponse<EmployeeOption[]>(res);
+}
+
+// resolveUserByEmail links an HR entity employee to an internal user.id by
+// email, creating the user row on the fly if one doesn't exist yet (e.g. an
+// employee who's never logged into grc-platform). Used to let fields
+// like Action Owner assign any real employee, not just existing grc-platform
+// users, while still storing a proper FK rather than free text.
+export async function resolveUserByEmail(
+  authFetch: AuthFetch,
+  employee: EmployeeOption,
+): Promise<UserOption> {
+  const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/users/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ email: employee.email, display_name: employee.name }),
+  });
+  return handleResponse<UserOption>(res);
 }
 
 export async function fetchNextSequenceID(

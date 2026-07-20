@@ -25,11 +25,11 @@ import {
   TablePagination,
   TextField,
   Tooltip,
-} from "@mui/material";
+} from "@wso2/oxygen-ui";
 import { Box, ListingTable, Typography } from "@wso2/oxygen-ui";
 import type { ListingTableSortDirection } from "@wso2/oxygen-ui";
-import { AlertCircle, Filter, Search, X } from "@wso2/oxygen-ui-icons-react";
-import { useState, type JSX } from "react";
+import { AlertCircle, Filter, Search, SlidersHorizontal, X } from "@wso2/oxygen-ui-icons-react";
+import { useState, type JSX, type ReactNode } from "react";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import UserAvatar from "@modules/audit/components/UserAvatar";
 import { formatAuditDate } from "@modules/audit/utils/format";
@@ -186,6 +186,89 @@ function ColumnFilter({ label, options, selected, onChange, searchable = false }
   );
 }
 
+// ── Column visibility picker ─────────────────────────────────────────────────
+
+interface ColumnPickerProps {
+  columns: { id: string; label: string; alwaysVisible?: boolean }[];
+  visible: string[];
+  onChange: (ids: string[]) => void;
+  onReset: () => void;
+}
+
+export function ColumnPicker({ columns, visible, onChange, onReset }: ColumnPickerProps): JSX.Element {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const open = Boolean(anchorEl);
+
+  function toggle(id: string) {
+    onChange(visible.includes(id) ? visible.filter((v) => v !== id) : [...visible, id]);
+  }
+
+  return (
+    <>
+      <Button
+        size="small"
+        startIcon={<SlidersHorizontal size={15} />}
+        onClick={(e) => setAnchorEl(e.currentTarget)}
+        sx={{ textTransform: "none", color: "text.secondary" }}
+      >
+        Columns
+      </Button>
+
+      <Popover
+        open={open}
+        anchorEl={anchorEl}
+        onClose={() => setAnchorEl(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+        slotProps={{ paper: { sx: { width: 240, borderRadius: 2, mt: 0.5 } } }}
+      >
+        <Box sx={{ p: 1.25 }}>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 0.5 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+              Show columns
+            </Typography>
+            <Button size="small" onClick={onReset} sx={{ textTransform: "none", fontSize: "0.72rem", py: 0.25 }}>
+              Reset
+            </Button>
+          </Box>
+          <Box sx={{ maxHeight: 320, overflowY: "auto" }}>
+            {columns.map((col) => (
+              <FormControlLabel
+                key={col.id}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={col.alwaysVisible || visible.includes(col.id)}
+                    disabled={col.alwaysVisible}
+                    onChange={() => toggle(col.id)}
+                    disableRipple
+                    sx={{ p: 0.5 }}
+                  />
+                }
+                label={
+                  <Typography variant="body2" sx={{ fontSize: "0.82rem", lineHeight: 1.4 }}>
+                    {col.label}
+                  </Typography>
+                }
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  px: 0.5,
+                  py: 0.1,
+                  borderRadius: 1,
+                  mx: 0,
+                  width: "100%",
+                  "&:hover": { bgcolor: "action.hover" },
+                }}
+              />
+            ))}
+          </Box>
+        </Box>
+      </Popover>
+    </>
+  );
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const REQ_TYPE_LABELS: Record<string, string> = {
@@ -226,18 +309,48 @@ const STATUS_FILTER_OPTIONS: { label: string; value: string }[] = [
   })),
 ];
 
-const HEADERS = [
-  "Control No.",
-  "Description",
-  "Req. Type",
-  "Control Type",
-  "Status",
-  "Auditor POC",
-  "Process Owner",
-  "Team",
-  "Scope",
-  "Due Date",
-];
+// The column catalogue (CONTROL_COLUMNS / DEFAULT_VISIBLE_CONTROL_COLUMNS /
+// CONTROL_COLUMNS_STORAGE_KEY) lives in ./controlColumns so this component file
+// only exports components (react-refresh/only-export-components).
+
+// Reusable cell renderers
+function userCell(name: string | null | undefined): JSX.Element {
+  return name ? (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+      <UserAvatar name={name} size={26} />
+      <Typography variant="body2" noWrap>{name}</Typography>
+    </Box>
+  ) : (
+    <Typography variant="body2" color="text.disabled">—</Typography>
+  );
+}
+
+function textCell(value: string | null | undefined): JSX.Element {
+  return <Typography variant="body2" noWrap>{value ?? "—"}</Typography>;
+}
+
+function dateCell(date: string | null | undefined): JSX.Element {
+  return date ? (
+    <Typography variant="body2" noWrap>{formatAuditDate(date)}</Typography>
+  ) : (
+    <Typography variant="body2" color="text.secondary">—</Typography>
+  );
+}
+
+// ── Column definitions ────────────────────────────────────────────────────────
+
+interface ColumnDef {
+  id: string;
+  label: string;
+  minWidth: number;
+  sortField: string;
+  filterKey?: string;
+  filterOptions?: { label: string; value: string }[];
+  searchableFilter?: boolean;
+  alwaysVisible?: boolean;
+  defaultHidden?: boolean;
+  render: (c: AuditControl) => ReactNode;
+}
 
 function applySorting(
   controls: AuditControl[],
@@ -261,6 +374,8 @@ interface ControlsTableProps {
   onFiltersChange: (f: Record<string, string[]>) => void;
   isLoading: boolean;
   onRowClick: (control: AuditControl) => void;
+  /** Column ids to show. Owned by the parent so the picker can sit in the filter bar. */
+  visibleColumnIds: string[];
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -272,13 +387,14 @@ export default function ControlsTable({
   onFiltersChange,
   isLoading,
   onRowClick,
+  visibleColumnIds,
 }: ControlsTableProps): JSX.Element {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<ListingTableSortDirection>("asc");
 
-  // Derive unique options for dynamic columns from the full (unfiltered) list
+  // Derive unique options for the filter dropdowns from the full (unfiltered) list.
   const auditorOptions = [
     ...new Set(allControls.map((c) => c.auditorName).filter((n): n is string => n !== null)),
   ].sort().map((n) => ({ label: n, value: n }));
@@ -290,6 +406,66 @@ export default function ControlsTable({
   const teamOptions = [
     ...new Set(allControls.map((c) => c.teamName).filter((n): n is string => n !== null)),
   ].sort().map((n) => ({ label: n, value: n }));
+
+  // Column catalogue. New columns can be added here; population columns are
+  // hidden by default so the row stays short until the user opts in.
+  const columns: ColumnDef[] = [
+    { id: "controlNumber", label: "Control No.", minWidth: 90, sortField: "controlNumber", alwaysVisible: true,
+      render: (c) => <Typography variant="body2" fontWeight={600} noWrap>{c.controlNumber}</Typography> },
+    { id: "description", label: "Description", minWidth: 240, sortField: "description",
+      render: (c) => (
+        <Typography variant="body2" sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", maxWidth: 340 }}>
+          {c.description}
+        </Typography>
+      ) },
+    { id: "requirementType", label: "Req. Type", minWidth: 110, sortField: "requirementType",
+      filterKey: "requirementType", filterOptions: REQ_TYPE_OPTIONS,
+      render: (c) => <Typography variant="body2" noWrap>{REQ_TYPE_LABELS[c.requirementType]}</Typography> },
+    { id: "controlType", label: "Control Type", minWidth: 130, sortField: "controlType",
+      filterKey: "controlType", filterOptions: CTRL_TYPE_OPTIONS,
+      render: (c) => <Typography variant="body2" noWrap>{CTRL_TYPE_LABELS[c.controlType]}</Typography> },
+    { id: "status", label: "Status", minWidth: 185, sortField: "status",
+      filterKey: "status", filterOptions: STATUS_FILTER_OPTIONS, searchableFilter: true,
+      render: (c) => <ControlStatusChip status={c.status} /> },
+    { id: "auditorName", label: "Auditor POC", minWidth: 140, sortField: "auditorName",
+      filterKey: "auditorName", filterOptions: auditorOptions, searchableFilter: true,
+      render: (c) => userCell(c.auditorName) },
+    { id: "ownerName", label: "Process Owner", minWidth: 150, sortField: "ownerName",
+      filterKey: "ownerName", filterOptions: ownerOptions, searchableFilter: true,
+      render: (c) => userCell(c.ownerName) },
+    { id: "teamName", label: "Team", minWidth: 130, sortField: "teamName",
+      filterKey: "teamName", filterOptions: teamOptions, searchableFilter: true,
+      render: (c) => textCell(c.teamName) },
+    { id: "scope", label: "Scope", minWidth: 130, sortField: "scope",
+      filterKey: "scope", filterOptions: SCOPE_OPTIONS,
+      render: (c) => <Typography variant="body2" noWrap>{SCOPE_LABELS[c.scope]}</Typography> },
+    { id: "dueDate", label: "Due Date", minWidth: 110, sortField: "dueDate",
+      render: (c) => c.dueDate ? (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+          <Typography variant="body2" noWrap color={c.isOverdue ? "error.main" : "text.primary"} fontWeight={c.isOverdue ? 600 : 400}>
+            {formatAuditDate(c.dueDate)}
+          </Typography>
+          {c.isOverdue && (
+            <Tooltip title="Overdue">
+              <AlertCircle size={14} color="var(--mui-palette-error-main, #d32f2f)" />
+            </Tooltip>
+          )}
+        </Box>
+      ) : (
+        <Typography variant="body2" color="text.secondary">—</Typography>
+      ) },
+    // ── New population-phase columns (hidden by default) ──
+    { id: "populationDueDate", label: "Population Due Date", minWidth: 150, sortField: "populationDueDate", defaultHidden: true,
+      render: (c) => dateCell(c.populationDueDate) },
+    { id: "populationOwnerName", label: "Population Owner", minWidth: 160, sortField: "populationOwnerName", defaultHidden: true,
+      render: (c) => userCell(c.populationOwnerName) },
+    { id: "populationTeamName", label: "Population Team", minWidth: 150, sortField: "populationTeamName", defaultHidden: true,
+      render: (c) => textCell(c.populationTeamName) },
+  ];
+
+  // Visible columns, in catalogue order (alwaysVisible ones can't be hidden).
+  // Visibility is controlled by the parent (AuditDetailPage owns the picker).
+  const visibleColumns = columns.filter((c) => c.alwaysVisible || visibleColumnIds.includes(c.id));
 
   const sorted = sortField ? applySorting(controls, sortField, sortDirection) : controls;
   const totalPages = Math.ceil(sorted.length / rowsPerPage);
@@ -314,9 +490,9 @@ export default function ControlsTable({
         <ListingTable size="small">
           <ListingTable.Head>
             <ListingTable.Row>
-              {HEADERS.map((h) => (
-                <ListingTable.Cell key={h} sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>
-                  {h}
+              {visibleColumns.map((col) => (
+                <ListingTable.Cell key={col.id} sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>
+                  {col.label}
                 </ListingTable.Cell>
               ))}
             </ListingTable.Row>
@@ -324,9 +500,9 @@ export default function ControlsTable({
           <ListingTable.Body>
             {Array.from({ length: 5 }).map((_, i) => (
               <ListingTable.Row key={i}>
-                {HEADERS.map((h) => (
-                  <ListingTable.Cell key={h}>
-                    <Skeleton variant="text" width={h === "Description" ? 200 : 80} />
+                {visibleColumns.map((col) => (
+                  <ListingTable.Cell key={col.id}>
+                    <Skeleton variant="text" width={col.id === "description" ? 200 : 80} />
                   </ListingTable.Cell>
                 ))}
               </ListingTable.Row>
@@ -341,249 +517,77 @@ export default function ControlsTable({
 
   return (
     <ListingTable.Provider
-      sortField={sortField ?? ""}
-      sortDirection={sortDirection}
-      onSortChange={handleSortChange}
-    >
-      <ListingTable.Container>
-        <ListingTable size="small" stickyHeader>
-          <ListingTable.Head>
-            <ListingTable.Row>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 90 }}>
-                <ListingTable.SortLabel field="controlNumber">Control No.</ListingTable.SortLabel>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, minWidth: 240 }}>
-                <ListingTable.SortLabel field="description">Description</ListingTable.SortLabel>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 110 }}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <ListingTable.SortLabel field="requirementType">Req. Type</ListingTable.SortLabel>
-                  <ColumnFilter
-                    label="Req. Type"
-                    options={REQ_TYPE_OPTIONS}
-                    selected={filters.requirementType ?? []}
-                    onChange={(v) => setFilter("requirementType", v)}
-                  />
-                </Box>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 130 }}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <ListingTable.SortLabel field="controlType">Control Type</ListingTable.SortLabel>
-                  <ColumnFilter
-                    label="Control Type"
-                    options={CTRL_TYPE_OPTIONS}
-                    selected={filters.controlType ?? []}
-                    onChange={(v) => setFilter("controlType", v)}
-                  />
-                </Box>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 185 }}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <ListingTable.SortLabel field="status">Status</ListingTable.SortLabel>
-                  <ColumnFilter
-                    label="Status"
-                    options={STATUS_FILTER_OPTIONS}
-                    selected={filters.status ?? []}
-                    onChange={(v) => setFilter("status", v)}
-                    searchable
-                  />
-                </Box>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 140 }}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <ListingTable.SortLabel field="auditorName">Auditor POC</ListingTable.SortLabel>
-                  <ColumnFilter
-                    label="Auditor POC"
-                    options={auditorOptions}
-                    selected={filters.auditorName ?? []}
-                    onChange={(v) => setFilter("auditorName", v)}
-                    searchable
-                  />
-                </Box>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 150 }}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <ListingTable.SortLabel field="ownerName">Process Owner</ListingTable.SortLabel>
-                  <ColumnFilter
-                    label="Process Owner"
-                    options={ownerOptions}
-                    selected={filters.ownerName ?? []}
-                    onChange={(v) => setFilter("ownerName", v)}
-                    searchable
-                  />
-                </Box>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 130 }}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <ListingTable.SortLabel field="teamName">Team</ListingTable.SortLabel>
-                  <ColumnFilter
-                    label="Team"
-                    options={teamOptions}
-                    selected={filters.teamName ?? []}
-                    onChange={(v) => setFilter("teamName", v)}
-                    searchable
-                  />
-                </Box>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 130 }}>
-                <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <ListingTable.SortLabel field="scope">Scope</ListingTable.SortLabel>
-                  <ColumnFilter
-                    label="Scope"
-                    options={SCOPE_OPTIONS}
-                    selected={filters.scope ?? []}
-                    onChange={(v) => setFilter("scope", v)}
-                  />
-                </Box>
-              </ListingTable.Cell>
-
-              <ListingTable.Cell sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: 110 }}>
-                <ListingTable.SortLabel field="dueDate">Due Date</ListingTable.SortLabel>
-              </ListingTable.Cell>
-
-            </ListingTable.Row>
-          </ListingTable.Head>
-
-          <ListingTable.Body>
-            {displayed.length === 0 ? (
+        sortField={sortField ?? ""}
+        sortDirection={sortDirection}
+        onSortChange={handleSortChange}
+      >
+        <ListingTable.Container>
+          <ListingTable size="small" stickyHeader>
+            <ListingTable.Head>
               <ListingTable.Row>
-                <ListingTable.Cell colSpan={10}>
-                  <ListingTable.EmptyState
-                    title="No controls match the selected filter."
-                    minHeight={180}
-                  />
-                </ListingTable.Cell>
+                {visibleColumns.map((col) => (
+                  <ListingTable.Cell key={col.id} sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: col.minWidth }}>
+                    {col.filterKey ? (
+                      <Box sx={{ display: "flex", alignItems: "center" }}>
+                        <ListingTable.SortLabel field={col.sortField}>{col.label}</ListingTable.SortLabel>
+                        <ColumnFilter
+                          label={col.label}
+                          options={col.filterOptions ?? []}
+                          selected={filters[col.filterKey] ?? []}
+                          onChange={(v) => setFilter(col.filterKey as string, v)}
+                          searchable={col.searchableFilter}
+                        />
+                      </Box>
+                    ) : (
+                      <ListingTable.SortLabel field={col.sortField}>{col.label}</ListingTable.SortLabel>
+                    )}
+                  </ListingTable.Cell>
+                ))}
               </ListingTable.Row>
-            ) : (
-              displayed.map((control) => (
-                <ListingTable.Row
-                  key={control.id}
-                  onClick={() => onRowClick(control)}
-                  sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
-                >
-                  <ListingTable.Cell>
-                    <Typography variant="body2" fontWeight={600} noWrap>
-                      {control.controlNumber}
-                    </Typography>
-                  </ListingTable.Cell>
+            </ListingTable.Head>
 
-                  <ListingTable.Cell>
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
-                        overflow: "hidden",
-                        maxWidth: 340,
-                      }}
-                    >
-                      {control.description}
-                    </Typography>
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    <Typography variant="body2" noWrap>
-                      {REQ_TYPE_LABELS[control.requirementType]}
-                    </Typography>
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    <Typography variant="body2" noWrap>
-                      {CTRL_TYPE_LABELS[control.controlType]}
-                    </Typography>
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    <ControlStatusChip status={control.status} />
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    {control.auditorName ? (
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <UserAvatar name={control.auditorName} size={26} />
-                        <Typography variant="body2" noWrap>{control.auditorName}</Typography>
-                      </Box>
-                    ) : (
-                      <Typography variant="body2" color="text.disabled">—</Typography>
-                    )}
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    {control.ownerName ? (
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        <UserAvatar name={control.ownerName} size={26} />
-                        <Typography variant="body2" noWrap>{control.ownerName}</Typography>
-                      </Box>
-                    ) : (
-                      <Typography variant="body2" color="text.disabled">—</Typography>
-                    )}
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    <Typography variant="body2" noWrap>
-                      {control.teamName ?? "—"}
-                    </Typography>
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    <Typography variant="body2" noWrap>
-                      {SCOPE_LABELS[control.scope]}
-                    </Typography>
-                  </ListingTable.Cell>
-
-                  <ListingTable.Cell>
-                    {control.dueDate ? (
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                        <Typography
-                          variant="body2"
-                          noWrap
-                          color={control.isOverdue ? "error.main" : "text.primary"}
-                          fontWeight={control.isOverdue ? 600 : 400}
-                        >
-                          {formatAuditDate(control.dueDate)}
-                        </Typography>
-                        {control.isOverdue && (
-                          <Tooltip title="Overdue">
-                            <AlertCircle size={14} color="var(--mui-palette-error-main, #d32f2f)" />
-                          </Tooltip>
-                        )}
-                      </Box>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">—</Typography>
-                    )}
+            <ListingTable.Body>
+              {displayed.length === 0 ? (
+                <ListingTable.Row>
+                  <ListingTable.Cell colSpan={visibleColumns.length}>
+                    <ListingTable.EmptyState
+                      title="No controls match the selected filter."
+                      minHeight={180}
+                    />
                   </ListingTable.Cell>
                 </ListingTable.Row>
-              ))
-            )}
-          </ListingTable.Body>
+              ) : (
+                displayed.map((control) => (
+                  <ListingTable.Row
+                    key={control.id}
+                    onClick={() => onRowClick(control)}
+                    sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
+                  >
+                    {visibleColumns.map((col) => (
+                      <ListingTable.Cell key={col.id}>{col.render(control)}</ListingTable.Cell>
+                    ))}
+                  </ListingTable.Row>
+                ))
+              )}
+            </ListingTable.Body>
 
-          <ListingTable.Footer>
-            <ListingTable.Row>
-              <TablePagination
-                count={sorted.length}
-                page={safePage}
-                rowsPerPage={rowsPerPage}
-                rowsPerPageOptions={[25, 50, 100]}
-                onPageChange={(_, newPage) => setPage(newPage)}
-                onRowsPerPageChange={(e) => {
-                  setRowsPerPage(parseInt(e.target.value, 10));
-                  setPage(0);
-                }}
-              />
-            </ListingTable.Row>
-          </ListingTable.Footer>
-        </ListingTable>
-      </ListingTable.Container>
-    </ListingTable.Provider>
+            <ListingTable.Footer>
+              <ListingTable.Row>
+                <TablePagination
+                  count={sorted.length}
+                  page={safePage}
+                  rowsPerPage={rowsPerPage}
+                  rowsPerPageOptions={[25, 50, 100]}
+                  onPageChange={(_, newPage) => setPage(newPage)}
+                  onRowsPerPageChange={(e) => {
+                    setRowsPerPage(parseInt(e.target.value, 10));
+                    setPage(0);
+                  }}
+                />
+              </ListingTable.Row>
+            </ListingTable.Footer>
+          </ListingTable>
+        </ListingTable.Container>
+      </ListingTable.Provider>
   );
 }

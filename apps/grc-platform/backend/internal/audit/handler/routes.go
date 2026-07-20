@@ -20,7 +20,9 @@ package handler
 import (
 	"net/http"
 
-	auditservice "github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
+	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/middleware"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aiagent"
 )
 
 // Deps holds all service dependencies for Audit Hub handlers.
@@ -35,10 +37,14 @@ type Deps struct {
 	Evidence     auditservice.EvidenceService
 	Population   auditservice.PopulationService
 	Comment      auditservice.CommentService
-	Review       auditservice.ReviewService
 	Notification auditservice.NotificationService
 	Assignment   auditservice.AssignmentService
 	Trail        auditservice.TrailService
+	AIValidation auditservice.AIValidationService
+
+	// AIAgent triggers async AI validation after an evidence submission.
+	// Nil when AI_VALIDATION_ENABLED is false — the trigger becomes a no-op.
+	AIAgent *aiagent.Client
 }
 
 // RegisterRoutes mounts all Audit Hub routes onto mux.
@@ -49,13 +55,25 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	uh := &userHandler{svc: deps.User}
 	th := &teamHandler{svc: deps.Team}
 	dh := &dashboardHandler{svc: deps.Dashboard}
+	eh := &evidenceHandler{svc: deps.Evidence, controlSvc: deps.Control, popSvc: deps.Population, trailSvc: deps.Trail, aiClient: deps.AIAgent}
+	eah := &evidenceAppHandler{svc: deps.Evidence, controlSvc: deps.Control, popSvc: deps.Population, trailSvc: deps.Trail, aiClient: deps.AIAgent}
+	cmh := &commentHandler{svc: deps.Comment}
+	avh := &aiValidationHandler{svc: deps.AIValidation}
+
+	// Per-principal rate limiter for the Evidence Portal proxy group (design §4D):
+	// 10 req/s sustained, burst 20, keyed by authenticated email. Sits behind the
+	// Choreo gateway's perimeter throttling.
+	evidenceAppRL := middleware.NewRateLimiter(10, 20)
+	rl := evidenceAppRL.Wrap
 
 	// Dashboard.
 	mux.HandleFunc("GET /api/v1/audit/dashboard", dh.getDashboard)
+	mux.HandleFunc("GET /api/v1/audit/work-queue", dh.getWorkQueue)
 
 	// Lookup data for Create Audit form dropdowns.
 	mux.HandleFunc("GET /api/v1/audit/frameworks", fh.listFrameworks)
 	mux.HandleFunc("POST /api/v1/audit/frameworks", fh.createFramework)
+	mux.HandleFunc("GET /api/v1/audit/frameworks/{id}/controls", fh.listFrameworkControls)
 	mux.HandleFunc("GET /api/v1/audit/products", fh.listProducts)
 	mux.HandleFunc("POST /api/v1/audit/products", fh.createProduct)
 	mux.HandleFunc("GET /api/v1/audit/users", uh.listUsers)
@@ -77,4 +95,43 @@ func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("PUT /api/v1/audits/{id}/controls/{controlId}", ch.updateControl)
 	mux.HandleFunc("DELETE /api/v1/audits/{id}/controls/{controlId}", ch.deleteControl)
 	mux.HandleFunc("PATCH /api/v1/audits/{id}/controls/{controlId}/status", ch.updateControlStatus)
+
+	// Evidence submission (backend-proxied upload flow).
+	// Note: /upload-link, /upload and /submit must be registered before the plain
+	// /evidence list route so the router matches their literal suffixes first.
+	// File bytes are proxied through the backend (POST /upload, multipart) — no
+	// write SAS is handed to the client.
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence/upload-link", eh.getUploadLink)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/upload", eh.uploadEvidence)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/submit", eh.submitEvidence)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/evidence/withdraw", eh.withdrawEvidence)
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence", eh.listEvidence)
+	// Population submission (OE controls; same proxied upload flow as evidence).
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/population/upload-link", eh.getPopulationUploadLink)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/population/upload", eh.uploadPopulation)
+	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/population/submit", eh.submitPopulation)
+	// Proxied file download by file ID (bytes streamed via the Compliance Entity).
+	mux.HandleFunc("GET /api/v1/evidence/files/{fileId}/download", eh.downloadEvidenceFile)
+	// Remove a single file from an evidence submission (DB record only).
+	mux.HandleFunc("DELETE /api/v1/evidence/files/{fileId}", eh.deleteEvidenceFile)
+
+	// Evidence comments (evidence-scoped; is_internal hides from external auditors)
+	mux.HandleFunc("GET /api/v1/evidence/{evidenceId}/comments", cmh.listComments)
+	mux.HandleFunc("POST /api/v1/evidence/{evidenceId}/comments", cmh.addComment)
+
+	// AI validation advisory results (read-only hint; SUBMIT or REVIEW evidence).
+	mux.HandleFunc("GET /api/v1/evidence/{evidenceId}/ai-validations", avh.listValidations)
+
+	// Evidence Portal proxy API (IdP-2 scope; also callable by IdP-1 users with
+	// SUBMIT_EVIDENCE). Each route is per-principal rate limited (rl). Every handler
+	// re-derives the audit from the control row and binds the folder path server-side.
+	mux.HandleFunc("GET /api/v1/evidence-app/controls", rl(eah.listControls))
+	// Evidence phase (DESIGN controls + OE controls once past the population phase).
+	mux.HandleFunc("GET /api/v1/evidence-app/controls/{controlId}/upload-link", rl(eah.uploadLink))
+	mux.HandleFunc("POST /api/v1/evidence-app/controls/{controlId}/upload", rl(eah.upload))
+	mux.HandleFunc("POST /api/v1/evidence-app/controls/{controlId}/submit", rl(eah.submit))
+	// Population phase (OE controls only — 409 when the control is DESIGN-type).
+	mux.HandleFunc("GET /api/v1/evidence-app/controls/{controlId}/population/upload-link", rl(eah.populationUploadLink))
+	mux.HandleFunc("POST /api/v1/evidence-app/controls/{controlId}/population/upload", rl(eah.populationUpload))
+	mux.HandleFunc("POST /api/v1/evidence-app/controls/{controlId}/population/submit", rl(eah.populationSubmit))
 }

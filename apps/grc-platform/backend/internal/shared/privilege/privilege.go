@@ -14,8 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package privilege loads role→privilege mappings from the database at startup
-// and provides context helpers for per-request privilege resolution.
+// Package privilege loads role→privilege mappings from the database and keeps
+// them current with a periodic refresh (every 15 min), matching the JWKS cache
+// refresh cadence. Revoked roles or privileges take effect within one window
+// without requiring a redeploy.
 //
 // Privilege names here must exactly match the privilege_name values seeded in
 // the privilege table. Roles are never referenced in application code — only
@@ -26,30 +28,33 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"sync"
+	"time"
 )
 
 // Risk Hub privilege names.
 const (
-	ViewRisks               = "VIEW_RISKS"
-	CreateRisk              = "CREATE_RISK"
-	UpdateRisk              = "UPDATE_RISK"
-	SubmitRisk              = "SUBMIT_RISK"
-	CancelRisk              = "CANCEL_RISK"
-	OwnerApproveRisk        = "OWNER_APPROVE_RISK"
-	ManagementApproveRisk   = "MANAGEMENT_APPROVE_RISK"
-	ComplianceApproveRisk   = "COMPLIANCE_APPROVE_RISK"
-	OwnerRejectRisk         = "OWNER_REJECT_RISK"
-	ManagementRejectRisk    = "MANAGEMENT_REJECT_RISK"
-	ComplianceRejectRisk    = "COMPLIANCE_REJECT_RISK"
-	CompleteRisk            = "COMPLETE_RISK"
-	CloseRisk               = "CLOSE_RISK"
-	EscalateRisk            = "ESCALATE_RISK"
-	AssessRisk              = "ASSESS_RISK"
-	ManageTeams             = "MANAGE_TEAMS"
-	ManageRiskScores        = "MANAGE_RISK_SCORES"
-	ManageActionPlans       = "MANAGE_ACTION_PLANS"
-	ManageComplianceRefs    = "MANAGE_COMPLIANCE_REFS"
-	ViewAnalytics           = "VIEW_ANALYTICS"
+	ViewRisks             = "VIEW_RISKS"
+	CreateRisk            = "CREATE_RISK"
+	UpdateRisk            = "UPDATE_RISK"
+	SubmitRisk            = "SUBMIT_RISK"
+	CancelRisk            = "CANCEL_RISK"
+	OwnerApproveRisk      = "OWNER_APPROVE_RISK"
+	ManagementApproveRisk = "MANAGEMENT_APPROVE_RISK"
+	ComplianceApproveRisk = "COMPLIANCE_APPROVE_RISK"
+	OwnerRejectRisk       = "OWNER_REJECT_RISK"
+	ManagementRejectRisk  = "MANAGEMENT_REJECT_RISK"
+	ComplianceRejectRisk  = "COMPLIANCE_REJECT_RISK"
+	CompleteRisk          = "COMPLETE_RISK"
+	CloseRisk             = "CLOSE_RISK"
+	EscalateRisk          = "ESCALATE_RISK"
+	AssessRisk            = "ASSESS_RISK"
+	ManageTeams           = "MANAGE_TEAMS"
+	ManageRiskScores      = "MANAGE_RISK_SCORES"
+	ManageActionPlans     = "MANAGE_ACTION_PLANS"
+	ManageComplianceRefs  = "MANAGE_COMPLIANCE_REFS"
+	ViewAnalytics         = "VIEW_ANALYTICS"
 )
 
 // Audit Hub privilege names.
@@ -68,21 +73,55 @@ const (
 	ManageAssignments    = "MANAGE_ASSIGNMENTS"
 	ViewTrail            = "VIEW_TRAIL"
 	ManageFrameworks     = "MANAGE_FRAMEWORKS"
+	ManageUsers          = "MANAGE_USERS"
+	ExportReport         = "EXPORT_REPORT"
 )
 
 type contextKey struct{}
 
-// Store holds the role→privilege mapping loaded from the database at startup.
-// It is safe for concurrent reads after construction.
+// Store holds the role→privilege mapping and refreshes it periodically from the
+// database. Safe for concurrent reads at all times.
 type Store struct {
-	// rolePrivileges maps role_name → set of privilege_names.
+	mu             sync.RWMutex
 	rolePrivileges map[string]map[string]bool
+	db             *sql.DB
 }
 
-// New loads the active role→privilege mapping from the database and returns a Store.
-// Call once at startup; pass the result to middleware.Config.PrivilegeStore.
+// NewForTest constructs a Store with a pre-populated mapping without a database.
+// For unit tests only — never call in production code.
+func NewForTest(rolePrivileges map[string]map[string]bool) *Store {
+	return &Store{rolePrivileges: rolePrivileges}
+}
+
+// New loads the active role→privilege mapping from the database, starts a
+// background goroutine that reloads it every 15 minutes, and returns the Store.
+// The goroutine stops when ctx is cancelled (typically at server shutdown).
 func New(ctx context.Context, db *sql.DB) (*Store, error) {
-	rows, err := db.QueryContext(ctx, `
+	s := &Store{db: db}
+	if err := s.reload(ctx); err != nil {
+		return nil, err
+	}
+	go func() {
+		t := time.NewTicker(15 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if err := s.reload(ctx); err != nil {
+					slog.Error("privilege: reload failed", "err", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return s, nil
+}
+
+// reload fetches the current role→privilege mapping from the database and
+// atomically replaces the in-memory map under the write lock.
+func (s *Store) reload(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT r.role_name, p.privilege_name
 		FROM role_privilege rp
 		JOIN role r ON r.id = rp.role_id
@@ -92,7 +131,7 @@ func New(ctx context.Context, db *sql.DB) (*Store, error) {
 		  AND p.status = 'ACTIVE'
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("privilege: load mapping: %w", err)
+		return fmt.Errorf("privilege: load mapping: %w", err)
 	}
 	defer rows.Close()
 
@@ -100,7 +139,7 @@ func New(ctx context.Context, db *sql.DB) (*Store, error) {
 	for rows.Next() {
 		var role, priv string
 		if err := rows.Scan(&role, &priv); err != nil {
-			return nil, fmt.Errorf("privilege: scan row: %w", err)
+			return fmt.Errorf("privilege: scan row: %w", err)
 		}
 		if m[role] == nil {
 			m[role] = make(map[string]bool)
@@ -108,13 +147,20 @@ func New(ctx context.Context, db *sql.DB) (*Store, error) {
 		m[role][priv] = true
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("privilege: iterate rows: %w", err)
+		return fmt.Errorf("privilege: iterate rows: %w", err)
 	}
-	return &Store{rolePrivileges: m}, nil
+
+	s.mu.Lock()
+	s.rolePrivileges = m
+	s.mu.Unlock()
+	slog.Info("privilege: map reloaded", "roles", len(m))
+	return nil
 }
 
 // Resolve returns the union of all privileges granted to any of the given roles.
 func (s *Store) Resolve(roles []string) map[string]bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	result := make(map[string]bool)
 	for _, role := range roles {
 		for priv := range s.rolePrivileges[role] {

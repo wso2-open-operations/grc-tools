@@ -20,8 +20,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/hrentity"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 )
 
 // employeeSearchLimit caps how many HR entity results are fetched per

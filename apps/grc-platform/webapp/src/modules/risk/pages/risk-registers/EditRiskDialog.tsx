@@ -29,6 +29,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormHelperText,
   IconButton,
   InputLabel,
   MenuItem,
@@ -42,7 +43,7 @@ import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { parseDateOnly, toDateOnlyString } from "@utils/dateTime";
 import type { JSX } from "react";
 import type * as React from "react";
-import { searchEmployees } from "../../api/riskApi";
+import { resolveUserByEmail, searchEmployees } from "../../api/riskApi";
 import type {
   ComplianceReference,
   EmployeeOption,
@@ -187,6 +188,66 @@ export default function EditRiskDialog({
     employeeSearchDebounce.current = setTimeout(() => runEmployeeSearch(value), EMPLOYEE_SEARCH_DEBOUNCE_MS);
   };
 
+  // Action Owner can be any employee, not just an existing grc-platform user,
+  // so — like Identified By (Employee) above — options are searched live
+  // against the HR entity. Unlike that field, action_owner_id is a real FK,
+  // so on selection we resolve the chosen employee to an internal user.id
+  // (creating the user row on the fly if needed) via resolveUserByEmail.
+  const [actionOwnerOptions, setActionOwnerOptions] = useState<EmployeeOption[]>([]);
+  const [actionOwnerSelected, setActionOwnerSelected] = useState<EmployeeOption | null>(() => {
+    const owner = users.find((u) => u.id === detail.action_plan?.action_owner_id);
+    return owner ? { name: owner.display_name, email: owner.email } : null;
+  });
+  const [actionOwnerSearchLoading, setActionOwnerSearchLoading] = useState(false);
+  const [actionOwnerResolving, setActionOwnerResolving] = useState(false);
+  const [actionOwnerError, setActionOwnerError] = useState<string | null>(null);
+  const actionOwnerDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Risk Owner is restricted to users already belonging (via risk_team_id) to
+  // this assignment team — source register isn't editable here (it's baked
+  // into the immutable risk_code), so only assignmentTeamId is checked. The
+  // risk's existing owner is always kept visible/selectable even if no
+  // longer "eligible", so opening this dialog never silently invalidates
+  // already-saved data — only an actual team change re-checks eligibility.
+  const eligibleRiskOwners = users.filter((u) => u.risk_team_id === assignmentTeamId);
+  const currentOwnerStillEligible = eligibleRiskOwners.some((u) => u.id === ownerId);
+  const riskOwnerOptions = currentOwnerStillEligible
+    ? eligibleRiskOwners
+    : [...eligibleRiskOwners, ...users.filter((u) => u.id === ownerId)];
+  const prevAssignmentTeamId = useRef(assignmentTeamId);
+  useEffect(() => {
+    if (prevAssignmentTeamId.current !== assignmentTeamId) {
+      prevAssignmentTeamId.current = assignmentTeamId;
+      setOwnerId((current) => {
+        if (current === "") return current;
+        const stillEligible = users.some((u) => u.id === current && u.risk_team_id === assignmentTeamId);
+        return stillEligible ? current : "";
+      });
+    }
+  }, [assignmentTeamId, users]);
+
+  const runActionOwnerSearch = useCallback((query: string) => {
+    if (query.trim().length < MIN_EMPLOYEE_SEARCH_LEN) {
+      setActionOwnerOptions([]);
+      setActionOwnerError(null);
+      return;
+    }
+    setActionOwnerSearchLoading(true);
+    setActionOwnerError(null);
+    searchEmployees(authFetch, query)
+      .then(setActionOwnerOptions)
+      .catch(() => {
+        setActionOwnerOptions([]);
+        setActionOwnerError("Unable to reach the employee directory. Please try again.");
+      })
+      .finally(() => setActionOwnerSearchLoading(false));
+  }, [authFetch]);
+
+  const handleActionOwnerInputChange = (value: string): void => {
+    if (actionOwnerDebounce.current) clearTimeout(actionOwnerDebounce.current);
+    actionOwnerDebounce.current = setTimeout(() => runActionOwnerSearch(value), EMPLOYEE_SEARCH_DEBOUNCE_MS);
+  };
+
   useEffect(() => {
     if (!open) return;
     setRiskTitle(detail.risk_title);
@@ -202,7 +263,10 @@ export default function EditRiskDialog({
     setReassessmentDate(parseDateOnly(detail.reassessment_date));
     setTreatmentStrategy(detail.treatment_strategy ?? "");
     setAssignmentTeamId(detail.assignment_team_id);
+    prevAssignmentTeamId.current = detail.assignment_team_id;
     setActionOwnerId(detail.action_plan?.action_owner_id ?? "");
+    const currentActionOwner = users.find((u) => u.id === detail.action_plan?.action_owner_id);
+    setActionOwnerSelected(currentActionOwner ? { name: currentActionOwner.display_name, email: currentActionOwner.email } : null);
     setActionPlanDescription(detail.action_plan?.description ?? "");
     setProgress(detail.progress ?? "");
     setGitIssueUrl(detail.git_issue_url ?? "");
@@ -527,11 +591,16 @@ export default function EditRiskDialog({
                       {users.map((u) => <MenuItem key={u.id} value={u.id}>{u.display_name}</MenuItem>)}
                     </Select>
                   </FormControl>
-                  <FormControl fullWidth disabled={submitting}>
+                  <FormControl fullWidth disabled={submitting} error={eligibleRiskOwners.length === 0}>
                     <InputLabel>Risk Owner</InputLabel>
                     <Select label="Risk Owner" value={ownerId} onChange={(e) => setOwnerId(Number(e.target.value))}>
-                      {users.map((u) => <MenuItem key={u.id} value={u.id}>{u.display_name}</MenuItem>)}
+                      {riskOwnerOptions.map((u) => <MenuItem key={u.id} value={u.id}>{u.display_name}</MenuItem>)}
                     </Select>
+                    {eligibleRiskOwners.length === 0 && (
+                      <FormHelperText error>
+                        No users are assigned to this team yet. Contact an admin to assign team membership.
+                      </FormHelperText>
+                    )}
                   </FormControl>
                   {/* Compliance References */}
                   <FormControl fullWidth disabled={submitting}>
@@ -644,12 +713,52 @@ export default function EditRiskDialog({
                       {assignmentTeams.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
                     </Select>
                   </FormControl>
-                  <FormControl fullWidth disabled={submitting}>
-                    <InputLabel>Action Owner</InputLabel>
-                    <Select label="Action Owner" value={actionOwnerId} onChange={(e) => setActionOwnerId(Number(e.target.value))}>
-                      {users.map((u) => <MenuItem key={u.id} value={u.id}>{u.display_name}</MenuItem>)}
-                    </Select>
-                  </FormControl>
+                  <Autocomplete
+                    options={actionOwnerOptions}
+                    loading={actionOwnerSearchLoading || actionOwnerResolving}
+                    filterOptions={(opts) => opts}
+                    getOptionLabel={(option) => option.name}
+                    isOptionEqualToValue={(option, value) => option.email === value.email}
+                    value={actionOwnerSelected}
+                    disabled={submitting}
+                    onInputChange={(_, newInputValue, reason) => {
+                      if (reason === "input") handleActionOwnerInputChange(newInputValue);
+                    }}
+                    onChange={(_, newValue) => {
+                      if (!newValue) {
+                        setActionOwnerSelected(null);
+                        setActionOwnerId("");
+                        return;
+                      }
+                      setActionOwnerResolving(true);
+                      resolveUserByEmail(authFetch, newValue)
+                        .then((resolved) => {
+                          setActionOwnerSelected(newValue);
+                          setActionOwnerId(resolved.id);
+                          if (errors.actionOwnerId) setErrors((p) => ({ ...p, actionOwnerId: "" }));
+                        })
+                        .catch(() => {
+                          setActionOwnerSelected(null);
+                          setActionOwnerId("");
+                          setActionOwnerError("Unable to link this employee to a user account. Please try again.");
+                        })
+                        .finally(() => setActionOwnerResolving(false));
+                    }}
+                    loadingText="Searching…"
+                    noOptionsText={
+                      actionOwnerError ??
+                      "Type at least 2 characters of the employee's email to search"
+                    }
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Action Owner"
+                        placeholder="Search by email"
+                        error={!!errors.actionOwnerId || !!actionOwnerError}
+                        helperText={errors.actionOwnerId ?? actionOwnerError ?? undefined}
+                      />
+                    )}
+                  />
                   <TextField
                     label="Action Plan Description"
                     fullWidth

@@ -18,6 +18,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -257,6 +259,37 @@ func (s *controlService) ListAssignedForEvidence(ctx context.Context, userEmail 
 	return domain.ListAssignedControlsResponse{Controls: controls}, nil
 }
 
+func (s *controlService) GetEvidenceAssignment(ctx context.Context, userEmail string, controlID int) (domain.EvidenceAssignmentResponse, error) {
+	if userEmail == "" {
+		return domain.EvidenceAssignmentResponse{}, &apierror.ValidationError{Msg: "email is required"}
+	}
+	if controlID <= 0 {
+		return domain.EvidenceAssignmentResponse{}, &apierror.ValidationError{Msg: "controlId must be a positive integer"}
+	}
+	auditID, err := s.repo.GetEvidenceAssignment(ctx, userEmail, controlID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.EvidenceAssignmentResponse{}, &apierror.NotFoundError{Msg: "not assigned to this control"}
+	}
+	if err != nil {
+		return domain.EvidenceAssignmentResponse{}, err
+	}
+	return domain.EvidenceAssignmentResponse{AuditID: auditID}, nil
+}
+
+func (s *controlService) FindActivePopulation(ctx context.Context, controlID int) (domain.ActivePopulationResponse, error) {
+	if controlID <= 0 {
+		return domain.ActivePopulationResponse{}, &apierror.ValidationError{Msg: "controlId must be a positive integer"}
+	}
+	populationID, err := s.repo.FindActivePopulation(ctx, controlID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ActivePopulationResponse{}, &apierror.NotFoundError{Msg: "no active population for this control"}
+	}
+	if err != nil {
+		return domain.ActivePopulationResponse{}, err
+	}
+	return domain.ActivePopulationResponse{PopulationID: populationID}, nil
+}
+
 func (s *controlService) UpdateControl(ctx context.Context, auditID, controlID int, req domain.UpdateControlRequest) (domain.AuditControl, error) {
 	if auditID <= 0 {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "auditId must be a positive integer"}
@@ -266,6 +299,20 @@ func (s *controlService) UpdateControl(ctx context.Context, auditID, controlID i
 	}
 	if req.UpdatedBy == "" {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "updatedBy is required"}
+	}
+	if req.ControlType != nil {
+		upper := strings.ToUpper(*req.ControlType)
+		if !validControlTypes[upper] {
+			return domain.AuditControl{}, &apierror.ValidationError{Msg: "invalid controlType: " + *req.ControlType}
+		}
+		req.ControlType = &upper
+	}
+	if req.Scope != nil {
+		upper := strings.ToUpper(*req.Scope)
+		if !validScopes[upper] {
+			return domain.AuditControl{}, &apierror.ValidationError{Msg: "invalid scope: " + *req.Scope}
+		}
+		req.Scope = &upper
 	}
 	if req.Status != nil {
 		if !validControlStatuses[strings.ToUpper(*req.Status)] {

@@ -19,6 +19,8 @@ import AuditDashboard from "@modules/audit/pages/AuditDashboard";
 import AuditsListPage from "@modules/audit/pages/AuditsListPage";
 import AuditDetailPage from "@modules/audit/pages/AuditDetailPage";
 import CreateAuditPage from "@modules/audit/pages/CreateAuditPage";
+import AuditPrivilegeGuard from "@modules/audit/components/AuditPrivilegeGuard";
+import { AuditPrivilege } from "@modules/audit/privileges";
 
 // Audit Hub routes, mounted under /audit by App.tsx. Owned by the Audit module —
 // add Audit pages here without touching the shared App.tsx.
@@ -26,7 +28,7 @@ export const auditRoutes = (
   <Route path="audit">
     <Route index element={<Navigate to="audits" replace />} />
     <Route path="audits" element={<AuditsListPage />} />
-    <Route path="audits/create" element={<CreateAuditPage />} />
+    <Route path="audits/create" element={<AuditPrivilegeGuard privilege={AuditPrivilege.CreateAudit}><CreateAuditPage /></AuditPrivilegeGuard>} />
     <Route path="audits/:auditId" element={<AuditDetailPage />} />
     <Route path="dashboard" element={<AuditDashboard />} />
   </Route>

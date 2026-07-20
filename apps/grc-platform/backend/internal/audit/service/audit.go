@@ -23,9 +23,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/apierror"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // AuditService defines business operations for audit engagements.
@@ -34,11 +34,11 @@ type AuditService interface {
 	GetByID(ctx context.Context, id int) (*model.Audit, error)
 	Create(ctx context.Context, req model.CreateAuditRequest, createdBy string) (*model.Audit, error)
 	Update(ctx context.Context, id int, req model.UpdateAuditRequest, updatedBy string) error
-	Delete(ctx context.Context, id int) error
+	Delete(ctx context.Context, id int, deletedBy string) error
 }
 
 type auditService struct {
-	repo        repository.AuditRepository
+	repo          repository.AuditRepository
 	frameworkRepo repository.FrameworkRepository
 	productRepo   repository.ProductRepository
 }
@@ -77,6 +77,9 @@ func (s *auditService) Create(ctx context.Context, req model.CreateAuditRequest,
 	if req.PeriodStart == "" || req.PeriodEnd == "" {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "periodStart and periodEnd are required"}
 	}
+	if createdBy == "" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "authenticated user email is missing from token — check Asgardeo app email scope"}
+	}
 
 	// Verify framework and product exist.
 	fw, err := s.frameworkRepo.GetByID(ctx, req.FrameworkID)
@@ -108,7 +111,10 @@ func (s *auditService) Update(ctx context.Context, id int, req model.UpdateAudit
 	return s.repo.Update(ctx, id, req, updatedBy)
 }
 
-func (s *auditService) Delete(ctx context.Context, id int) error {
+func (s *auditService) Delete(ctx context.Context, id int, deletedBy string) error {
+	if deletedBy == "" {
+		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "authenticated user email is missing from token — check Asgardeo app email scope"}
+	}
 	a, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -116,5 +122,5 @@ func (s *auditService) Delete(ctx context.Context, id int) error {
 	if a == nil {
 		return &apierror.Error{StatusCode: http.StatusNotFound, Body: "audit not found"}
 	}
-	return s.repo.Delete(ctx, id)
+	return s.repo.Delete(ctx, id, deletedBy)
 }

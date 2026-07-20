@@ -19,10 +19,11 @@ package handler
 import (
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/service"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 type controlHandler struct {
@@ -31,6 +32,9 @@ type controlHandler struct {
 
 // listControls handles GET /api/v1/audits/{id}/controls.
 func (h *controlHandler) listControls(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -51,6 +55,9 @@ func (h *controlHandler) listControls(w http.ResponseWriter, r *http.Request) {
 
 // getControl handles GET /api/v1/audits/{id}/controls/{controlId}.
 func (h *controlHandler) getControl(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+		return
+	}
 	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -69,6 +76,9 @@ func (h *controlHandler) getControl(w http.ResponseWriter, r *http.Request) {
 
 // addControl handles POST /api/v1/audits/{id}/controls.
 func (h *controlHandler) addControl(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageControls) {
+		return
+	}
 	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -89,6 +99,9 @@ func (h *controlHandler) addControl(w http.ResponseWriter, r *http.Request) {
 // bulkAddControls handles POST /api/v1/audits/{id}/controls/bulk.
 // Used by the Create Audit form when copying from a previous audit or uploading CSV.
 func (h *controlHandler) bulkAddControls(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageControls) {
+		return
+	}
 	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -111,6 +124,9 @@ func (h *controlHandler) bulkAddControls(w http.ResponseWriter, r *http.Request)
 
 // updateControl handles PUT /api/v1/audits/{id}/controls/{controlId}.
 func (h *controlHandler) updateControl(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageControls) {
+		return
+	}
 	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -133,6 +149,9 @@ func (h *controlHandler) updateControl(w http.ResponseWriter, r *http.Request) {
 
 // updateControlStatus handles PATCH /api/v1/audits/{id}/controls/{controlId}/status.
 func (h *controlHandler) updateControlStatus(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageControls) {
+		return
+	}
 	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return
@@ -155,6 +174,9 @@ func (h *controlHandler) updateControlStatus(w http.ResponseWriter, r *http.Requ
 
 // deleteControl handles DELETE /api/v1/audits/{id}/controls/{controlId}.
 func (h *controlHandler) deleteControl(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageControls) {
+		return
+	}
 	auditID, ok := parseIntParam(w, r, "id")
 	if !ok {
 		return

@@ -45,6 +45,7 @@ type User struct {
 	ID          int       `json:"id"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"displayName"`
+	UserType    string    `json:"userType"` // INTERNAL | EXTERNAL
 	AuditTeamID *int      `json:"auditTeamId"`
 	RiskTeamID  *int      `json:"riskTeamId"`
 	Status      string    `json:"status"`
@@ -278,6 +279,12 @@ type AuditControl struct {
 	IsOverdue           bool      `json:"isOverdue"`
 	CreatedOn           time.Time `json:"createdOn"`
 	UpdatedOn           time.Time `json:"updatedOn"`
+	// Population-phase fields (OE controls only), from the initial audit_population record.
+	PopulationDescription *string `json:"populationDescription"`
+	PopulationComments    *string `json:"populationComments"`
+	PopulationDueDate     *string `json:"populationDueDate"`
+	PopulationOwnerName   *string `json:"populationOwnerName"`
+	PopulationTeamName    *string `json:"populationTeamName"`
 }
 
 // SearchControlsRequest is the payload for POST /audits/{auditId}/controls/search.
@@ -300,19 +307,44 @@ type SearchControlsResponse struct {
 }
 
 // AssignedControlForEvidence is a control a user's team must submit evidence for.
+// It is enriched with audit/product/framework so the Evidence Portal can render a
+// control without extra round-trips. The phase-aware base folder path is computed
+// by the GRC Backend (never trusted from a client), so it is not carried here.
 type AssignedControlForEvidence struct {
-	AuditID        int    `json:"auditId"`
-	AuditName      string `json:"auditName"`
-	ControlID      int    `json:"controlId"`
-	ControlNumber  string `json:"controlNumber"`
-	Description    string `json:"description"`
-	Status         string `json:"status"`
-	BaseFolderPath string `json:"baseFolderPath"` // e.g. "audits/5/controls/12/evidence/"
+	AuditID             int     `json:"auditId"`
+	AuditName           string  `json:"auditName"`
+	Product             string  `json:"product"`
+	Framework           string  `json:"framework"`
+	PeriodStart         string  `json:"periodStart"` // YYYY-MM-DD
+	PeriodEnd           string  `json:"periodEnd"`   // YYYY-MM-DD
+	ControlID           int     `json:"controlId"`
+	ControlNumber       string  `json:"controlNumber"`
+	Description         string  `json:"description"`
+	EvidenceRequirement *string `json:"evidenceRequirement"`
+	RequirementType     string  `json:"requirementType"` // DESIGN | OE
+	Status              string  `json:"status"`
+	DueDate             *string `json:"dueDate"` // YYYY-MM-DD
 }
 
 // ListAssignedControlsResponse is returned by GET /controls/assigned-for-evidence.
 type ListAssignedControlsResponse struct {
 	Controls []AssignedControlForEvidence `json:"controls"`
+}
+
+// EvidenceAssignmentResponse is returned by
+// GET /audit-controls/{controlId}/evidence-assignment?email=. A 200 with the
+// derived audit id means the user is assigned to this control right now (for
+// either the population or evidence phase); a 404 means not assigned.
+type EvidenceAssignmentResponse struct {
+	AuditID int `json:"auditId"`
+}
+
+// ActivePopulationResponse is returned by
+// GET /audit-controls/{controlId}/active-population. A 200 carries the id of the
+// population round the team must act on (status PENDING or COMPLIANCE_REJECTED);
+// a 404 means no active population (e.g. a DESIGN control).
+type ActivePopulationResponse struct {
+	PopulationID int `json:"populationId"`
 }
 
 // BulkCreateControlsRequest is the payload for POST /audits/{auditId}/controls/bulk.
@@ -465,6 +497,7 @@ type SearchRisksResponse struct {
 type CreateUserRequest struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"displayName"`
+	UserType    string `json:"userType"` // INTERNAL | EXTERNAL; defaults to INTERNAL
 	AuditTeamID *int   `json:"auditTeamId"`
 	RiskTeamID  *int   `json:"riskTeamId"`
 	Status      string `json:"status"`
@@ -474,6 +507,7 @@ type CreateUserRequest struct {
 // UpdateUserRequest is the payload for PATCH /users/{id}.
 type UpdateUserRequest struct {
 	DisplayName *string `json:"displayName"`
+	UserType    *string `json:"userType"` // INTERNAL | EXTERNAL
 	AuditTeamID *int    `json:"auditTeamId"`
 	RiskTeamID  *int    `json:"riskTeamId"`
 	Status      *string `json:"status"`
@@ -596,15 +630,19 @@ type CreateControlRequest struct {
 
 // UpdateControlRequest is the payload for PATCH /audits/{auditId}/controls/{controlId}.
 type UpdateControlRequest struct {
-	OwnerID         *int    `json:"ownerId"`
-	TeamID          *int    `json:"teamId"`
-	AuditorID       *int    `json:"auditorId"`
-	DueDate         *string `json:"dueDate"`
-	Status          *string `json:"status"`
-	Comments        *string `json:"comments"`
-	SampleReference *string `json:"sampleReference"`
-	UpdatedBy       string  `json:"updatedBy"`
-	ExpectedStatus  string  `json:"-"` // set server-side for atomic transition; never decoded from JSON
+	Description         *string `json:"description"`
+	ControlType         *string `json:"controlType"`
+	Scope               *string `json:"scope"`
+	EvidenceRequirement *string `json:"evidenceRequirement"`
+	OwnerID             *int    `json:"ownerId"`
+	TeamID              *int    `json:"teamId"`
+	AuditorID           *int    `json:"auditorId"`
+	DueDate             *string `json:"dueDate"`
+	Status              *string `json:"status"`
+	Comments            *string `json:"comments"`
+	SampleReference     *string `json:"sampleReference"`
+	UpdatedBy           string  `json:"updatedBy"`
+	ExpectedStatus      string  `json:"-"` // set server-side for atomic transition; never decoded from JSON
 }
 
 // =============================================================================
@@ -1155,8 +1193,9 @@ type AuditAIValidationLog struct {
 	ID              int64     `json:"id"`
 	EvidenceID      int       `json:"evidenceId"`
 	ControlID       int       `json:"controlId"`
-	Result          string    `json:"result"` // PASS | FAIL | UNCERTAIN
-	GapsFound       *string   `json:"gapsFound"`
+	Result          string    `json:"result"`    // PASS | FAIL | UNCERTAIN | PENDING | ERROR
+	GapsFound       *string   `json:"gapsFound"` // JSON array of gap objects
+	Feedback        *string   `json:"feedback"`  // JSON array of submitter-facing action strings
 	Summary         *string   `json:"summary"`
 	ConfidenceScore *float64  `json:"confidenceScore"`
 	CreatedBy       *string   `json:"createdBy"`
@@ -1166,8 +1205,9 @@ type AuditAIValidationLog struct {
 // CreateAuditAIValidationLogRequest is the payload for POST /evidence/{evidenceId}/ai-validations.
 type CreateAuditAIValidationLogRequest struct {
 	ControlID       int      `json:"controlId"`
-	Result          string   `json:"result"` // PASS | FAIL | UNCERTAIN
+	Result          string   `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR
 	GapsFound       *string  `json:"gapsFound"`
+	Feedback        *string  `json:"feedback"`
 	Summary         *string  `json:"summary"`
 	ConfidenceScore *float64 `json:"confidenceScore"`
 	CreatedBy       string   `json:"createdBy"`

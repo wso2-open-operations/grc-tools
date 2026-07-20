@@ -17,10 +17,28 @@
 // Package model defines the domain types for the Audit Hub module.
 package model
 
-// AuditComment represents a threaded comment on a control or evidence.
-// TODO: add fields based on `audit_comment` in audit_schema.sql
-type AuditComment struct{}
+import "time"
 
-// AddCommentRequest is the payload for POST .../comments.
-// TODO: define fields (content, parentId for threading, isInternal)
-type AddCommentRequest struct{}
+// AuditComment is a comment on an evidence submission (audit_comment).
+// IsInternal hides the comment from external auditors.
+type AuditComment struct {
+	ID              int       `json:"id"`
+	EvidenceID      int       `json:"evidenceId"`
+	ParentCommentID *int      `json:"parentCommentId"`
+	Content         string    `json:"content"`
+	IsInternal      bool      `json:"isInternal"`
+	CreatedBy       string    `json:"createdBy"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+// AddCommentRequest is the payload for POST /evidence/{evidenceId}/comments.
+type AddCommentRequest struct {
+	Content         string `json:"content"`
+	IsInternal      bool   `json:"isInternal"`
+	ParentCommentID *int   `json:"parentCommentId"`
+}
+
+// CommentListResponse is returned by GET /evidence/{evidenceId}/comments.
+type CommentListResponse struct {
+	Items []*AuditComment `json:"items"`
+}

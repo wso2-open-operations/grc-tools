@@ -21,14 +21,14 @@ import (
 	"database/sql"
 	"fmt"
 
-    "github.com/wso2-open-operations/grc-platform/backend/internal/user"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user"
 )
 
 type repository struct{ db *sql.DB }
 
 // NewRepository creates a MySQL-backed user.Repository.
 func NewRepository(db *sql.DB) user.Repository {
-    return &repository{db: db}
+	return &repository{db: db}
 }
 
 func (r *repository) GetByEmail(ctx context.Context, email string) (*user.User, error) {
@@ -61,9 +61,28 @@ func (r *repository) GetByID(ctx context.Context, id int) (*user.User, error) {
 	return u, nil
 }
 
+// Upsert creates a user row for email if one doesn't exist yet, or refreshes
+// display_name if it does. Used to provision an account for a
+// employee (from an HR entity search) picked as e.g. a risk's Action Owner,
+// who may never have logged into grc-platform before.
+//
+// TODO(user-management): these created rows only have email/display_name/
+// status set — once admin user management exists, give an admin a way to view
+// and edit them (team assignment, status, etc.) directly.
 func (r *repository) Upsert(ctx context.Context, email, displayName string) (*user.User, error) {
-    // TODO: INSERT ... ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)
-    return nil, nil
+	result, err := r.db.ExecContext(ctx,
+		`INSERT INTO user (email, display_name, status) VALUES (?, ?, 'ACTIVE')
+		 ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), id = LAST_INSERT_ID(id)`,
+		email, displayName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("upsert user: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("get upserted user id: %w", err)
+	}
+	return r.GetByID(ctx, int(id))
 }
 
 func (r *repository) List(ctx context.Context) ([]*user.User, error) {

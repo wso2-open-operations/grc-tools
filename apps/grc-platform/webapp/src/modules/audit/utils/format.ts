@@ -29,6 +29,18 @@ export function formatAuditDate(dateStr: string): string {
   });
 }
 
+/**
+ * Days from today until dateStr ("YYYY-MM-DD"); negative when past.
+ * Returns null for empty input.
+ */
+export function daysLeft(dateStr: string | null | undefined): number | null {
+  if (!dateStr) return null;
+  const target = parseLocalDate(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+}
+
 /** Formats a date range. Same year omits the year from the start: "Jan 1 – Dec 31, 2026" */
 export function formatDateRange(start: string, end: string): string {
   const s = parseLocalDate(start);

@@ -18,15 +18,20 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"strings"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/model"
-	"github.com/wso2-open-operations/grc-platform/backend/internal/audit/repository"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 // CommentService defines business operations for per-evidence comments.
 type CommentService interface {
-	List(ctx context.Context, controlID int) ([]*model.AuditComment, error)
-	Add(ctx context.Context, controlID int, req model.AddCommentRequest, createdBy string) (*model.AuditComment, error)
+	// List returns comments for an evidence submission. When includeInternal is
+	// false (external auditor), is_internal comments are excluded.
+	List(ctx context.Context, evidenceID int, includeInternal bool) ([]*model.AuditComment, error)
+	Add(ctx context.Context, evidenceID int, req model.AddCommentRequest, createdBy string) (*model.AuditComment, error)
 }
 
 type commentService struct {
@@ -37,12 +42,27 @@ func NewCommentService(repo repository.CommentRepository) CommentService {
 	return &commentService{repo: repo}
 }
 
-func (s *commentService) List(ctx context.Context, controlID int) ([]*model.AuditComment, error) {
-	// TODO: delegate to repo; filter is_internal based on caller's privilege
-	return nil, nil
+func (s *commentService) List(ctx context.Context, evidenceID int, includeInternal bool) ([]*model.AuditComment, error) {
+	all, err := s.repo.ListByEvidence(ctx, evidenceID)
+	if err != nil {
+		return nil, err
+	}
+	if includeInternal {
+		return all, nil
+	}
+	// Strip internal comments for external auditors.
+	visible := make([]*model.AuditComment, 0, len(all))
+	for _, c := range all {
+		if !c.IsInternal {
+			visible = append(visible, c)
+		}
+	}
+	return visible, nil
 }
 
-func (s *commentService) Add(ctx context.Context, controlID int, req model.AddCommentRequest, createdBy string) (*model.AuditComment, error) {
-	// TODO: validate content, set is_internal based on caller's privilege, delegate to repo
-	return nil, nil
+func (s *commentService) Add(ctx context.Context, evidenceID int, req model.AddCommentRequest, createdBy string) (*model.AuditComment, error) {
+	if strings.TrimSpace(req.Content) == "" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "content is required"}
+	}
+	return s.repo.Create(ctx, evidenceID, req.Content, req.IsInternal, req.ParentCommentID, createdBy)
 }

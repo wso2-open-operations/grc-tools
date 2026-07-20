@@ -19,8 +19,8 @@ package handler
 import (
 	"net/http"
 
-	"github.com/wso2-open-operations/grc-platform/backend/internal/response"
-	userentity "github.com/wso2-open-operations/grc-platform/backend/internal/user"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	userentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user"
 )
 
 // handleListUsers returns all active users. Used by both Risk and Audit form dropdowns.

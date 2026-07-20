@@ -14,9 +14,116 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package model defines the domain types for the Audit Hub module.
 package model
 
-// AuditEvidence represents an evidence item submitted for a control.
-// TODO: add fields based on `audit_evidence` in audit_schema.sql
-type AuditEvidence struct{}
+import "time"
+
+// AuditEvidenceFile represents a single uploaded file attached to an evidence submission.
+type AuditEvidenceFile struct {
+	ID         int       `json:"id"`
+	EvidenceID int       `json:"evidenceId"`
+	FileName   string    `json:"fileName"`
+	FilePath   string    `json:"filePath"`
+	FileType   *string   `json:"fileType"`
+	FileSize   *int64    `json:"fileSize"`
+	CreatedBy  string    `json:"createdBy"`
+	CreatedAt  time.Time `json:"createdAt"`
+	// ReadURL is the backend proxy download URL (GET /api/v1/evidence/files/{id}/download).
+	// Computed at list time (not persisted); nil if the file has no DB id.
+	ReadURL *string `json:"readUrl"`
+}
+
+// AuditEvidence represents one submission round for a control.
+// Each resubmission creates a new row; Files holds all blobs in that round.
+type AuditEvidence struct {
+	ID         int                  `json:"id"`
+	ControlID  int                  `json:"controlId"`
+	Status     string               `json:"status"`
+	FolderPath string               `json:"folderPath"`
+	Files      []*AuditEvidenceFile `json:"files"`
+	CreatedBy  string               `json:"createdBy"`
+	CreatedAt  time.Time            `json:"createdAt"`
+}
+
+// AssignedControlForEvidence is the flat, enriched control record the Compliance
+// Entity returns for the authenticated user's team. It is the transport type
+// unmarshalled from the entity; the evidence-app handler reshapes it into the
+// nested EvidenceAppControl contract (§3.1) with a phase-aware base folder path.
+type AssignedControlForEvidence struct {
+	AuditID             int     `json:"auditId"`
+	AuditName           string  `json:"auditName"`
+	Product             string  `json:"product"`
+	Framework           string  `json:"framework"`
+	PeriodStart         string  `json:"periodStart"`
+	PeriodEnd           string  `json:"periodEnd"`
+	ControlID           int     `json:"controlId"`
+	ControlNumber       string  `json:"controlNumber"`
+	Description         string  `json:"description"`
+	EvidenceRequirement *string `json:"evidenceRequirement"`
+	RequirementType     string  `json:"requirementType"`
+	Status              string  `json:"status"`
+	DueDate             *string `json:"dueDate"`
+}
+
+// EvidenceAppControl is one item in the GET /api/v1/evidence-app/controls response
+// (design §3.1). The audit and control are nested, and the backend computes two
+// derived fields the portal needs: the control's phase and the phase-aware base
+// folder path — both server-side, never trusted from a client.
+type EvidenceAppControl struct {
+	Audit          EvidenceAppAudit       `json:"audit"`
+	Control        EvidenceAppControlInfo `json:"control"`
+	BaseFolderPath string                 `json:"baseFolderPath"`
+}
+
+// EvidenceAppAudit is the audit context nested in EvidenceAppControl.
+type EvidenceAppAudit struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Product     string `json:"product"`
+	Framework   string `json:"framework"`
+	PeriodStart string `json:"periodStart"`
+	PeriodEnd   string `json:"periodEnd"`
+}
+
+// EvidenceAppControlInfo is the control detail nested in EvidenceAppControl.
+type EvidenceAppControlInfo struct {
+	ID                  int     `json:"id"`
+	Number              string  `json:"number"`
+	Description         string  `json:"description"`
+	EvidenceRequirement *string `json:"evidenceRequirement"`
+	RequirementType     string  `json:"requirementType"` // DESIGN | OE
+	Status              string  `json:"status"`
+	Phase               string  `json:"phase"` // POPULATION | EVIDENCE
+	DueDate             *string `json:"dueDate"`
+}
+
+// UploadLinkResponse is returned by GET .../evidence/upload-link.
+// It gives the agent the folder path to use as a prefix when requesting
+// per-file upload URLs and when calling the submit endpoint.
+type UploadLinkResponse struct {
+	// FolderPath is the Azure Blob prefix for this upload session.
+	// e.g. "audits/5/controls/12/evidence/1751500000/"
+	FolderPath string    `json:"folderPath"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+}
+
+// FileUploadURLRequest is the body for POST .../evidence/file-url.
+// The agent calls this once per file to get a blob-scoped upload URL.
+type FileUploadURLRequest struct {
+	FileName   string `json:"fileName"`
+	FolderPath string `json:"folderPath"`
+}
+
+// FileUploadURLResponse is returned by POST .../evidence/file-url.
+// UploadURL is a pre-signed PUT URL scoped to exactly one blob.
+// Agent: PUT {UploadURL} with body=file bytes and header x-ms-blob-type: BlockBlob.
+type FileUploadURLResponse struct {
+	UploadURL string    `json:"uploadUrl"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// SubmitEvidenceRequest is the body for POST .../evidence/submit.
+type SubmitEvidenceRequest struct {
+	// FolderPath must match exactly what was returned by the upload-link endpoint.
+	FolderPath string `json:"folderPath"`
+}

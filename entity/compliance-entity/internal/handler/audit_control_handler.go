@@ -79,6 +79,40 @@ func (h *ControlHandler) ListAssignedForEvidence(w http.ResponseWriter, r *http.
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// GetEvidenceAssignment handles GET /audit-controls/{controlId}/evidence-assignment?email=.
+// 200 {"auditId":N} when the user is assigned to this actionable control; 404 otherwise.
+func (h *ControlHandler) GetEvidenceAssignment(w http.ResponseWriter, r *http.Request) {
+	controlID, err := strconv.Atoi(r.PathValue("controlId"))
+	if err != nil {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "controlId must be a positive integer"})
+		return
+	}
+	resp, err := h.svc.GetEvidenceAssignment(r.Context(), r.URL.Query().Get("email"), controlID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// GetActivePopulation handles GET /audit-controls/{controlId}/active-population.
+// 200 {"populationId":N} for an OE control with an active round; 404 otherwise.
+func (h *ControlHandler) GetActivePopulation(w http.ResponseWriter, r *http.Request) {
+	controlID, err := strconv.Atoi(r.PathValue("controlId"))
+	if err != nil {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "controlId must be a positive integer"})
+		return
+	}
+	resp, err := h.svc.FindActivePopulation(r.Context(), controlID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // GetControlByID handles GET /audits/{auditId}/controls/{controlId}.
 func (h *ControlHandler) GetControlByID(w http.ResponseWriter, r *http.Request) {
 	auditID, err := strconv.Atoi(r.PathValue("auditId"))

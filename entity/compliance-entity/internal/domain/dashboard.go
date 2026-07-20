@@ -60,6 +60,7 @@ type DashboardStats struct {
 	OverdueControls          int     `json:"overdueControls"`
 	EvidenceRequiredControls int     `json:"evidenceRequiredControls"`
 	CompletionPercent        float64 `json:"completionPercent"`
+	TotalActionItems         int     `json:"totalActionItems"`
 }
 
 // StatusCount is one slice of the "Controls by Status" chart.
@@ -73,6 +74,15 @@ type TeamCompletion struct {
 	Team      string `json:"team"`
 	Completed int    `json:"completed"`
 	Total     int    `json:"total"`
+	Overdue   int    `json:"overdue"`
+}
+
+// TeamStatusCount is one team's control count for a single status — feeds the
+// per-team status breakdown in the dashboard's team drill-down.
+type TeamStatusCount struct {
+	Team   string `json:"team"`
+	Status string `json:"status"`
+	Count  int    `json:"count"`
 }
 
 // DashboardControlItem is a single control entry used in both "My Action Items"
@@ -85,14 +95,57 @@ type DashboardControlItem struct {
 	Description   string `json:"description"`
 	Status        string `json:"status"`
 	DueDate       string `json:"dueDate"`
+	Team          string `json:"team"`
+	ProcessOwner  string `json:"processOwner"`
+}
+
+// WorkQueueTab identifies which sub-list the caller wants.
+type WorkQueueTab string
+
+const (
+	WorkQueueTabActionItems WorkQueueTab = "action-items"
+	WorkQueueTabDueSoon     WorkQueueTab = "due-soon"
+	WorkQueueTabOverdue     WorkQueueTab = "overdue"
+)
+
+// WorkQueueRequest is the body of POST /audit/work-queue/search.
+type WorkQueueRequest struct {
+	Roles     []string     `json:"roles"`
+	UserEmail string       `json:"userEmail"`
+	Tab       WorkQueueTab `json:"tab"`
+	Page      int          `json:"page"`  // 1-based
+	Limit     int          `json:"limit"` // rows per page; capped at 100 server-side
+}
+
+// PrimaryRole re-uses the same priority logic as AuditDashboardRequest.
+func (r WorkQueueRequest) PrimaryRole() string {
+	priority := []string{RoleComplianceAdmin, RoleComplianceTeam, RoleExternalAuditor, RoleInternalTeam, RoleManagement}
+	for _, p := range priority {
+		for _, g := range r.Roles {
+			if g == p {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// WorkQueuePage is the paginated response for POST /audit/work-queue/search.
+type WorkQueuePage struct {
+	Items []DashboardControlItem `json:"items"`
+	Total int                    `json:"total"`
+	Page  int                    `json:"page"`
+	Limit int                    `json:"limit"`
 }
 
 // DashboardData is the full audit dashboard payload.
 type DashboardData struct {
-	AuditStats         AuditStats             `json:"auditStats"`
-	Stats              DashboardStats         `json:"stats"`
-	StatusDistribution []StatusCount          `json:"statusDistribution"`
-	TeamCompletion     []TeamCompletion       `json:"teamCompletion"`
-	ActionItems        []DashboardControlItem `json:"actionItems"`
-	OverdueControls    []DashboardControlItem `json:"overdueControls"`
+	AuditStats             AuditStats             `json:"auditStats"`
+	Stats                  DashboardStats         `json:"stats"`
+	StatusDistribution     []StatusCount          `json:"statusDistribution"`
+	TeamCompletion         []TeamCompletion       `json:"teamCompletion"`
+	TeamStatusDistribution []TeamStatusCount      `json:"teamStatusDistribution"`
+	ActionItems            []DashboardControlItem `json:"actionItems"`
+	DueSoonItems           []DashboardControlItem `json:"dueSoonItems"`
+	OverdueControls        []DashboardControlItem `json:"overdueControls"`
 }
