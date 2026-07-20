@@ -188,7 +188,10 @@ def delete_evidence(evidence_id: int, db: Session = Depends(get_db), user: User 
         raise HTTPException(status_code=404, detail="Evidence not found")
     file_names = {ef.file_name for ef in evidence.files}
     file_names.add(evidence.file_name)
-    for fn in file_names:
-        delete_file(fn)
     db.delete(evidence)
     db.commit()
+    # Delete blobs only after the row is gone, matching delete_control/
+    # delete_framework/delete_product. A failed commit must not strand
+    # Evidence rows pointing at blobs that were already removed.
+    for fn in file_names:
+        delete_file(fn)

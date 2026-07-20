@@ -122,3 +122,38 @@ def test_commit_failure_during_empty_parent_deletion_leaves_everything_unchanged
     assert db_session.get(EvidenceFile, only_file.id) is not None
 
     assert httpx.get(get_signed_url(only_file.file_name)).status_code == 200
+
+
+def test_commit_failure_deleting_whole_evidence_leaves_every_blob(
+    db_session, admin_client, monkeypatch
+):
+    """`DELETE /api/evidence/{id}` deletes every blob for the Evidence, then
+    the row. Before the fix it deleted the blobs *before* committing, so a
+    failed commit stranded storage: the Evidence and its files survived the
+    rollback but their blobs were already gone. The blobs must only be
+    removed after the commit succeeds -- this fails commit and proves every
+    blob is still there."""
+    evidence, files = build_evidence(
+        db_session,
+        ("primary.png", b"primary screenshot"),
+        ("extra.png", b"extra screenshot"),
+    )
+
+    _fail_next_commit(monkeypatch, db_session)
+
+    with pytest.raises(RuntimeError, match="simulated commit failure"):
+        admin_client.delete(f"/api/evidence/{evidence.id}")
+
+    db_session.rollback()
+
+    assert db_session.query(Evidence).filter(Evidence.id == evidence.id).count() == 1
+    assert (
+        db_session.query(EvidenceFile).filter(EvidenceFile.evidence_id == evidence.id).count()
+        == 2
+    )
+
+    # Both the legacy primary blob and every Evidence File blob must survive
+    # a commit that never succeeded.
+    assert httpx.get(get_signed_url(evidence.file_name)).status_code == 200
+    for ef in files:
+        assert httpx.get(get_signed_url(ef.file_name)).status_code == 200
