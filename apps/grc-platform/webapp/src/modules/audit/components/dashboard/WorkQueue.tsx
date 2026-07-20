@@ -222,12 +222,12 @@ function TabPanel({ tab, canApprove, emptyText }: TabPanelProps): JSX.Element {
       {hasFilters && (
         <Box sx={{ px: 0.5, pb: 1, display: "flex", flexWrap: "wrap", gap: 0.5, alignItems: "center" }}>
           {teamFilter.map((id) => (
-            <Chip key={id} label={teams.find((t) => t.id === id)?.label ?? String(id)} size="small" onDelete={() => setTeamFilter((p) => p.filter((x) => x !== id))} />
+            <Chip key={id} label={teams.find((t) => t.id === id)?.label ?? String(id)} size="small" onDelete={() => { setTeamFilter((p) => p.filter((x) => x !== id)); setPage(0); }} />
           ))}
           {ownerFilter.map((id) => (
-            <Chip key={id} label={owners.find((o) => o.id === id)?.label ?? String(id)} size="small" onDelete={() => setOwnerFilter((p) => p.filter((x) => x !== id))} />
+            <Chip key={id} label={owners.find((o) => o.id === id)?.label ?? String(id)} size="small" onDelete={() => { setOwnerFilter((p) => p.filter((x) => x !== id)); setPage(0); }} />
           ))}
-          <Button size="small" onClick={() => { setTeamFilter([]); setOwnerFilter([]); }}
+          <Button size="small" onClick={() => { setTeamFilter([]); setOwnerFilter([]); setPage(0); }}
             sx={{ textTransform: "none", fontSize: "0.75rem", py: 0.25 }}>
             Clear all
           </Button>
