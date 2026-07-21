@@ -52,8 +52,3 @@ func (r *complianceReferenceRepository) List(ctx context.Context) ([]*model.Comp
 	}
 	return refs, rows.Err()
 }
-
-func (r *complianceReferenceRepository) Create(ctx context.Context, req model.CreateComplianceRefRequest, createdBy string) (*model.ComplianceReference, error) {
-	// TODO: implement compliance reference INSERT
-	return nil, nil
-}

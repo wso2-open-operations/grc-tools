@@ -70,7 +70,9 @@ func TestTeamParity(t *testing.T) {
 						i, fmtTeam(want[i]), fmtTeam(got[i]))
 				}
 			}
-			t.Logf("%d teams identical", len(want))
+			if !t.Failed() {
+				t.Logf("%d teams identical", len(want))
+			}
 		})
 	}
 }

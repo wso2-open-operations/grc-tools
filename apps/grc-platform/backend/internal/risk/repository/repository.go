@@ -102,9 +102,11 @@ type NotificationRepository interface {
 }
 
 // ComplianceReferenceRepository is the data-access contract for compliance references.
+// Read-only, for the same reason as RiskScoreRepository: Create was declared but
+// never routed and never implemented — the service stub returned nil without
+// calling it — so it was dropped rather than migrated.
 type ComplianceReferenceRepository interface {
 	List(ctx context.Context) ([]*model.ComplianceReference, error)
-	Create(ctx context.Context, req model.CreateComplianceRefRequest, createdBy string) (*model.ComplianceReference, error)
 }
 
 // AnalyticsRepository provides the aggregated read queries behind

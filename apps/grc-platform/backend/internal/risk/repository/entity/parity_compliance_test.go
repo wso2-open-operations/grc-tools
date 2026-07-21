@@ -18,26 +18,21 @@ package entity
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	riskmysql "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository/mysql"
 )
 
-// TestRiskScoreParity asserts the entity-backed RiskScoreRepository.List
-// returns exactly what the MySQL one does.
-//
-// Order is the point of this test. The entity originally ordered by
-// risk_rating, which ties — (1,2) and (2,1) both rate 2 — leaving the sequence
-// up to MySQL. It now orders by likelihood then impact like the MySQL query.
-// If this fails on ordering after an entity change, fix the entity's ORDER BY
-// rather than sorting in the repository, and remember the entity caches this
-// response for 30 minutes so it needs a restart to pick the change up.
-func TestRiskScoreParity(t *testing.T) {
+// TestComplianceReferenceParity asserts the entity-backed
+// ComplianceReferenceRepository.List returns exactly what the MySQL one does.
+func TestComplianceReferenceParity(t *testing.T) {
 	skipUnlessParity(t)
 
-	mysqlRepo := riskmysql.NewRiskScoreRepository(parityDB(t))
-	entityRepo := NewRiskScoreRepository(parityClient(t))
+	mysqlRepo := riskmysql.NewComplianceReferenceRepository(parityDB(t))
+	entityRepo := NewComplianceReferenceRepository(parityClient(t))
 
 	ctx := context.Background()
 
@@ -51,17 +46,26 @@ func TestRiskScoreParity(t *testing.T) {
 	}
 
 	if len(want) == 0 {
-		t.Fatal("MySQL returned 0 scores — the comparison would prove nothing")
+		t.Fatal("MySQL returned 0 references — the comparison would prove nothing")
 	}
 	if len(got) != len(want) {
 		t.Fatalf("count: mysql %d, entity %d", len(want), len(got))
 	}
+	// Both sides ORDER BY name and the handler passes the slice straight
+	// through, so a reordering would be user-visible. DeepEqual, not ==:
+	// Description is a *string.
 	for i := range want {
 		if !reflect.DeepEqual(want[i], got[i]) {
-			t.Errorf("index %d differs:\n  mysql  %+v\n  entity %+v", i, *want[i], *got[i])
+			t.Errorf("index %d differs:\n  mysql  %s\n  entity %s",
+				i, fmtRef(want[i]), fmtRef(got[i]))
 		}
 	}
 	if !t.Failed() {
-		t.Logf("%d scores identical, in the same order", len(want))
+		t.Logf("%d compliance references identical", len(want))
 	}
+}
+
+// fmtRef renders a reference with its pointer field dereferenced.
+func fmtRef(r *model.ComplianceReference) string {
+	return fmt.Sprintf("{ID:%d Name:%q Description:%q}", r.ID, r.Name, derefString(r.Description))
 }
