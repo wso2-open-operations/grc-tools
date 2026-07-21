@@ -36,8 +36,8 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/entityclient"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
+	userentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/entity"
 	userhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/handler"
-	usermysql "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/mysql"
 )
 
 func main() {
@@ -82,7 +82,7 @@ func main() {
 	hrClient := hrentity.NewClient(cfg.HREntity.GraphQLURL, cfg.HREntity.TokenURL, cfg.HREntity.ClientID, cfg.HREntity.ClientSecret)
 
 	userDeps := userhandler.Deps{
-		Users:    usermysql.NewRepository(sqlDB),
+		Users:    userentity.NewRepository(entityCli),
 		HREntity: hrClient,
 	}
 
