@@ -408,6 +408,29 @@ func (r *riskRepo) UpdateRisk(ctx context.Context, id int, req domain.UpdateRisk
 		sets = append(sets, "owner_first_approved_at = ?")
 		args = append(args, *req.OwnerFirstApprovedAt)
 	}
+	if req.ImpactDescription != nil {
+		sets = append(sets, "impact_description = ?")
+		args = append(args, *req.ImpactDescription)
+	}
+	if req.RiskIdentifiedDate != nil {
+		sets = append(sets, "risk_identified_date = ?")
+		args = append(args, *req.RiskIdentifiedDate)
+	}
+	if req.IdentifiedByType != nil {
+		sets = append(sets, "identified_by_type = ?")
+		args = append(args, *req.IdentifiedByType)
+	}
+	if req.IdentifiedByName != nil {
+		sets = append(sets, "identified_by_name = ?")
+		args = append(args, *req.IdentifiedByName)
+	}
+	if req.AssignerID != nil {
+		sets = append(sets, "assigner_id = ?")
+		args = append(args, *req.AssignerID)
+	}
+	if req.ClearRejection {
+		sets = append(sets, "rejection_comment = NULL", "rejection_stage = NULL")
+	}
 	if req.RejectionComment != nil {
 		sets = append(sets, "rejection_comment = ?")
 		args = append(args, *req.RejectionComment)

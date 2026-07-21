@@ -958,7 +958,22 @@ type UpdateRiskRequest struct {
 	// workflow transitions.
 	RiskType             *string `json:"riskType"` // NEW | UPDATED
 	OwnerFirstApprovedAt *string `json:"ownerFirstApprovedAt"`
-	UpdatedBy            string  `json:"updatedBy"`
+
+	// Fields the risk edit form can change that were previously absent here.
+	ImpactDescription  *string `json:"impactDescription"`
+	RiskIdentifiedDate *string `json:"riskIdentifiedDate"` // YYYY-MM-DD
+	IdentifiedByType   *string `json:"identifiedByType"`   // EMPLOYEE | EXTERNAL_PERSON | TOOL
+	IdentifiedByName   *string `json:"identifiedByName"`
+	AssignerID         *int    `json:"assignerId"`
+
+	// ClearRejection sets rejection_comment and rejection_stage back to NULL.
+	// A *string cannot express this: nil means "leave alone", so there is
+	// otherwise no way to clear a nullable column — sending "" writes an empty
+	// string, which is not the same thing and shows up as a blank rejection
+	// banner rather than none.
+	ClearRejection bool `json:"clearRejection"`
+
+	UpdatedBy string `json:"updatedBy"`
 
 	// Related rows the caller wants rewritten in the same transaction. Each is
 	// nil when the caller is not touching that relation — an empty slice is a
