@@ -52,13 +52,3 @@ func (r *riskScoreRepository) List(ctx context.Context) ([]*model.RiskScore, err
 	}
 	return scores, rows.Err()
 }
-
-func (r *riskScoreRepository) Create(ctx context.Context, req model.CreateRiskScoreRequest, createdBy string) (*model.RiskScore, error) {
-	// TODO: implement risk_score INSERT
-	return nil, nil
-}
-
-func (r *riskScoreRepository) Update(ctx context.Context, id int, req model.UpdateRiskScoreRequest, updatedBy string) error {
-	// TODO: implement risk_score UPDATE
-	return nil
-}

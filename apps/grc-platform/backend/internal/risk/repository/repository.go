@@ -61,10 +61,12 @@ type TeamRepository interface {
 }
 
 // RiskScoreRepository is the data-access contract for risk score configurations.
+// Read-only: the score matrix is reference data, seeded and edited out of band.
+// Create and Update were declared here but never routed and never implemented —
+// the service stubs returned nil without calling them — so they were dropped
+// rather than migrated. The Compliance Entity likewise exposes only a read.
 type RiskScoreRepository interface {
 	List(ctx context.Context) ([]*model.RiskScore, error)
-	Create(ctx context.Context, req model.CreateRiskScoreRequest, createdBy string) (*model.RiskScore, error)
-	Update(ctx context.Context, id int, req model.UpdateRiskScoreRequest, updatedBy string) error
 }
 
 // ActionPlanRepository is the data-access contract for action plans and steps.

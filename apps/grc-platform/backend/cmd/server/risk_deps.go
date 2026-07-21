@@ -55,9 +55,15 @@ func buildRiskDeps(
 		teamRepo = riskmysql.NewTeamRepository(db)
 	}
 
+	var scoreRepo repository.RiskScoreRepository
+	if entityRepos["score"] {
+		scoreRepo = riskentity.NewRiskScoreRepository(ec)
+	} else {
+		scoreRepo = riskmysql.NewRiskScoreRepository(db)
+	}
+
 	riskRepo := riskmysql.NewRiskRepository(db)
 	assessmentRepo := riskmysql.NewAssessmentRepository(db)
-	scoreRepo := riskmysql.NewRiskScoreRepository(db)
 	actionPlanRepo := riskmysql.NewActionPlanRepository(db)
 	evidenceRepo := riskmysql.NewRiskEvidenceRepository(db)
 	escalationRepo := riskmysql.NewEscalationRepository(db)
