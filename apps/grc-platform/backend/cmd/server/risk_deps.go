@@ -88,7 +88,13 @@ func buildRiskDeps(
 	escalationRepo := riskmysql.NewEscalationRepository(db)
 	notifRepo := riskmysql.NewNotificationRepository(db)
 	analyticsRepo := riskmysql.NewAnalyticsRepository(db)
-	dashboardRepo := riskmysql.NewDashboardRepository(db)
+
+	// Dashboard: the entity returns the payload already assembled, so that path
+	// uses a passthrough service rather than the fact-pivoting one.
+	dashboardSvc := riskservice.NewDashboardService(riskmysql.NewDashboardRepository(db))
+	if entityRepos["dashboard"] {
+		dashboardSvc = riskservice.NewAssembledDashboardService(riskentity.NewDashboardRepository(ec))
+	}
 
 	return riskhandler.Deps{
 		Risk:         riskservice.NewRiskService(riskRepo),
@@ -101,7 +107,7 @@ func buildRiskDeps(
 		Notification: riskservice.NewNotificationService(notifRepo),
 		Compliance:   riskservice.NewComplianceReferenceService(complianceRepo),
 		Analytics:    riskservice.NewAnalyticsService(analyticsRepo),
-		Dashboard:    riskservice.NewDashboardService(dashboardRepo),
+		Dashboard:    dashboardSvc,
 		Employee:     riskservice.NewEmployeeSearchService(hrClient),
 	}
 }
