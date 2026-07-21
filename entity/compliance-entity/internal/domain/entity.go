@@ -963,11 +963,26 @@ type RiskAssessment struct {
 	ReassessmentDate string    `json:"reassessmentDate"` // YYYY-MM-DD
 	AssessedBy       string    `json:"assessedBy"`       // actor email
 	CreatedOn        time.Time `json:"createdOn"`
+	// Residual score, resolved by joining risk_score on score_id. A bare
+	// scoreId is not enough for callers: the GRC backend renders the residual
+	// likelihood, impact, rating, level and colour directly from this response,
+	// and would otherwise have to fetch the score matrix to interpret it.
+	ResidualLikelihood int    `json:"residualLikelihood"`
+	ResidualImpact     int    `json:"residualImpact"`
+	ResidualRating     int    `json:"residualRating"`
+	ResidualLevel      string `json:"residualLevel"`
+	ResidualColorCode  string `json:"residualColorCode"`
 }
 
 // CreateRiskAssessmentRequest is the payload for POST /risks/{riskId}/assessments.
+//
+// Likelihood and impact identify the residual score cell; the score_id is
+// resolved server-side from risk_score. Callers describe the assessment they
+// made, not the surrogate key of a row they would otherwise have to look up
+// first.
 type CreateRiskAssessmentRequest struct {
-	ScoreID          int    `json:"scoreId"`
+	Likelihood       int    `json:"likelihood"`
+	Impact           int    `json:"impact"`
 	Progress         string `json:"progress"`
 	ReassessmentDate string `json:"reassessmentDate"` // YYYY-MM-DD
 	AssessedBy       string `json:"assessedBy"`
