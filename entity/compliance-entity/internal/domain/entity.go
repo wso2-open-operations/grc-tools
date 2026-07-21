@@ -863,10 +863,14 @@ type CreateRiskRequest struct {
 	AssignmentTeamID   int     `json:"assignmentTeamId"`
 	AssignerID         int     `json:"assignerId"`
 	OwnerID            int     `json:"ownerId"`
-	RiskYear           int     `json:"riskYear"`
-	RiskQuarter        string  `json:"riskQuarter"` // Q1 | Q2 | Q3 | Q4
-	GrossScoreID       *int    `json:"grossScoreId"`
-	TreatmentStrategy  *string `json:"treatmentStrategy"`
+	RiskYear    int    `json:"riskYear"`
+	RiskQuarter string `json:"riskQuarter"` // Q1 | Q2 | Q3 | Q4
+	// Likelihood and impact identify the gross score cell; the score_id is
+	// resolved server-side from risk_score, as it is for assessments. Callers
+	// describe the rating they gave, not the surrogate key behind it.
+	Likelihood        int     `json:"likelihood"`
+	Impact            int     `json:"impact"`
+	TreatmentStrategy *string `json:"treatmentStrategy"`
 	ImplementationDate *string `json:"implementationDate"` // YYYY-MM-DD
 	ReassessmentDate   *string `json:"reassessmentDate"`   // YYYY-MM-DD
 	ImpactDescription  *string `json:"impactDescription"`
@@ -879,7 +883,25 @@ type CreateRiskRequest struct {
 	GitIssueURL      *string `json:"gitIssueUrl"`
 	EmailSubject     *string `json:"emailSubject"`
 	Remarks          *string `json:"remarks"`
-	CreatedBy        string  `json:"createdBy"`
+	Progress         *string `json:"progress"`
+
+	// Creating a risk also creates its action plan, that plan's steps and its
+	// compliance-reference links. They belong to this request rather than to
+	// follow-up calls, so the whole thing commits or none of it does: a risk
+	// that reaches the register without its action plan is not a valid state,
+	// and over HTTP a second call can always fail.
+	ActionOwnerID          *int              `json:"actionOwnerId"`
+	ActionPlanDescription  *string           `json:"actionPlanDescription"`
+	ActionSteps            []ActionStepInput `json:"actionSteps"`
+	ComplianceReferenceIDs []int             `json:"complianceReferenceIds"`
+
+	CreatedBy string `json:"createdBy"`
+}
+
+// ActionStepInput is one step of the action plan created alongside a risk.
+// Step numbers are assigned from the slice order, starting at 1.
+type ActionStepInput struct {
+	Description string `json:"description"`
 }
 
 // UpdateRiskRequest is the payload for PATCH /risks/{id}.

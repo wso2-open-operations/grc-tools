@@ -129,7 +129,11 @@ func isValidRiskTransition(from, to string) bool {
 // validTreatmentStrategies / validIdentifiedByTypes mirror the risk.treatment_strategy
 // and risk.identified_by_type ENUMs in risk_schema.sql. Both columns are nullable,
 // so these are only enforced when a value is provided.
-var validTreatmentStrategies = map[string]bool{"MITIGATE": true, "ACCEPT": true, "TRANSFER": true, "VOID": true}
+// REMEDIATE, not MITIGATE: the risk.treatment_strategy ENUM is
+// ('REMEDIATE','ACCEPT','TRANSFER','VOID'). MITIGATE was accepted here and then
+// rejected by MySQL as a truncated value, while every real REMEDIATE row was
+// refused — the validator had it exactly backwards.
+var validTreatmentStrategies = map[string]bool{"REMEDIATE": true, "ACCEPT": true, "TRANSFER": true, "VOID": true}
 var validIdentifiedByTypes = map[string]bool{"EMPLOYEE": true, "EXTERNAL_PERSON": true, "TOOL": true}
 
 func (s *riskService) SearchRisks(ctx context.Context, req domain.SearchRisksRequest) (domain.SearchRisksResponse, error) {
@@ -190,8 +194,16 @@ func (s *riskService) CreateRisk(ctx context.Context, req domain.CreateRiskReque
 	if !validRiskQuarters[req.RiskQuarter] {
 		return domain.Risk{}, &apierror.ValidationError{Msg: "riskQuarter must be Q1, Q2, Q3, or Q4"}
 	}
+	// Bounds match the 3×3 risk_score matrix; the repository resolves the pair
+	// to a score row and fails the create if no cell matches.
+	if req.Likelihood < 1 || req.Likelihood > 3 {
+		return domain.Risk{}, &apierror.ValidationError{Msg: "likelihood must be 1, 2, or 3"}
+	}
+	if req.Impact < 1 || req.Impact > 3 {
+		return domain.Risk{}, &apierror.ValidationError{Msg: "impact must be 1, 2, or 3"}
+	}
 	if req.TreatmentStrategy != nil && !validTreatmentStrategies[strings.ToUpper(*req.TreatmentStrategy)] {
-		return domain.Risk{}, &apierror.ValidationError{Msg: "treatmentStrategy must be MITIGATE, ACCEPT, TRANSFER, or VOID"}
+		return domain.Risk{}, &apierror.ValidationError{Msg: "treatmentStrategy must be REMEDIATE, ACCEPT, TRANSFER, or VOID"}
 	}
 	if req.TreatmentStrategy != nil {
 		up := strings.ToUpper(*req.TreatmentStrategy)
@@ -241,7 +253,7 @@ func (s *riskService) UpdateRisk(ctx context.Context, id int, req domain.UpdateR
 		req.ExpectedStatus = current.WorkflowStatus
 	}
 	if req.TreatmentStrategy != nil && !validTreatmentStrategies[strings.ToUpper(*req.TreatmentStrategy)] {
-		return domain.Risk{}, &apierror.ValidationError{Msg: "treatmentStrategy must be MITIGATE, ACCEPT, TRANSFER, or VOID"}
+		return domain.Risk{}, &apierror.ValidationError{Msg: "treatmentStrategy must be REMEDIATE, ACCEPT, TRANSFER, or VOID"}
 	}
 	if req.TreatmentStrategy != nil {
 		up := strings.ToUpper(*req.TreatmentStrategy)

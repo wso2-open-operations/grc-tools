@@ -167,46 +167,72 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 	}
 	defer tx.Rollback()
 
-	// Upsert sequence row and atomically increment.
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO risk_register_sequence (risk_team_id, last_sequence_number) VALUES (?, 1)
-		 ON DUPLICATE KEY UPDATE last_sequence_number = last_sequence_number + 1`,
-		req.AssignmentTeamID)
-	if err != nil {
-		return nil, fmt.Errorf("risk.Create seq upsert: %w", err)
+	// ── 1. Reserve the next sequence number ───────────────────────────────────
+	// Keyed on the SOURCE REGISTER, not the assignment team: a risk's code
+	// belongs to the register it was raised in, and the two are frequently
+	// different. INSERT IGNORE then SELECT ... FOR UPDATE holds the row for the
+	// rest of the transaction, so concurrent creates cannot take the same
+	// number. The counter never resets — it runs across years and quarters.
+	if _, err = tx.ExecContext(ctx,
+		"INSERT IGNORE INTO risk_register_sequence (risk_team_id, last_sequence_number) VALUES (?, 0)",
+		req.SourceRegisterID); err != nil {
+		return nil, fmt.Errorf("risk.Create ensure sequence: %w", err)
 	}
 
-	var seqNum int
+	var lastSeq int
 	if err = tx.QueryRowContext(ctx,
-		"SELECT last_sequence_number FROM risk_register_sequence WHERE risk_team_id = ?",
-		req.AssignmentTeamID).Scan(&seqNum); err != nil {
-		return nil, fmt.Errorf("risk.Create seq read: %w", err)
+		"SELECT last_sequence_number FROM risk_register_sequence WHERE risk_team_id = ? FOR UPDATE",
+		req.SourceRegisterID).Scan(&lastSeq); err != nil {
+		return nil, fmt.Errorf("risk.Create lock sequence: %w", err)
+	}
+	seqNum := lastSeq + 1
+
+	if _, err = tx.ExecContext(ctx,
+		"UPDATE risk_register_sequence SET last_sequence_number = ? WHERE risk_team_id = ?",
+		seqNum, req.SourceRegisterID); err != nil {
+		return nil, fmt.Errorf("risk.Create bump sequence: %w", err)
 	}
 
-	// Use the team code (or name as fallback) for the risk code segment.
+	// ── 2. Build the risk code from the source register's code ────────────────
+	// Deliberately not COALESCE(code, name): a register with no code is a data
+	// problem, and silently substituting its name would mint a risk code in a
+	// different format that nothing can parse back.
 	var teamCode string
 	if err = tx.QueryRowContext(ctx,
-		"SELECT COALESCE(code, name) FROM risk_team WHERE id = ?",
-		req.AssignmentTeamID).Scan(&teamCode); err != nil {
+		"SELECT code FROM risk_team WHERE id = ?",
+		req.SourceRegisterID).Scan(&teamCode); err != nil {
 		return nil, fmt.Errorf("risk.Create team code: %w", err)
 	}
-
 	riskCode := fmt.Sprintf("%d-%s-%s-%04d", req.RiskYear, teamCode, req.RiskQuarter, seqNum)
 
+	// ── 3. Resolve the gross score from likelihood/impact ─────────────────────
+	var grossScoreID int
+	if err = tx.QueryRowContext(ctx,
+		"SELECT id FROM risk_score WHERE likelihood = ? AND impact = ?",
+		req.Likelihood, req.Impact).Scan(&grossScoreID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &apierror.ValidationError{
+				Msg: fmt.Sprintf("no risk score for likelihood %d and impact %d", req.Likelihood, req.Impact),
+			}
+		}
+		return nil, fmt.Errorf("risk.Create resolve gross score: %w", err)
+	}
+
+	// ── 4. Insert the risk ────────────────────────────────────────────────────
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO risk (
 			risk_code, risk_year, risk_quarter, risk_title, risk_description,
 			source_register_id, assignment_team_id, assigner_id, owner_id,
-			treatment_strategy, gross_score_id,
+			treatment_strategy, gross_score_id, progress,
 			implementation_date, reassessment_date,
 			impact_description, risk_identified_date,
 			identified_by_type, identified_by_name,
 			git_issue_url, email_subject, remarks,
 			workflow_status, created_by, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_RISK_OWNER_APPROVAL', ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_RISK_OWNER_APPROVAL', ?, ?)`,
 		riskCode, req.RiskYear, req.RiskQuarter, req.RiskTitle, req.RiskDescription,
 		req.SourceRegisterID, req.AssignmentTeamID, req.AssignerID, req.OwnerID,
-		req.TreatmentStrategy, nullableInt(req.GrossScoreID),
+		req.TreatmentStrategy, grossScoreID, req.Progress,
 		req.ImplementationDate, req.ReassessmentDate,
 		req.ImpactDescription, req.RiskIdentifiedDate,
 		req.IdentifiedByType, req.IdentifiedByName,
@@ -215,12 +241,68 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 	if err != nil {
 		return nil, fmt.Errorf("risk.Create insert: %w", err)
 	}
+	riskID64, err := res.LastInsertId()
+	if err != nil || riskID64 == 0 {
+		if err == nil {
+			err = fmt.Errorf("driver returned zero last-insert-id")
+		}
+		return nil, fmt.Errorf("risk.Create inserted id: %w", err)
+	}
+	riskID := int(riskID64)
 
-	id, _ := res.LastInsertId()
+	// ── 5. Action plan, its steps, and the compliance links ───────────────────
+	// All inside this transaction. A risk visible in the register without its
+	// action plan is not a state the product can represent.
+	planRes, err := tx.ExecContext(ctx,
+		`INSERT INTO risk_action_plan (risk_id, action_owner_id, description, status, plan_type, created_by, updated_by)
+		 VALUES (?, ?, ?, 'PENDING', 'STANDARD', ?, ?)`,
+		riskID, nullableInt(req.ActionOwnerID), req.ActionPlanDescription, req.CreatedBy, req.CreatedBy)
+	if err != nil {
+		return nil, fmt.Errorf("risk.Create action plan: %w", err)
+	}
+	planID64, err := planRes.LastInsertId()
+	if err != nil || planID64 == 0 {
+		if err == nil {
+			err = fmt.Errorf("driver returned zero last-insert-id")
+		}
+		return nil, fmt.Errorf("risk.Create action plan id: %w", err)
+	}
+	planID := int(planID64)
+
+	if _, err = tx.ExecContext(ctx,
+		"UPDATE risk SET action_plan_id = ? WHERE id = ?", planID, riskID); err != nil {
+		return nil, fmt.Errorf("risk.Create link action plan: %w", err)
+	}
+
+	// Step numbers come from slice order, starting at 1.
+	for i, step := range req.ActionSteps {
+		if _, err = tx.ExecContext(ctx,
+			`INSERT INTO risk_action_step (plan_id, step_no, description, status, created_by, updated_by)
+			 VALUES (?, ?, ?, 'PENDING', ?, ?)`,
+			planID, i+1, step.Description, req.CreatedBy, req.CreatedBy); err != nil {
+			return nil, fmt.Errorf("risk.Create action step %d: %w", i+1, err)
+		}
+	}
+
+	for _, refID := range req.ComplianceReferenceIDs {
+		if _, err = tx.ExecContext(ctx,
+			"INSERT INTO risk_compliance_reference (risk_id, reference_id) VALUES (?, ?)",
+			riskID, refID); err != nil {
+			return nil, fmt.Errorf("risk.Create compliance reference %d: %w", refID, err)
+		}
+	}
+
+	// ── 6. Record the creation in the change log ──────────────────────────────
+	if _, err = tx.ExecContext(ctx,
+		"INSERT INTO risk_change_log (risk_id, created_by, action) VALUES (?, ?, 'CREATE')",
+		riskID, req.CreatedBy); err != nil {
+		return nil, fmt.Errorf("risk.Create change log: %w", err)
+	}
+
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("risk.Create commit: %w", err)
 	}
-	return r.GetRiskByID(ctx, int(id))
+	return r.GetRiskByID(ctx, riskID)
 }
 
 func (r *riskRepo) UpdateRisk(ctx context.Context, id int, req domain.UpdateRiskRequest) (*domain.Risk, error) {
