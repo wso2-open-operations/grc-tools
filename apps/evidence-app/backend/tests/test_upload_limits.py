@@ -79,3 +79,47 @@ def test_upload_within_the_size_limit_succeeds_end_to_end(db_session, engineer_c
     fetch = httpx.get(response.json()["file_url"])
     assert fetch.status_code == 200
     assert fetch.content == content
+
+
+def test_upload_with_pdf_content_type_is_accepted_end_to_end(db_session, engineer_client):
+    """`application/pdf` is on the allow-list alongside the image types --
+    the Runner uploads PDFs, not just screenshots -- so a PDF upload
+    succeeds and is really retrievable from the emulator, the same way the
+    image case above is verified."""
+    control = make_control(db_session)
+    content = b"%PDF-1.4 not a real pdf but bytes are bytes"
+
+    response = engineer_client.post(
+        "/api/evidence",
+        data={"title": "Audit report", "control_id": str(control.id)},
+        files={"file": ("report.pdf", content, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+
+    fetch = httpx.get(response.json()["file_url"])
+    assert fetch.status_code == 200
+    assert fetch.content == content
+
+
+def test_upload_with_still_disallowed_content_type_is_rejected_with_allowed_types_message(
+    db_session, engineer_client
+):
+    """Adding `application/pdf` to the allow-list must not turn it into a
+    deny-list: a type that was never allowed (e.g. a zip archive) is still
+    rejected with a 400 that names the currently allowed types, generated
+    live from `ALLOWED_UPLOAD_CONTENT_TYPES` rather than hard-coded."""
+    control = make_control(db_session)
+    blobs_before = uploaded_blob_names()
+
+    response = engineer_client.post(
+        "/api/evidence",
+        data={"title": "Archive", "control_id": str(control.id)},
+        files={"file": ("bundle.zip", b"PK not a real zip", "application/zip")},
+    )
+
+    assert response.status_code == 400
+    assert "application/pdf" in response.json()["detail"]
+
+    assert db_session.query(Evidence).count() == 0
+    assert uploaded_blob_names() == blobs_before

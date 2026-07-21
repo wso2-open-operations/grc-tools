@@ -31,6 +31,7 @@ ALLOWED_UPLOAD_CONTENT_TYPES = {
     "image/jpeg",
     "image/webp",
     "image/gif",
+    "application/pdf",
 }
 
 _blob_service: BlobServiceClient | None = None
