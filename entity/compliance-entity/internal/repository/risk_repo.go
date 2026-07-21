@@ -392,11 +392,19 @@ func (r *riskRepo) UpdateRisk(ctx context.Context, id int, req domain.UpdateRisk
 	sets = append(sets, "updated_by = ?")
 	args = append(args, req.UpdatedBy)
 
-	var (
-		query  string
-		result sql.Result
-		err    error
-	)
+	sets = append(sets, "updated_at = NOW()")
+
+	// Everything below is one transaction: the risk row, its compliance-reference
+	// links, its action plan and steps, and the change-log entries either all
+	// land or none do. Over HTTP the caller cannot retry a half-applied edit,
+	// so a partial update would leave a risk the user cannot repair.
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("risk.Update begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var query string
 	if req.ExpectedStatus != "" {
 		args = append(args, id, req.ExpectedStatus)
 		query = "UPDATE risk SET " + strings.Join(sets, ", ") + " WHERE id = ? AND workflow_status = ?" // #nosec G202
@@ -404,22 +412,148 @@ func (r *riskRepo) UpdateRisk(ctx context.Context, id int, req domain.UpdateRisk
 		args = append(args, id)
 		query = "UPDATE risk SET " + strings.Join(sets, ", ") + " WHERE id = ?" // #nosec G202
 	}
-	if result, err = r.db.ExecContext(ctx, query, args...); err != nil {
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
 		return nil, fmt.Errorf("risk.Update(%d): %w", id, err)
 	}
 	if req.ExpectedStatus != "" {
 		if n, _ := result.RowsAffected(); n == 0 {
-			current, err := r.GetRiskByID(ctx, id)
-			if err != nil {
-				return nil, err // propagates NotFoundError if record was deleted
+			// Zero rows means either the status moved under us, or MySQL
+			// reported a no-op because nothing actually differed. Distinguish
+			// them by reading the row inside this transaction.
+			var current string
+			if err := tx.QueryRowContext(ctx,
+				"SELECT workflow_status FROM risk WHERE id = ?", id).Scan(&current); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d not found", id)}
+				}
+				return nil, fmt.Errorf("risk.Update(%d) recheck: %w", id, err)
 			}
-			if current.WorkflowStatus == req.ExpectedStatus && (req.WorkflowStatus == nil || *req.WorkflowStatus == req.ExpectedStatus) {
-				return current, nil // MySQL no-op: status not being changed, or already at the target value
+			if current != req.ExpectedStatus || (req.WorkflowStatus != nil && *req.WorkflowStatus != req.ExpectedStatus) {
+				return nil, &apierror.ConflictError{Msg: "risk was modified concurrently, please retry"}
 			}
-			return nil, &apierror.ConflictError{Msg: "risk was modified concurrently, please retry"}
 		}
 	}
+
+	// Compliance references: nil means "not touching them"; a non-nil slice is
+	// the complete desired set, so replace wholesale.
+	if req.ComplianceReferenceIDs != nil {
+		if _, err = tx.ExecContext(ctx,
+			"DELETE FROM risk_compliance_reference WHERE risk_id = ?", id); err != nil {
+			return nil, fmt.Errorf("risk.Update clear compliance refs: %w", err)
+		}
+		for _, refID := range req.ComplianceReferenceIDs {
+			if _, err = tx.ExecContext(ctx,
+				"INSERT INTO risk_compliance_reference (risk_id, reference_id) VALUES (?, ?)",
+				id, refID); err != nil {
+				return nil, fmt.Errorf("risk.Update compliance reference %d: %w", refID, err)
+			}
+		}
+	}
+
+	if req.ActionPlan != nil {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE risk_action_plan SET
+				description = COALESCE(?, description),
+				action_owner_id = COALESCE(?, action_owner_id),
+				updated_by = ?, updated_at = NOW()
+			WHERE risk_id = ? AND plan_type = 'STANDARD'`,
+			req.ActionPlan.Description, nullableInt(req.ActionPlan.ActionOwnerID),
+			req.UpdatedBy, id); err != nil {
+			return nil, fmt.Errorf("risk.Update action plan: %w", err)
+		}
+	}
+
+	if req.ActionSteps != nil {
+		if err = r.applyActionSteps(ctx, tx, id, req); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, e := range req.ChangeLog {
+		action := e.Action
+		if action == "" {
+			action = "UPDATE"
+		}
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO risk_change_log (risk_id, created_by, action, field_changed, old_value, new_value)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			id, req.UpdatedBy, action, e.FieldChanged, e.OldValue, e.NewValue); err != nil {
+			return nil, fmt.Errorf("risk.Update change log: %w", err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("risk.Update commit: %w", err)
+	}
 	return r.GetRiskByID(ctx, id)
+}
+
+// applyActionSteps reconciles the plan's steps with the desired list. Steps are
+// matched by ID rather than replaced wholesale so that an untouched step keeps
+// its status and completed_date — a user editing the wording of step 3 must not
+// silently reopen step 1. An ID that is not on this plan (stale, or belonging
+// to another plan) is treated as a new step rather than trusted.
+func (r *riskRepo) applyActionSteps(ctx context.Context, tx *sql.Tx, riskID int, req domain.UpdateRiskRequest) error {
+	var planID int
+	err := tx.QueryRowContext(ctx,
+		"SELECT id FROM risk_action_plan WHERE risk_id = ? AND plan_type = 'STANDARD' LIMIT 1",
+		riskID).Scan(&planID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d has no standard action plan", riskID)}
+	}
+	if err != nil {
+		return fmt.Errorf("risk.Update find action plan: %w", err)
+	}
+
+	rows, err := tx.QueryContext(ctx, "SELECT id FROM risk_action_step WHERE plan_id = ?", planID)
+	if err != nil {
+		return fmt.Errorf("risk.Update load step ids: %w", err)
+	}
+	existing := make(map[int]bool)
+	for rows.Next() {
+		var stepID int
+		if err := rows.Scan(&stepID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("risk.Update scan step id: %w", err)
+		}
+		existing[stepID] = true
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("risk.Update iterate step ids: %w", err)
+	}
+
+	kept := make(map[int]bool)
+	for i, step := range req.ActionSteps {
+		if step.ID != nil && existing[*step.ID] {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE risk_action_step SET step_no = ?, description = ?, updated_by = ?, updated_at = NOW()
+				WHERE id = ? AND plan_id = ?`,
+				i+1, step.Description, req.UpdatedBy, *step.ID, planID); err != nil {
+				return fmt.Errorf("risk.Update step %d: %w", i+1, err)
+			}
+			kept[*step.ID] = true
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO risk_action_step (plan_id, step_no, description, status, created_by, updated_by)
+			VALUES (?, ?, ?, 'PENDING', ?, ?)`,
+			planID, i+1, step.Description, req.UpdatedBy, req.UpdatedBy); err != nil {
+			return fmt.Errorf("risk.Update new step %d: %w", i+1, err)
+		}
+	}
+
+	for stepID := range existing {
+		if !kept[stepID] {
+			if _, err := tx.ExecContext(ctx,
+				"DELETE FROM risk_action_step WHERE id = ? AND plan_id = ?",
+				stepID, planID); err != nil {
+				return fmt.Errorf("risk.Update delete step %d: %w", stepID, err)
+			}
+		}
+	}
+	return nil
 }
 
 func scanRisk(s scanner) (*domain.Risk, error) {

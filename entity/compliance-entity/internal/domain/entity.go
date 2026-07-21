@@ -933,7 +933,52 @@ type UpdateRiskRequest struct {
 	RiskType             *string `json:"riskType"` // NEW | UPDATED
 	OwnerFirstApprovedAt *string `json:"ownerFirstApprovedAt"`
 	UpdatedBy            string  `json:"updatedBy"`
-	ExpectedStatus       string  `json:"-"` // set server-side for atomic transition; never decoded from JSON
+
+	// Related rows the caller wants rewritten in the same transaction. Each is
+	// nil when the caller is not touching that relation — an empty slice is a
+	// meaningful instruction ("remove them all") and is not the same as nil.
+	//
+	// The caller decides *what* to write; this service decides whether the
+	// write is legal and makes it atomic. That split matters: which edits
+	// require re-approval, and what belongs in the change log, are workflow
+	// rules owned by the GRC backend, not persistence rules owned here.
+	ComplianceReferenceIDs []int              `json:"complianceReferenceIds"`
+	ActionPlan             *ActionPlanUpdate  `json:"actionPlan"`
+	ActionSteps            []ActionStepUpdate `json:"actionSteps"`
+	ChangeLog              []ChangeLogEntry   `json:"changeLog"`
+
+	// ExpectedStatus makes the update a compare-and-set. When the caller
+	// supplies it, the UPDATE is guarded by that status and a mismatch is a
+	// 409 — so a caller that read the risk, decided something, and is now
+	// writing cannot be overtaken in between. Left empty, this service reads
+	// the current status itself when a workflow transition is requested.
+	ExpectedStatus string `json:"expectedStatus"`
+}
+
+// ActionPlanUpdate patches the risk's STANDARD action plan. Nil fields are left
+// as they are.
+type ActionPlanUpdate struct {
+	Description   *string `json:"description"`
+	ActionOwnerID *int    `json:"actionOwnerId"`
+}
+
+// ActionStepUpdate is one step in the desired final state of the action plan.
+// A step carrying an ID that still exists on the plan is updated in place,
+// which is what preserves its status and completed_date; anything else is
+// inserted as new, and steps absent from the list are deleted. Step numbers are
+// reassigned from list order.
+type ActionStepUpdate struct {
+	ID          *int   `json:"id"`
+	Description string `json:"description"`
+}
+
+// ChangeLogEntry is one row for risk_change_log, composed by the caller because
+// deciding what counts as a noteworthy change is a workflow question.
+type ChangeLogEntry struct {
+	Action       string  `json:"action"` // CREATE | UPDATE
+	FieldChanged *string `json:"fieldChanged"`
+	OldValue     *string `json:"oldValue"`
+	NewValue     *string `json:"newValue"`
 }
 
 // =============================================================================

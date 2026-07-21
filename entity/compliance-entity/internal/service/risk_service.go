@@ -241,16 +241,24 @@ func (s *riskService) UpdateRisk(ctx context.Context, id int, req domain.UpdateR
 		req.WorkflowStatus = &up
 	}
 	if req.WorkflowStatus != nil {
-		current, err := s.repo.GetRiskByID(ctx, id)
-		if err != nil {
-			return domain.Risk{}, err
+		// A caller that supplied expectedStatus already read the risk and made a
+		// decision against that value — validate and guard on it, not on a fresh
+		// read. Re-reading here would check a transition the caller never
+		// decided on, and would let a concurrent change slip past the CAS.
+		from := req.ExpectedStatus
+		if from == "" {
+			current, err := s.repo.GetRiskByID(ctx, id)
+			if err != nil {
+				return domain.Risk{}, err
+			}
+			from = current.WorkflowStatus
+			req.ExpectedStatus = from
 		}
-		if !isValidRiskTransition(current.WorkflowStatus, *req.WorkflowStatus) {
+		if !isValidRiskTransition(from, *req.WorkflowStatus) {
 			return domain.Risk{}, &apierror.ValidationError{
-				Msg: "invalid workflow transition: " + current.WorkflowStatus + " → " + *req.WorkflowStatus,
+				Msg: "invalid workflow transition: " + from + " → " + *req.WorkflowStatus,
 			}
 		}
-		req.ExpectedStatus = current.WorkflowStatus
 	}
 	if req.TreatmentStrategy != nil && !validTreatmentStrategies[strings.ToUpper(*req.TreatmentStrategy)] {
 		return domain.Risk{}, &apierror.ValidationError{Msg: "treatmentStrategy must be REMEDIATE, ACCEPT, TRANSFER, or VOID"}
