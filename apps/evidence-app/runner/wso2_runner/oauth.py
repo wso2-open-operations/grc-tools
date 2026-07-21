@@ -228,8 +228,8 @@ def _email_from_id_token(tokens: dict) -> str | None:
         return None
     try:
         parts = id_token.split(".")
-        padding = 4 - len(parts[1]) % 4
-        payload = json.loads(base64.b64decode(parts[1] + "=" * padding).decode("utf-8"))
+        padding = -len(parts[1]) % 4
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * padding).decode("utf-8"))
         return payload.get("email") or payload.get("sub")
     except Exception:
         return None
