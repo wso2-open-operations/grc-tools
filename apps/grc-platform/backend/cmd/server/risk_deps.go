@@ -83,10 +83,14 @@ func buildRiskDeps(
 		riskRepo = riskmysql.NewRiskRepository(db)
 	}
 
-	actionPlanRepo := riskmysql.NewActionPlanRepository(db)
-	evidenceRepo := riskmysql.NewRiskEvidenceRepository(db)
-	escalationRepo := riskmysql.NewEscalationRepository(db)
-	notifRepo := riskmysql.NewNotificationRepository(db)
+	// Unimplemented features. These have no MySQL behaviour to preserve — every
+	// method returns errNotImplemented on both sides — so they are wired to the
+	// entity unconditionally rather than through RISK_ENTITY_REPOS. There is
+	// nothing to roll back to.
+	actionPlanRepo := riskentity.NewActionPlanRepository(ec)
+	evidenceRepo := riskentity.NewRiskEvidenceRepository(ec)
+	escalationRepo := riskentity.NewEscalationRepository(ec)
+	notifRepo := riskentity.NewNotificationRepository(ec)
 
 	analyticsSvc := riskservice.NewAnalyticsService(riskmysql.NewAnalyticsRepository(db))
 	if entityRepos["analytics"] {

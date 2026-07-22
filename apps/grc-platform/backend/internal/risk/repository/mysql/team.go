@@ -19,11 +19,16 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 )
+
+// errNotImplemented is returned by the Create/Update stubs below, which are
+// declared on the interface but reach no route.
+var errNotImplemented = errors.New("not implemented")
 
 type teamRepository struct{ db *sql.DB }
 
