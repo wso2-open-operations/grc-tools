@@ -40,6 +40,7 @@ import {
   DrawingPencilIcon,
 } from "@oxygen-ui/react-icons";
 import { evidenceApi, frameworksApi, controlsApi, productsApi, submissionsApi } from "../api/client";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 
 type Product = { id: number; name: string };
 type Framework = { id: number; name: string; product_id: number };
@@ -58,6 +59,7 @@ type Evidence = {
   file_url: string;
   control_id: number;
   created_at: string;
+  created_by: string;
   files?: EvidenceFile[];
 };
 type Submission = {
@@ -127,6 +129,7 @@ function StatCard({ label, value, accent }: { label: string; value: number; acce
 
 export default function EvidenceList() {
   const queryClient = useQueryClient();
+  const { user, isAdmin } = useCurrentUser();
   const [productId, setProductId] = useState<number | "">("");
   const [frameworkId, setFrameworkId] = useState<number | "">("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
@@ -567,15 +570,17 @@ export default function EvidenceList() {
                               <DrawingPencilIcon size={16} />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="Delete evidence">
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => setPendingDeleteId(e.id)}
-                            >
-                              <TrashIcon size={16} />
-                            </IconButton>
-                          </Tooltip>
+                          {(isAdmin || e.created_by === user?.email) && (
+                            <Tooltip title="Delete evidence">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => setPendingDeleteId(e.id)}
+                              >
+                                <TrashIcon size={16} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       )}
                     </TableCell>
@@ -708,11 +713,13 @@ export default function EvidenceList() {
                           <DrawingPencilIcon size={16} />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="Delete evidence">
-                        <IconButton size="small" color="error" onClick={() => setPendingDeleteId(e.id)}>
-                          <TrashIcon size={16} />
-                        </IconButton>
-                      </Tooltip>
+                      {(isAdmin || e.created_by === user?.email) && (
+                        <Tooltip title="Delete evidence">
+                          <IconButton size="small" color="error" onClick={() => setPendingDeleteId(e.id)}>
+                            <TrashIcon size={16} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </Stack>
                   )}
                 </Stack>
@@ -808,15 +815,17 @@ export default function EvidenceList() {
                         </Button>
                       </Stack>
                     ) : (
-                      <Tooltip title="Delete this screenshot">
-                        <IconButton
-                          size="small"
-                          onClick={() => setPendingDeleteFileId(f.id)}
-                          sx={{ backgroundColor: "rgba(0,0,0,0.5)", color: "#fff", "&:hover": { backgroundColor: "rgba(200,0,0,0.8)" }, width: 28, height: 28 }}
-                        >
-                          <TrashIcon size={14} />
-                        </IconButton>
-                      </Tooltip>
+                      (isAdmin || galleryEvidence?.created_by === user?.email) && (
+                        <Tooltip title="Delete this screenshot">
+                          <IconButton
+                            size="small"
+                            onClick={() => setPendingDeleteFileId(f.id)}
+                            sx={{ backgroundColor: "rgba(0,0,0,0.5)", color: "#fff", "&:hover": { backgroundColor: "rgba(200,0,0,0.8)" }, width: 28, height: 28 }}
+                          >
+                            <TrashIcon size={14} />
+                          </IconButton>
+                        </Tooltip>
+                      )
                     )}
                   </Box>
                 </Box>
