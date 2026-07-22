@@ -109,9 +109,7 @@ Open [http://localhost:3000](http://localhost:3000). The root path redirects to
 
 ## Role-Based Access Control (RBAC)
 
-Access is enforced at the Go backend and gated in the UI by role claims from Asgardeo. The table below defines what each role can do inside the Audit Hub.
-
-
+Access is enforced at the Go backend and gated in the UI by role claims from Asgardeo.
 
 **Key decisions:**
 

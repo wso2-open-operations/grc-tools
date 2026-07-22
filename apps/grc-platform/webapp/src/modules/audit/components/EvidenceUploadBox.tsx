@@ -18,6 +18,7 @@ import { Alert, Box, Button, CircularProgress, IconButton, Typography } from "@w
 import { FileUp, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { useRef, useState, type JSX } from "react";
 import { useSubmitEvidence } from "@modules/audit/api/useSubmitEvidence";
+import { useSubmitPopulation } from "@modules/audit/api/useSubmitPopulation";
 
 interface EvidenceUploadBoxProps {
   auditId: number;
@@ -26,12 +27,16 @@ interface EvidenceUploadBoxProps {
   buttonLabel: string;
   // Called after a successful submission (e.g. to advance the stepper).
   onSubmitted: () => void;
+  /** Which submission flow to drive; defaults to the evidence endpoints. */
+  phase?: "evidence" | "population";
 }
 
 /**
  * Manual evidence submission box: pick/drop files and upload them via the SAS
  * flow (useSubmitEvidence). This is the primary submission path on the platform;
- * the evidence agent uses the same backend endpoints programmatically.
+ * the evidence agent uses the same backend endpoints programmatically. With
+ * phase="population" the same UI drives the population submission endpoints —
+ * both flows require at least one file before Submit enables.
  */
 export default function EvidenceUploadBox({
   auditId,
@@ -39,11 +44,14 @@ export default function EvidenceUploadBox({
   hint,
   buttonLabel,
   onSubmitted,
+  phase = "evidence",
 }: EvidenceUploadBoxProps): JSX.Element {
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const submit = useSubmitEvidence();
+  const submitEvidence = useSubmitEvidence();
+  const submitPopulation = useSubmitPopulation();
+  const submit = phase === "population" ? submitPopulation : submitEvidence;
   const busy = submit.isPending;
 
   function addFiles(list: FileList | null) {
@@ -77,7 +85,11 @@ export default function EvidenceUploadBox({
       />
 
       <Box
+        role="button"
+        tabIndex={busy ? -1 : 0}
+        aria-label="Upload files — click or press Enter to browse"
         onClick={() => !busy && inputRef.current?.click()}
+        onKeyDown={(e) => { if (!busy && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); inputRef.current?.click(); } }}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); if (!busy) addFiles(e.dataTransfer.files); }}

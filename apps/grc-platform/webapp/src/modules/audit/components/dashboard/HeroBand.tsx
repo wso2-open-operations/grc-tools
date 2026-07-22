@@ -99,8 +99,8 @@ export default function HeroBand({
               onClick={onOverdueClick}
               sx={{
                 color: DUE_OVERDUE, fontWeight: 600,
-                bgcolor: "rgba(229,57,53,0.12)",
-                "[data-color-scheme='dark'] &": { bgcolor: "rgba(229,57,53,0.25)" },
+                bgcolor: "rgba(239,68,68,0.12)",
+                "[data-color-scheme='dark'] &": { bgcolor: "rgba(239,68,68,0.25)" },
                 "& .MuiChip-icon": { color: DUE_OVERDUE },
               }}
             />
@@ -114,8 +114,8 @@ export default function HeroBand({
               onClick={onQueueClick}
               sx={{
                 color: DUE_SOON, fontWeight: 600,
-                bgcolor: "rgba(251,140,0,0.12)",
-                "[data-color-scheme='dark'] &": { bgcolor: "rgba(251,140,0,0.25)" },
+                bgcolor: "rgba(245,158,11,0.12)",
+                "[data-color-scheme='dark'] &": { bgcolor: "rgba(245,158,11,0.25)" },
                 "& .MuiChip-icon": { color: DUE_SOON },
               }}
             />
@@ -128,10 +128,10 @@ export default function HeroBand({
               label={`${dueSoonCount} due this week`}
               onClick={onQueueClick}
               sx={{
-                color: "#0369A1", fontWeight: 600,
-                bgcolor: "rgba(3,105,161,0.10)",
-                "[data-color-scheme='dark'] &": { bgcolor: "rgba(3,105,161,0.25)" },
-                "& .MuiChip-icon": { color: "#0369A1" },
+                color: "#3B82F6", fontWeight: 600,
+                bgcolor: "rgba(59,130,246,0.10)",
+                "[data-color-scheme='dark'] &": { bgcolor: "rgba(59,130,246,0.25)" },
+                "& .MuiChip-icon": { color: "#3B82F6" },
               }}
             />
           )}

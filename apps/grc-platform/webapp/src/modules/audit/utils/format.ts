@@ -41,6 +41,20 @@ export function daysLeft(dateStr: string | null | undefined): number | null {
   return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
+/** Formats a full ISO timestamp → "Jun 22, 2026 02:30 PM". Returns "" for invalid input. */
+export function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 /** Formats a date range. Same year omits the year from the start: "Jan 1 – Dec 31, 2026" */
 export function formatDateRange(start: string, end: string): string {
   const s = parseLocalDate(start);

@@ -67,6 +67,8 @@ type ActionItem struct {
 	DueDate       string `json:"dueDate"`
 	Team          string `json:"team"`
 	ProcessOwner  string `json:"processOwner"`
+	TeamID        *int   `json:"teamId"`
+	OwnerID       *int   `json:"ownerId"`
 }
 
 // OverdueControl is a single entry in the "Overdue Controls" list.
@@ -80,6 +82,8 @@ type OverdueControl struct {
 	DueDate       string `json:"dueDate"`
 	Team          string `json:"team"`
 	ProcessOwner  string `json:"processOwner"`
+	TeamID        *int   `json:"teamId"`
+	OwnerID       *int   `json:"ownerId"`
 }
 
 // DashboardData is the full payload returned by GET /api/v1/audit/dashboard.
@@ -117,6 +121,10 @@ type DashboardFilter struct {
 	Roles []string
 	// UserEmail is the authenticated user's email (used to look up team/auditor ID).
 	UserEmail string
+	// TeamIDs optionally restricts work-queue results to specific audit_team IDs.
+	TeamIDs []int
+	// OwnerIDs optionally restricts work-queue results to specific process owner user IDs.
+	OwnerIDs []int
 }
 
 // Role constants — mirror the Asgardeo group names exactly.

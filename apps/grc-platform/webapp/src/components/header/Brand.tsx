@@ -107,18 +107,18 @@ export default function Brand({
           ...BRAND_TITLE_BASE_SX,
           fontWeight: 700,
           fontSize: {
-            xs: "0.9375rem",
-            sm: "1rem",
-            md: "1.125rem",
-            lg: "1rem",
-            xl: "1.125rem",
+            xs: "1.1875rem",
+            sm: "1.25rem",
+            md: "1.375rem",
+            lg: "1.25rem",
+            xl: "1.375rem",
           },
           [theme.breakpoints.down("xl")]: {
             display: "inline-block",
           },
         }}
       >
-        GRC Platform
+       GRC Platform
       </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );

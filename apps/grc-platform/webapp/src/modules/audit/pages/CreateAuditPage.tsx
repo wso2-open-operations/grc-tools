@@ -30,9 +30,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControl,
   IconButton,
-  InputLabel,
   MenuItem,
   Paper,
   Select,
@@ -87,7 +85,7 @@ import type { AuditUser } from "@modules/audit/types/user";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type ControlSource = "empty" | "copy" | "csv" | "template";
+type ControlSourceMode = "empty" | "copy" | "csv" | "template";
 
 let _localIdCounter = 0;
 const nextLocalId = () => String(++_localIdCounter);
@@ -111,6 +109,7 @@ interface DraftControl {
   // When set this draft is linked to a framework template row (source = COPIED).
   // Definition fields below are read-only display values; only assignments are editable.
   frameworkControlId?: number;
+  controlSource: "MANUAL" | "COPIED" | "CSV";
   controlNumber: string;
   description: string;
   requirementType: RequirementType;
@@ -127,6 +126,7 @@ interface DraftControl {
 function blankDraft(): DraftControl {
   return {
     localId: nextLocalId(),
+    controlSource: "MANUAL",
     controlNumber: "",
     description: "",
     requirementType: "DESIGN",
@@ -144,6 +144,7 @@ function blankDraft(): DraftControl {
 function controlToDraft(c: AuditControl): DraftControl {
   return {
     localId: nextLocalId(),
+    controlSource: "COPIED",
     controlNumber: c.controlNumber,
     description: c.description,
     requirementType: c.requirementType,
@@ -173,9 +174,7 @@ function draftToRequest(d: DraftControl): AddControlRequest {
   if (d.frameworkControlId) {
     return {
       frameworkControlId: d.frameworkControlId,
-      controlSource: 'COPIED' as const,
-      controlNumber: "",       // unused — backend ignores when frameworkControlId is set
-      description: "",
+      controlSource: "COPIED" as const,
       requirementType: d.requirementType,
       controlType: d.controlType,
       scope: d.scope,
@@ -197,7 +196,7 @@ function draftToRequest(d: DraftControl): AddControlRequest {
     ownerId: d.ownerId,
     teamId: d.teamId,
     auditorId: d.auditorId,
-    controlSource: 'MANUAL' as const,
+    controlSource: d.controlSource,
     population,
   };
 }
@@ -259,6 +258,7 @@ function parseCSV(text: string): DraftControl[] | string {
 
     drafts.push({
       localId: nextLocalId(),
+      controlSource: "CSV",
       controlNumber: cn,
       description: desc,
       requirementType: rawReq,
@@ -296,12 +296,17 @@ function PopulationDialog({
   const paperProps = { sx: { backdropFilter: "none", backgroundColor: "background.paper" } };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      slotProps={{ paper: { sx: { backgroundImage: "none", borderRadius: 2 } } }}
+    >
       <DialogTitle>
         Population Details - {controlDraft.controlNumber || "New Control"}
       </DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: "16px !important" }}>
-        
 
         {/* Population description */}
         <TextField
@@ -315,26 +320,28 @@ function PopulationDialog({
           placeholder="Describe what records make up the population (e.g. all access review records for Jan–Dec 2026)"
         />
 
-        {/* Due date + comments */}
-        <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
-          <TextField
-            label="Population Due Date"
-            required
-            type="date"
-            fullWidth
-            value={pop.dueDate}
-            onChange={(e) => onChangePopulation({ ...pop, dueDate: e.target.value })}
-            InputLabelProps={{ shrink: true }}
-            helperText="When population must be submitted"
-          />
-          <TextField
-            label="Comments (optional)"
-            fullWidth
-            value={pop.comments}
-            onChange={(e) => onChangePopulation({ ...pop, comments: e.target.value })}
-            placeholder="Any additional notes"
-          />
-        </Box>
+        {/* Due date */}
+        <TextField
+          label="Population Due Date"
+          required
+          type="date"
+          fullWidth
+          value={pop.dueDate}
+          onChange={(e) => onChangePopulation({ ...pop, dueDate: e.target.value })}
+          InputLabelProps={{ shrink: true }}
+          helperText="When population must be submitted"
+        />
+
+        {/* Comments — separate row so the textarea has full width */}
+        <TextField
+          label="Comments (optional)"
+          fullWidth
+          multiline
+          rows={2}
+          value={pop.comments}
+          onChange={(e) => onChangePopulation({ ...pop, comments: e.target.value })}
+          placeholder="Any additional notes for the population submission"
+        />
 
         <Divider />
 
@@ -347,7 +354,7 @@ function PopulationDialog({
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {/* Process Owner — stored on population; also auto-fills the control's owner */}
           <Autocomplete
-            options={users}
+            options={users.filter((u) => u.userType === "INTERNAL")}
             getOptionLabel={(u) => u.displayName}
             isOptionEqualToValue={(a, b) => a.id === b.id}
             value={users.find((u) => u.id === pop.ownerId) ?? null}
@@ -357,7 +364,11 @@ function PopulationDialog({
           />
           {/* Auditor POC — shared with control */}
           <Autocomplete
-            options={users}
+            options={[...users].sort((a, b) => {
+              if (a.userType === b.userType) return a.displayName.localeCompare(b.displayName);
+              return a.userType === "EXTERNAL" ? -1 : 1;
+            })}
+            groupBy={(u) => u.userType === "EXTERNAL" ? "External Auditors" : "Internal"}
             getOptionLabel={(u) => u.displayName}
             isOptionEqualToValue={(a, b) => a.id === b.id}
             value={users.find((u) => u.id === controlDraft.auditorId) ?? null}
@@ -366,22 +377,26 @@ function PopulationDialog({
             renderInput={(params) => <TextField {...params} label="Auditor POC" />}
           />
           {/* Team — stored on population; also auto-fills the control's team */}
-          <FormControl fullWidth>
-            <InputLabel>Team (Population)</InputLabel>
-            <Select
-              label="Team (Population)"
-              value={pop.teamId !== null ? String(pop.teamId) : ""}
-              onChange={(e) => {
-                const v = e.target.value as string;
-                onChangePopulation({ ...pop, teamId: v === "" ? null : Number(v) });
-              }}
-            >
-              <MenuItem value=""><em>None</em></MenuItem>
-              {teams.map((t) => (
-                <MenuItem key={t.id} value={String(t.id)}>{t.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Select
+            fullWidth
+            displayEmpty
+            inputProps={{ "aria-label": "Team (Population)" }}
+            value={pop.teamId !== null ? String(pop.teamId) : ""}
+            onChange={(e) => {
+              const v = e.target.value as string;
+              onChangePopulation({ ...pop, teamId: v === "" ? null : Number(v) });
+            }}
+            renderValue={(v) =>
+              v === ""
+                ? <span style={{ opacity: 0.5 }}>Team (Population)</span>
+                : (teams.find((t) => String(t.id) === v)?.name ?? "")
+            }
+          >
+            <MenuItem value="">None</MenuItem>
+            {teams.map((t) => (
+              <MenuItem key={t.id} value={String(t.id)}>{t.name}</MenuItem>
+            ))}
+          </Select>
         </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -583,11 +598,11 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
                   </Select>
                 )}
               </TableCell>
-              {/* Process Owner — searchable */}
+              {/* Process Owner — internal users only */}
               <TableCell>
                 <Autocomplete
                   size="small"
-                  options={users}
+                  options={users.filter((u) => u.userType === "INTERNAL")}
                   getOptionLabel={(u) => u.displayName}
                   isOptionEqualToValue={(a, b) => a.id === b.id}
                   value={users.find((u) => u.id === d.ownerId) ?? null}
@@ -604,11 +619,15 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
                   slotProps={{ paper: paperProps }}
                 />
               </TableCell>
-              {/* Auditor POC — searchable (all users; external auditor filtering requires role sync) */}
+              {/* Auditor POC — external auditors first, then internal */}
               <TableCell>
                 <Autocomplete
                   size="small"
-                  options={users}
+                  options={[...users].sort((a, b) => {
+                    if (a.userType === b.userType) return a.displayName.localeCompare(b.displayName);
+                    return a.userType === "EXTERNAL" ? -1 : 1;
+                  })}
+                  groupBy={(u) => u.userType === "EXTERNAL" ? "External Auditors" : "Internal"}
                   getOptionLabel={(u) => u.displayName}
                   isOptionEqualToValue={(a, b) => a.id === b.id}
                   value={users.find((u) => u.id === d.auditorId) ?? null}
@@ -622,7 +641,7 @@ function EditableControlsTable({ drafts, onChange, users, teams }: EditableContr
                     />
                   )}
                   sx={{ minWidth: 135 }}
-                  slotProps={{ paper: paperProps }}
+                  slotProps={{ paper: paperProps, popper: { style: { minWidth: 220 } } }}
                 />
               </TableCell>
               {/* Team */}
@@ -854,7 +873,7 @@ function Step1Form({
         value={name}
         onChange={(e) => onNameChange(e.target.value)}
         fullWidth
-        placeholder="e.g. SOC 2 Type II – 2026"
+        placeholder="e.g. SOC 2 Asgardeo 2026"
       />
 
       <Box>
@@ -1056,8 +1075,8 @@ function Step1Form({
 // ── Step 2: Controls ──────────────────────────────────────────────────────────
 
 interface Step2Props {
-  source: ControlSource;
-  onSourceChange: (s: ControlSource) => void;
+  source: ControlSourceMode;
+  onSourceChange: (s: ControlSourceMode) => void;
   drafts: DraftControl[];
   onDraftsChange: (d: DraftControl[]) => void;
   copyAuditId: number | null;
@@ -1096,26 +1115,30 @@ function Step2Controls({
   // Set of selected framework control IDs for the template source.
   const selectedFwCtlIds = new Set(drafts.filter((d) => d.frameworkControlId).map((d) => d.frameworkControlId!));
 
+  function createDraftControl(fc: AuditFrameworkControl): DraftControl {
+    return {
+      localId: nextLocalId(),
+      frameworkControlId: fc.id,
+      controlSource: "COPIED",
+      controlNumber: fc.controlNumber,
+      description: fc.description,
+      requirementType: fc.requirementType as RequirementType,
+      controlType: fc.controlType as ControlType,
+      scope: fc.scope as ControlScope,
+      evidenceRequirement: fc.evidenceRequirement ?? "",
+      dueDate: "",
+      ownerId: null,
+      teamId: null,
+      auditorId: null,
+      population: fc.requirementType === "OE" ? blankPopulation() : null,
+    };
+  }
+
   function toggleFwControl(fc: AuditFrameworkControl) {
     if (selectedFwCtlIds.has(fc.id)) {
       onDraftsChange(drafts.filter((d) => d.frameworkControlId !== fc.id));
     } else {
-      const newDraft: DraftControl = {
-        localId: nextLocalId(),
-        frameworkControlId: fc.id,
-        controlNumber: fc.controlNumber,
-        description: fc.description,
-        requirementType: fc.requirementType as RequirementType,
-        controlType: fc.controlType as ControlType,
-        scope: fc.scope as ControlScope,
-        evidenceRequirement: fc.evidenceRequirement ?? "",
-        dueDate: "",
-        ownerId: null,
-        teamId: null,
-        auditorId: null,
-        population: fc.requirementType === "OE" ? blankPopulation() : null,
-      };
-      onDraftsChange([...drafts, newDraft]);
+      onDraftsChange([...drafts, createDraftControl(fc)]);
     }
   }
 
@@ -1131,6 +1154,9 @@ function Step2Controls({
   }, [source, sourceControlsData, copyAuditId, onDraftsChange]);
 
   const allAudits = auditsData?.items ?? [];
+  const sameFrameworkAudits = allAudits.filter(
+    (a) => framework !== null && a.framework.id === framework.id,
+  );
 
   function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1181,7 +1207,7 @@ function Step2Controls({
         <SourceCard
           icon={<ClipboardList size={22} />}
           title="Start Empty"
-          description="Add controls manually — control number, description, and all fields are yours to fill."
+          description="Add controls manually - control number, description, and all fields are yours to fill."
           selected={source === "empty"}
           onClick={() => {
             onSourceChange("empty");
@@ -1206,7 +1232,7 @@ function Step2Controls({
         <Box>
           {!framework && (
             <Alert severity="warning" sx={{ py: 0.5 }}>
-              Select a framework in Step 1 first — controls are specific to each framework.
+              Select a framework in Step 1 first - controls are specific to each framework.
             </Alert>
           )}
           {framework && fwControlsLoading && (
@@ -1226,7 +1252,7 @@ function Step2Controls({
             <Box>
               <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
                 <Typography variant="subtitle2" fontWeight={600}>
-                  {framework.name} — {fwControlsData!.length} controls
+                  {framework.name} - {fwControlsData!.length} controls
                 </Typography>
                 <Box sx={{ display: "flex", gap: 1 }}>
                   <Button
@@ -1235,22 +1261,7 @@ function Step2Controls({
                     sx={{ textTransform: "none" }}
                     onClick={() => {
                       const toAdd = (fwControlsData ?? []).filter((fc) => !selectedFwCtlIds.has(fc.id));
-                      const newDrafts: DraftControl[] = toAdd.map((fc) => ({
-                        localId: nextLocalId(),
-                        frameworkControlId: fc.id,
-                        controlNumber: fc.controlNumber,
-                        description: fc.description,
-                        requirementType: fc.requirementType as RequirementType,
-                        controlType: fc.controlType as ControlType,
-                        scope: fc.scope as ControlScope,
-                        evidenceRequirement: fc.evidenceRequirement ?? "",
-                        dueDate: "",
-                        ownerId: null,
-                        teamId: null,
-                        auditorId: null,
-                        population: fc.requirementType === "OE" ? blankPopulation() : null,
-                      }));
-                      onDraftsChange([...drafts, ...newDrafts]);
+                      onDraftsChange([...drafts, ...toAdd.map(createDraftControl)]);
                     }}
                   >
                     Select All
@@ -1320,7 +1331,7 @@ function Step2Controls({
               </Paper>
               {selectedFwCtlIds.size > 0 && (
                 <Typography variant="caption" color="primary.main" sx={{ mt: 1, display: "block" }}>
-                  {selectedFwCtlIds.size} control{selectedFwCtlIds.size !== 1 ? "s" : ""} selected — assign owners and due dates in the table below.
+                  {selectedFwCtlIds.size} control{selectedFwCtlIds.size !== 1 ? "s" : ""} selected. Assign owners and due dates in the table below.
                 </Typography>
               )}
             </Box>
@@ -1331,23 +1342,33 @@ function Step2Controls({
       {/* Copy — audit selector */}
       {source === "copy" && (
         <Box>
-          <FormControl fullWidth>
-            <InputLabel>Select source audit</InputLabel>
-            <Select
-              label="Select source audit"
-              value={copyAuditId !== null ? String(copyAuditId) : ""}
-              onChange={(e) => {
-                const v = e.target.value as string;
-                onCopyAuditIdChange(v === "" ? null : Number(v));
-              }}
-            >
-              {allAudits.map((a) => (
+          <Select
+            fullWidth
+            displayEmpty
+            inputProps={{ "aria-label": "Source audit" }}
+            value={copyAuditId !== null ? String(copyAuditId) : ""}
+            onChange={(e) => {
+              const v = e.target.value as string;
+              onCopyAuditIdChange(v === "" ? null : Number(v));
+            }}
+            renderValue={(v) =>
+              v === ""
+                ? <span style={{ opacity: 0.5 }}>Select source audit</span>
+                : (sameFrameworkAudits.find((a) => String(a.id) === v)?.name ?? "")
+            }
+          >
+            {sameFrameworkAudits.length === 0 ? (
+              <MenuItem disabled value="">
+                {framework ? "No previous audits for this framework" : "Select a framework first"}
+              </MenuItem>
+            ) : (
+              sameFrameworkAudits.map((a) => (
                 <MenuItem key={a.id} value={String(a.id)}>
-                  {a.name} ({a.framework.name})
+                  {a.name}
                 </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+              ))
+            )}
+          </Select>
           {copyAuditId && sourceControlsLoading && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 2 }}>
               <CircularProgress size={16} />
@@ -1595,7 +1616,7 @@ export default function CreateAuditPage(): JSX.Element {
   const [scopeDescription, setScopeDescription] = useState("");
 
   // Step 2 state
-  const [source, setSource] = useState<ControlSource>("empty");
+  const [source, setSource] = useState<ControlSourceMode>("empty");
   const [copyAuditId, setCopyAuditId] = useState<number | null>(null);
   const [drafts, setDrafts] = useState<DraftControl[]>([]);
   const [csvError, setCsvError] = useState<string | null>(null);
@@ -1724,7 +1745,7 @@ export default function CreateAuditPage(): JSX.Element {
             onRefetchFrameworks={refetchFrameworks}
             onRefetchProducts={refetchProducts}
             onNameChange={setName}
-            onFrameworkChange={setFramework}
+            onFrameworkChange={(v) => { setFramework(v); setCopyAuditId(null); setDrafts([]); }}
             onProductChange={setProduct}
             onPeriodStartChange={setPeriodStart}
             onPeriodEndChange={setPeriodEnd}

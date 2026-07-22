@@ -15,8 +15,10 @@
 // under the License.
 
 import {
+  Alert,
   Button,
   Chip,
+  CircularProgress,
   Drawer,
   IconButton,
   Paper,
@@ -30,7 +32,6 @@ import {
 import { Box, Typography } from "@wso2/oxygen-ui";
 import {
   AlertCircle,
-  Bot,
   CalendarDays,
   CheckCircle2,
   Clock,
@@ -40,8 +41,6 @@ import {
   History,
   MessageSquare,
   RotateCcw,
-  Sparkles,
-  Upload,
   Users,
   X,
   XCircle,
@@ -51,9 +50,11 @@ import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import UserAvatar from "@modules/audit/components/UserAvatar";
 import { formatAuditDate } from "@modules/audit/utils/format";
 import { useUpdateControlStatus } from "@modules/audit/api/useUpdateControlStatus";
+import { useWithdrawEvidence } from "@modules/audit/api/useWithdrawEvidence";
 import EvidenceUploadBox from "@modules/audit/components/EvidenceUploadBox";
 import SubmittedEvidenceList from "@modules/audit/components/SubmittedEvidenceList";
 import CommentsSection from "@modules/audit/components/CommentsSection";
+import AIValidationCard from "@modules/audit/components/AIValidationCard";
 import type { AuditControl, ControlStatus } from "@modules/audit/types/audit";
 import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
 import { AuditPrivilege } from "@modules/audit/privileges";
@@ -217,6 +218,8 @@ function DesignEvidenceSection({
   canSubmitEvidence: boolean;
 }): JSX.Element {
   const activeStep = designActiveStep(control.status);
+  const withdraw = useWithdrawEvidence();
+
   return (
     <>
       <Paper variant="outlined" sx={{ borderRadius: 2, p: { xs: 1.5, sm: 2 }, overflow: "hidden" }}>
@@ -234,59 +237,69 @@ function DesignEvidenceSection({
               <Typography variant="body2" sx={{ lineHeight: 1.7 }}>{control.comments}</Typography>
             </SectionCard>
           )}
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
-            {canSubmitEvidence && (
-              <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Evidence Submission" flexContent>
-                <EvidenceUploadBox
-                  auditId={control.auditId}
-                  controlId={control.id}
-                  hint="PDF, XLSX, PNG up to 50 MB"
-                  buttonLabel="Submit Evidence"
-                  onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
-                />
-              </SectionCard>
-            )}
-            <SectionCard icon={<Sparkles size={16} />} iconBg="#faf5ff" iconColor="#7c3aed" title="AI Validation">
-              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 2, py: 0.5 }}>
-                <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: "#faf5ff", display: "flex", alignItems: "center", justifyContent: "center", color: "#7c3aed" }}>
-                  <Bot size={26} />
-                </Box>
-                <Box>
-                  <Typography variant="body2" fontWeight={600} gutterBottom>Automated Evidence Check</Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.65 }}>AI reviews your uploaded files against the requirement and flags any gaps.</Typography>
-                </Box>
-                <Box sx={{ width: "100%", py: 1, px: 1.5, borderRadius: 1.5, bgcolor: "action.hover", display: "flex", alignItems: "center", gap: 1 }}>
-                  <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#9ca3af", flexShrink: 0 }} />
-                  <Typography variant="caption" color="text.secondary">Not yet validated</Typography>
-                </Box>
-                <Button variant="outlined" fullWidth disabled startIcon={<Sparkles size={15} />} sx={{ textTransform: "none", fontWeight: 600 }}>Run AI Validation</Button>
-              </Box>
+          {canSubmitEvidence && (
+            <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Evidence Submission" flexContent>
+              <EvidenceUploadBox
+                auditId={control.auditId}
+                controlId={control.id}
+                hint="PDF, XLSX, PNG up to 50 MB"
+                buttonLabel="Submit Evidence"
+                onSubmitted={() => onStatusChange("EVIDENCE_INTERNAL_REVIEW")}
+              />
             </SectionCard>
-          </Box>
+          )}
         </>
       )}
 
+      {/* Submitted files + withdraw: same card position as upload so layout stays stable */}
       {activeStep === 1 && (
-        <SectionCard icon={<ClipboardCheck size={16} />} iconBg="#fff7ed" iconColor="#b45309" title="Evidence Under Internal Review">
-          <Box sx={{ py: 1, px: 1.5, borderRadius: 1.5, bgcolor: "action.hover", display: "flex", alignItems: "center", gap: 1 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#b45309", flexShrink: 0 }} />
-            <Typography variant="body2" color="text.secondary">Evidence submitted — compliance team is reviewing internally.</Typography>
-          </Box>
+        <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Evidence Submission">
+          <SubmittedEvidenceList auditId={control.auditId} controlId={control.id} canDelete={canSubmitEvidence} />
+          {canSubmitEvidence && (
+            <Box sx={{ mt: 2, pt: 2, borderTop: "1px solid", borderColor: "divider", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 1 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#b45309", flexShrink: 0 }} />
+                <Typography variant="body2" color="text.secondary">Under internal review</Typography>
+              </Box>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={withdraw.isPending ? <CircularProgress size={13} color="inherit" /> : <RotateCcw size={14} />}
+                disabled={withdraw.isPending}
+                onClick={() => withdraw.mutate({ auditId: control.auditId, controlId: control.id })}
+                sx={{ textTransform: "none", color: "#b45309", borderColor: "#b45309", "&:hover": { borderColor: "#92400e", bgcolor: "rgba(180,83,9,0.04)" } }}
+              >
+                Edit Submission
+              </Button>
+            </Box>
+          )}
+          {withdraw.isError && (
+            <Alert severity="error" sx={{ mt: 1, fontSize: "0.8rem" }}>
+              {(withdraw.error as Error).message}
+            </Alert>
+          )}
         </SectionCard>
       )}
 
+      {/* AI validation — always below submission card, consistent position */}
+      {canSubmitEvidence && (
+        <AIValidationCard auditId={control.auditId} controlId={control.id} variant="submitter" />
+      )}
+
       {activeStep === 2 && (
-        <SectionCard icon={<ClipboardCheck size={16} />} iconBg="#f5f3ff" iconColor="#7c3aed" title="Evidence Under Auditor Validation">
-          <Box sx={{ py: 1, px: 1.5, borderRadius: 1.5, bgcolor: "action.hover", display: "flex", alignItems: "center", gap: 1 }}>
+        <SectionCard icon={<ClipboardCheck size={16} />} iconBg="#f5f3ff" iconColor="#7c3aed" title="Submitted Evidence">
+          <SubmittedEvidenceList auditId={control.auditId} controlId={control.id} />
+          <Box sx={{ mt: 1.5, py: 1, px: 1.5, borderRadius: 1.5, bgcolor: "action.hover", display: "flex", alignItems: "center", gap: 1 }}>
             <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#7c3aed", flexShrink: 0 }} />
-            <Typography variant="body2" color="text.secondary">Passed internal review — external auditor is validating the evidence.</Typography>
+            <Typography variant="body2" color="text.secondary">Passed internal review — external auditor is validating.</Typography>
           </Box>
         </SectionCard>
       )}
 
       {activeStep === 3 && (
-        <SectionCard icon={<CheckCircle2 size={16} />} iconBg="#f0fdf4" iconColor="#16a34a" title="Control Complete">
-          <Box sx={{ py: 1, px: 1.5, borderRadius: 1.5, bgcolor: "rgba(22,163,74,0.06)", display: "flex", alignItems: "center", gap: 1 }}>
+        <SectionCard icon={<CheckCircle2 size={16} />} iconBg="#f0fdf4" iconColor="#16a34a" title="Submitted Evidence">
+          <SubmittedEvidenceList auditId={control.auditId} controlId={control.id} />
+          <Box sx={{ mt: 1.5, py: 1, px: 1.5, borderRadius: 1.5, bgcolor: "rgba(22,163,74,0.06)", display: "flex", alignItems: "center", gap: 1 }}>
             <CheckCircle2 size={14} color="#16a34a" />
             <Typography variant="body2" color="text.secondary">
               {control.comments ?? "All evidence reviewed and approved."}
@@ -299,34 +312,6 @@ function DesignEvidenceSection({
 }
 
 // ─── OE evidence section ──────────────────────────────────────────────────────
-
-function UploadDropzone({ label, hint }: { label: string; hint: string }): JSX.Element {
-  return (
-    <Box
-      sx={(theme) => ({
-        border: "2px dashed",
-        borderColor: theme.palette.mode === "dark" ? "rgba(255,255,255,0.15)" : "#d1d5db",
-        borderRadius: 2,
-        p: 3,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 1,
-        cursor: "pointer",
-        textAlign: "center",
-        mb: 1.5,
-        "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" },
-      })}
-    >
-      <Box sx={{ width: 44, height: 44, borderRadius: "50%", bgcolor: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", color: "#16a34a" }}>
-        <Upload size={20} />
-      </Box>
-      <Typography variant="body2" fontWeight={600}>{label}</Typography>
-      <Typography variant="caption" color="text.secondary">{hint}</Typography>
-    </Box>
-  );
-}
 
 function SampleSelectionCard({ control }: { control: AuditControl }): JSX.Element {
   const hasNote = Boolean(control.sampleReference);
@@ -366,6 +351,7 @@ function OEEvidenceSection({
   canSubmitEvidence: boolean;
 }): JSX.Element {
   const activeStep = oeActiveStep(control.status);
+  const withdraw = useWithdrawEvidence();
 
   return (
     <>
@@ -382,16 +368,30 @@ function OEEvidenceSection({
         <>
           {control.status === "POPULATION_PENDING" && (
             <>
-              {control.evidenceRequirement && (
+              {control.populationDescription && (
                 <SectionCard icon={<FileText size={16} />} iconBg="#f1f5f9" iconColor="#475569" title="Population Requirement">
-                  <Typography variant="body2" sx={{ lineHeight: 1.8 }}>{control.evidenceRequirement}</Typography>
+                  <Typography variant="body2" sx={{ lineHeight: 1.8 }}>{control.populationDescription}</Typography>
+                  {control.populationDueDate && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                      Due: {control.populationDueDate}
+                    </Typography>
+                  )}
+                  {control.populationComments && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1, lineHeight: 1.7, fontStyle: "italic" }}>
+                      {control.populationComments}
+                    </Typography>
+                  )}
                 </SectionCard>
               )}
               <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Submit Population" flexContent>
-                <UploadDropzone label="Drop population file here" hint="CSV or XLSX — complete list of in-scope items" />
-                <Button variant="contained" fullWidth disableElevation startIcon={<FileUp size={15} />} sx={{ textTransform: "none", fontWeight: 600 }} onClick={() => onStatusChange("POPULATION_INTERNAL_REVIEW")}>
-                  Submit Population
-                </Button>
+                <EvidenceUploadBox
+                  auditId={control.auditId}
+                  controlId={control.id}
+                  phase="population"
+                  hint="CSV or XLSX — complete list of in-scope items"
+                  buttonLabel="Submit Population"
+                  onSubmitted={() => onStatusChange("POPULATION_INTERNAL_REVIEW")}
+                />
               </SectionCard>
             </>
           )}
@@ -434,10 +434,14 @@ function OEEvidenceSection({
                 </Typography>
               </SectionCard>
               <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Resubmit Population" flexContent>
-                <UploadDropzone label="Drop updated population file here" hint="CSV or XLSX — complete list of in-scope items" />
-                <Button variant="contained" fullWidth disableElevation startIcon={<FileUp size={15} />} sx={{ textTransform: "none", fontWeight: 600 }} onClick={() => onStatusChange("POPULATION_INTERNAL_REVIEW")}>
-                  Resubmit Population
-                </Button>
+                <EvidenceUploadBox
+                  auditId={control.auditId}
+                  controlId={control.id}
+                  phase="population"
+                  hint="CSV or XLSX — complete list of in-scope items"
+                  buttonLabel="Resubmit Population"
+                  onSubmitted={() => onStatusChange("POPULATION_INTERNAL_REVIEW")}
+                />
               </SectionCard>
             </>
           )}
@@ -491,20 +495,46 @@ function OEEvidenceSection({
         </>
       )}
 
-      {/* ── Step 3+: Under review ── */}
-      {activeStep >= 3 && control.status !== "COMPLETE" && (
+      {/* ── Step 3+: EVIDENCE_INTERNAL_REVIEW — show files + withdraw ── */}
+      {activeStep >= 3 && control.status === "EVIDENCE_INTERNAL_REVIEW" && (
         <>
           <SampleSelectionCard control={control} />
-          <SectionCard
-            icon={<Clock size={16} />}
-            iconBg={control.status === "EVIDENCE_UNDER_VALIDATION" ? "#f5f3ff" : "#fff7ed"}
-            iconColor={control.status === "EVIDENCE_UNDER_VALIDATION" ? "#7c3aed" : "#b45309"}
-            title={control.status === "EVIDENCE_INTERNAL_REVIEW" ? "Evidence Under Internal Review" : "Evidence Under Auditor Validation"}
-          >
+          <SectionCard icon={<FileUp size={16} />} iconBg="#dcfce7" iconColor="#16a34a" title="Evidence Submission">
+            <SubmittedEvidenceList auditId={control.auditId} controlId={control.id} canDelete={canSubmitEvidence} />
+            {canSubmitEvidence && (
+              <Box sx={{ mt: 2, pt: 2, borderTop: "1px solid", borderColor: "divider", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 1 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#b45309", flexShrink: 0 }} />
+                  <Typography variant="body2" color="text.secondary">Under internal review</Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={withdraw.isPending ? <CircularProgress size={13} color="inherit" /> : <RotateCcw size={14} />}
+                  disabled={withdraw.isPending}
+                  onClick={() => withdraw.mutate({ auditId: control.auditId, controlId: control.id })}
+                  sx={{ textTransform: "none", color: "#b45309", borderColor: "#b45309", "&:hover": { borderColor: "#92400e", bgcolor: "rgba(180,83,9,0.04)" } }}
+                >
+                  Edit Submission
+                </Button>
+              </Box>
+            )}
+            {withdraw.isError && (
+              <Alert severity="error" sx={{ mt: 1, fontSize: "0.8rem" }}>
+                {(withdraw.error as Error).message}
+              </Alert>
+            )}
+          </SectionCard>
+        </>
+      )}
+
+      {/* ── Step 3+: EVIDENCE_UNDER_VALIDATION ── */}
+      {activeStep >= 3 && control.status === "EVIDENCE_UNDER_VALIDATION" && (
+        <>
+          <SampleSelectionCard control={control} />
+          <SectionCard icon={<Clock size={16} />} iconBg="#f5f3ff" iconColor="#7c3aed" title="Evidence Under Auditor Validation">
             <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-              {control.status === "EVIDENCE_INTERNAL_REVIEW"
-                ? "The compliance team is reviewing your evidence submission."
-                : "The external auditor is validating the submitted evidence."}
+              The external auditor is validating the submitted evidence.
             </Typography>
           </SectionCard>
         </>
@@ -514,10 +544,14 @@ function OEEvidenceSection({
       {control.status === "COMPLETE" && (
         <>
           <SampleSelectionCard control={control} />
-          <SectionCard icon={<CheckCircle2 size={16} />} iconBg="#f0fdf4" iconColor="#16a34a" title="Control Complete">
-            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
-              {control.comments ?? "All evidence reviewed and approved by the auditor."}
-            </Typography>
+          <SectionCard icon={<CheckCircle2 size={16} />} iconBg="#f0fdf4" iconColor="#16a34a" title="Submitted Evidence">
+            <SubmittedEvidenceList auditId={control.auditId} controlId={control.id} />
+            <Box sx={{ mt: 1.5, py: 1, px: 1.5, borderRadius: 1.5, bgcolor: "rgba(22,163,74,0.06)", display: "flex", alignItems: "center", gap: 1 }}>
+              <CheckCircle2 size={14} color="#16a34a" />
+              <Typography variant="body2" color="text.secondary">
+                {control.comments ?? "All evidence reviewed and approved by the auditor."}
+              </Typography>
+            </Box>
           </SectionCard>
         </>
       )}
@@ -530,6 +564,7 @@ function OEEvidenceSection({
 export default function ControlDrawer({ control, open, onClose }: ControlDrawerProps): JSX.Element {
   const { can } = useAuditPrivileges();
   const canSubmitEvidence = can(AuditPrivilege.SubmitEvidence);
+  const canReviewEvidence = can(AuditPrivilege.ReviewEvidence);
   const canComment = can(AuditPrivilege.AddComment);
 
   const [tab, setTab] = useState(0);
@@ -754,15 +789,10 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               />
             )}
 
-            {/* Submitted evidence — reviewers open/download the files here */}
-            <SectionCard
-              icon={<FileText size={16} />}
-              iconBg="#f1f5f9"
-              iconColor="#475569"
-              title="Submitted Evidence"
-            >
-              <SubmittedEvidenceList auditId={control.auditId} controlId={control.id} />
-            </SectionCard>
+            {/* AI pre-review hint (advisory) above the reviewer's decision */}
+            {canReviewEvidence && (
+              <AIValidationCard auditId={control.auditId} controlId={control.id} variant="reviewer" />
+            )}
 
             {/* Internal Review */}
             <SectionCard
@@ -774,25 +804,27 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.7 }}>
                 Review the submitted evidence internally before passing it to the auditor.
               </Typography>
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                <Button
-                  variant="contained"
-                  disableElevation
-                  startIcon={<CheckCircle2 size={15} />}
-                  onClick={() => handleStatusChange(control, "EVIDENCE_UNDER_VALIDATION")}
-                  sx={{ textTransform: "none", fontWeight: 600, bgcolor: "#b45309", "&:hover": { bgcolor: "#92400e" } }}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<XCircle size={15} />}
-                  onClick={() => handleStatusChange(control, "EVIDENCE_PENDING")}
-                  sx={{ textTransform: "none", fontWeight: 600, color: "#dc2626", borderColor: "#dc2626", "&:hover": { borderColor: "#b91c1c", bgcolor: "rgba(220,38,38,0.04)" } }}
-                >
-                  Reject
-                </Button>
-              </Box>
+              {canReviewEvidence && control.status === "EVIDENCE_INTERNAL_REVIEW" && (
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                  <Button
+                    variant="contained"
+                    disableElevation
+                    startIcon={<CheckCircle2 size={15} />}
+                    onClick={() => handleStatusChange(control, "EVIDENCE_UNDER_VALIDATION")}
+                    sx={{ textTransform: "none", fontWeight: 600, bgcolor: "#b45309", "&:hover": { bgcolor: "#92400e" } }}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<XCircle size={15} />}
+                    onClick={() => handleStatusChange(control, "EVIDENCE_PENDING")}
+                    sx={{ textTransform: "none", fontWeight: 600, color: "#dc2626", borderColor: "#dc2626", "&:hover": { borderColor: "#b91c1c", bgcolor: "rgba(220,38,38,0.04)" } }}
+                  >
+                    Reject
+                  </Button>
+                </Box>
+              )}
             </SectionCard>
 
             {/* Auditor Validation */}
@@ -805,25 +837,27 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.7 }}>
                 Validate the submitted evidence and take a final decision on this control.
               </Typography>
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                <Button
-                  variant="contained"
-                  disableElevation
-                  startIcon={<CheckCircle2 size={15} />}
-                  onClick={() => handleStatusChange(control, "COMPLETE")}
-                  sx={{ textTransform: "none", fontWeight: 600, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<RotateCcw size={15} />}
-                  onClick={() => handleStatusChange(control, "EVIDENCE_NEED_CLARIFICATION")}
-                  sx={{ textTransform: "none", fontWeight: 600 }}
-                >
-                  Request Resubmission
-                </Button>
-              </Box>
+              {canReviewEvidence && control.status === "EVIDENCE_UNDER_VALIDATION" && (
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                  <Button
+                    variant="contained"
+                    disableElevation
+                    startIcon={<CheckCircle2 size={15} />}
+                    onClick={() => handleStatusChange(control, "COMPLETE")}
+                    sx={{ textTransform: "none", fontWeight: 600, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<RotateCcw size={15} />}
+                    onClick={() => handleStatusChange(control, "EVIDENCE_NEED_CLARIFICATION")}
+                    sx={{ textTransform: "none", fontWeight: 600 }}
+                  >
+                    Request Resubmission
+                  </Button>
+                </Box>
+              )}
             </SectionCard>
 
             {/* Comments */}

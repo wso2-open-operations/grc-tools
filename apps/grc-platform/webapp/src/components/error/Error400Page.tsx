@@ -35,7 +35,7 @@ export default function Error400Page({ message }: Error400PageProps): JSX.Elemen
       illustrationAlt="400 bad request illustration"
       description={
         message ??
-        "This request could not be processed. Check the link or try again from the portal navigation."
+        "This request could not be processed. Check the link or try again."
       }
     />
   );

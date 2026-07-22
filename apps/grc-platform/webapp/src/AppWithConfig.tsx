@@ -23,7 +23,8 @@ import { AsgardeoProvider } from "@asgardeo/react";
 import { loggerConfig } from "@config/loggerConfig";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import { authConfig } from "@config/authConfig";
-import { ThemePreferenceProvider, useThemePreference } from "@context/theme/ThemePreferenceContext";
+import { ThemePreferenceProvider } from "@context/theme/ThemePreferenceContext";
+import { useThemePreference } from "@context/theme/useThemePreference";
 
 /**
  * Custom retry function for React Query.

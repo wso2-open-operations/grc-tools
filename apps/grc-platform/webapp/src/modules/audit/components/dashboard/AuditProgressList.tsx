@@ -55,7 +55,10 @@ export default function AuditProgressList({ audits }: { audits: Audit[] }): JSX.
         return (
           <Box
             key={audit.id}
+            role="button"
+            tabIndex={0}
             onClick={() => void navigate(`/audit/audits/${audit.id}`)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void navigate(`/audit/audits/${audit.id}`); } }}
             sx={{
               cursor: "pointer",
               borderRadius: 1.5,
@@ -87,7 +90,7 @@ export default function AuditProgressList({ audits }: { audits: Audit[] }): JSX.
                   }}
                 />
               )}
-              <Typography variant="body2" color="text.secondary" sx={{ width: 74, textAlign: "right", flexShrink: 0 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ textAlign: "right", flexShrink: 0, whiteSpace: "nowrap" }}>
                 {approved}/{total} · {Math.round(pct)}%
               </Typography>
             </Box>

@@ -17,16 +17,16 @@
 import {
   AcrylicOrangeTheme,
   AcrylicPurpleTheme,
-  ChoreoTheme,
+  WSO2Theme,
   HighContrastTheme,
   ClassicTheme,
 } from "@wso2/oxygen-ui";
-import type { OxygenTheme } from "@wso2/oxygen-ui/styles/Themes/OxygenThemeBase";
+import type { OxygenTheme } from "@wso2/oxygen-ui/styles/OxygenThemeBase";
 
 export const themes: Record<string, OxygenTheme> = {
   acrylicOrange: AcrylicOrangeTheme,
   acrylicPurple: AcrylicPurpleTheme,
-  choreo: ChoreoTheme,
+  choreo: WSO2Theme,
   highContrast: HighContrastTheme,
   classic: ClassicTheme,
 };
@@ -34,7 +34,7 @@ export const themes: Record<string, OxygenTheme> = {
 export const THEME_OPTIONS: { key: string; label: string }[] = [
   { key: "acrylicOrange", label: "Acrylic Orange" },
   { key: "acrylicPurple", label: "Acrylic Purple" },
-  { key: "choreo", label: "Choreo" },
+  { key: "choreo", label: "WSO2" },
   { key: "highContrast", label: "High Contrast" },
   { key: "classic", label: "Classic" },
 ];

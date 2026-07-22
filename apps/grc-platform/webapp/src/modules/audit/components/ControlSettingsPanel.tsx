@@ -19,7 +19,6 @@ import {
   Autocomplete,
   Box,
   Button,
-  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -46,9 +45,9 @@ import {
 } from "@wso2/oxygen-ui";
 import { Pencil, Plus, Trash2, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
-import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import { useGetControls } from "@modules/audit/api/useGetControls";
 import { useGetUsers } from "@modules/audit/api/useGetUsers";
+import { useGetTeams } from "@modules/audit/api/useGetTeams";
 import { useAddControl } from "@modules/audit/api/useAddControl";
 import { useUpdateControl } from "@modules/audit/api/useUpdateControl";
 import { useDeleteControl } from "@modules/audit/api/useDeleteControl";
@@ -57,8 +56,10 @@ import { AuditPrivilege } from "@modules/audit/privileges";
 import type {
   AddControlRequest,
   AuditControl,
+  AuditTeam,
   ControlScope,
   ControlType,
+  PopulationDetails,
   RequirementType,
   UpdateControlRequest,
 } from "@modules/audit/types/audit";
@@ -76,6 +77,11 @@ interface ControlFormState {
   dueDate: string;
   owner: AuditUser | null;
   auditor: AuditUser | null;
+  populationDescription: string;
+  populationDueDate: string;
+  populationComments: string;
+  populationOwner: AuditUser | null;
+  populationTeam: AuditTeam | null;
 }
 
 const EMPTY_FORM: ControlFormState = {
@@ -88,9 +94,14 @@ const EMPTY_FORM: ControlFormState = {
   dueDate: "",
   owner: null,
   auditor: null,
+  populationDescription: "",
+  populationDueDate: "",
+  populationComments: "",
+  populationOwner: null,
+  populationTeam: null,
 };
 
-function controlToForm(c: AuditControl, users: AuditUser[]): ControlFormState {
+function controlToForm(c: AuditControl, users: AuditUser[], teams: AuditTeam[]): ControlFormState {
   return {
     controlNumber: c.controlNumber,
     description: c.description,
@@ -101,6 +112,11 @@ function controlToForm(c: AuditControl, users: AuditUser[]): ControlFormState {
     dueDate: c.dueDate ?? "",
     owner: users.find((u) => u.id === c.ownerId) ?? null,
     auditor: users.find((u) => u.id === c.auditorId) ?? null,
+    populationDescription: c.populationDescription ?? "",
+    populationDueDate: c.populationDueDate ?? "",
+    populationComments: c.populationComments ?? "",
+    populationOwner: users.find((u) => u.displayName === c.populationOwnerName) ?? null,
+    populationTeam: teams.find((t) => t.name === c.populationTeamName) ?? null,
   };
 }
 
@@ -111,8 +127,10 @@ interface ControlFormDialogProps {
   title: string;
   initialValues: ControlFormState;
   users: AuditUser[];
+  teams: AuditTeam[];
   isSaving: boolean;
   error: string | null;
+  editMode?: boolean;
   onSave: (form: ControlFormState) => void;
   onClose: () => void;
 }
@@ -122,8 +140,10 @@ function ControlFormDialog({
   title,
   initialValues,
   users,
+  teams,
   isSaving,
   error,
+  editMode = false,
   onSave,
   onClose,
 }: ControlFormDialogProps): JSX.Element {
@@ -135,8 +155,11 @@ function ControlFormDialog({
   const set = <K extends keyof ControlFormState>(key: K, val: ControlFormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: val }));
 
+  const isOE = form.requirementType === "OE";
   const isValid =
-    form.controlNumber.trim().length > 0 && form.description.trim().length > 0;
+    form.controlNumber.trim().length > 0 &&
+    form.description.trim().length > 0 &&
+    (!isOE || editMode || (form.populationDescription.trim().length > 0 && form.populationDueDate.length > 0));
 
   return (
     <Dialog
@@ -159,6 +182,7 @@ function ControlFormDialog({
               onChange={(e) => set("controlNumber", e.target.value)}
               size="small"
               sx={{ width: 160, flexShrink: 0 }}
+              InputProps={{ readOnly: editMode }}
             />
             <TextField
               label="Description"
@@ -179,6 +203,7 @@ function ControlFormDialog({
                 label="Req. Type"
                 value={form.requirementType}
                 onChange={(e) => set("requirementType", e.target.value as RequirementType)}
+                disabled={editMode}
               >
                 <MenuItem value="DESIGN">Design</MenuItem>
                 <MenuItem value="OE">OE</MenuItem>
@@ -210,7 +235,7 @@ function ControlFormDialog({
 
           <Stack direction="row" spacing={2}>
             <Autocomplete
-              options={users}
+              options={users.filter((u) => u.userType === "INTERNAL")}
               getOptionLabel={(u) => u.displayName}
               value={form.owner}
               onChange={(_e, val) => set("owner", val)}
@@ -219,7 +244,11 @@ function ControlFormDialog({
               renderInput={(params) => <TextField {...params} label="Process Owner" />}
             />
             <Autocomplete
-              options={users}
+              options={[...users].sort((a, b) => {
+                if (a.userType === b.userType) return a.displayName.localeCompare(b.displayName);
+                return a.userType === "EXTERNAL" ? -1 : 1;
+              })}
+              groupBy={(u) => u.userType === "EXTERNAL" ? "External Auditors" : "Internal"}
               getOptionLabel={(u) => u.displayName}
               value={form.auditor}
               onChange={(_e, val) => set("auditor", val)}
@@ -247,6 +276,71 @@ function ControlFormDialog({
             rows={3}
             fullWidth
           />
+
+          {isOE && !editMode && (
+            <>
+              <Divider>
+                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                  Population Details
+                </Typography>
+              </Divider>
+
+              <TextField
+                label="Population Requirement"
+                required
+                value={form.populationDescription}
+                onChange={(e) => set("populationDescription", e.target.value)}
+                size="small"
+                multiline
+                rows={3}
+                fullWidth
+                placeholder="Describe what records make up the population"
+              />
+
+              <TextField
+                label="Population Due Date"
+                type="date"
+                required
+                value={form.populationDueDate}
+                onChange={(e) => set("populationDueDate", e.target.value)}
+                size="small"
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+
+              <TextField
+                label="Population Comments"
+                value={form.populationComments}
+                onChange={(e) => set("populationComments", e.target.value)}
+                size="small"
+                multiline
+                rows={2}
+                fullWidth
+                placeholder="Any additional notes for the population submission"
+              />
+
+              <Stack direction="row" spacing={2}>
+                <Autocomplete
+                  options={users.filter((u) => u.userType === "INTERNAL")}
+                  getOptionLabel={(u) => u.displayName}
+                  value={form.populationOwner}
+                  onChange={(_e, val) => set("populationOwner", val)}
+                  size="small"
+                  sx={{ flex: 1 }}
+                  renderInput={(params) => <TextField {...params} label="Population Process Owner" />}
+                />
+                <Autocomplete
+                  options={teams}
+                  getOptionLabel={(t) => t.name}
+                  value={form.populationTeam}
+                  onChange={(_e, val) => set("populationTeam", val)}
+                  size="small"
+                  sx={{ flex: 1 }}
+                  renderInput={(params) => <TextField {...params} label="Population Team" />}
+                />
+              </Stack>
+            </>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>
@@ -331,6 +425,7 @@ export default function ControlSettingsPanel({
 
   const { data: controlsData, isLoading: controlsLoading } = useGetControls(auditId);
   const { data: users = [] } = useGetUsers();
+  const { data: teams = [] } = useGetTeams();
 
   const addMutation = useAddControl();
   const updateMutation = useUpdateControl();
@@ -345,6 +440,16 @@ export default function ControlSettingsPanel({
 
   function handleAdd(form: ControlFormState) {
     setMutationError(null);
+    const population: PopulationDetails | null =
+      form.requirementType === "OE"
+        ? {
+            description: form.populationDescription.trim(),
+            dueDate: form.populationDueDate || null,
+            comments: form.populationComments.trim() || null,
+            ownerId: form.populationOwner?.id ?? null,
+            teamId: form.populationTeam?.id ?? null,
+          }
+        : null;
     const req: AddControlRequest = {
       controlNumber: form.controlNumber.trim(),
       description: form.description.trim(),
@@ -356,6 +461,7 @@ export default function ControlSettingsPanel({
       ownerId: form.owner?.id ?? null,
       auditorId: form.auditor?.id ?? null,
       controlSource: 'MANUAL' as const,
+      population,
     };
     addMutation.mutate(
       { auditId, req },
@@ -370,9 +476,7 @@ export default function ControlSettingsPanel({
     if (!editingControl) return;
     setMutationError(null);
     const req: UpdateControlRequest = {
-      controlNumber: form.controlNumber.trim(),
       description: form.description.trim(),
-      requirementType: form.requirementType,
       controlType: form.controlType,
       scope: form.scope,
       evidenceRequirement: form.evidenceRequirement.trim() || null,
@@ -466,10 +570,9 @@ export default function ControlSettingsPanel({
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ fontWeight: 600, width: 90 }}>#</TableCell>
+                    <TableCell sx={{ fontWeight: 600, width: 90 }}>No.</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>Description</TableCell>
-                    <TableCell sx={{ fontWeight: 600, width: 90 }}>Type</TableCell>
-                    <TableCell sx={{ fontWeight: 600, width: 130 }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: 600, width: 90 }}>Req. Type</TableCell>
                     {canManage && (
                       <TableCell sx={{ fontWeight: 600, width: 80 }} align="right">
                         Actions
@@ -484,9 +587,6 @@ export default function ControlSettingsPanel({
                         <Typography variant="body2" fontWeight={600} noWrap>
                           {c.controlNumber}
                         </Typography>
-                        {c.controlSource === 'MANUAL' && (
-                          <Chip label="Manual" size="small" sx={{ fontSize: "0.65rem", height: 16, mt: 0.25 }} />
-                        )}
                       </TableCell>
                       <TableCell>
                         <Typography
@@ -506,10 +606,7 @@ export default function ControlSettingsPanel({
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="caption">{c.controlType === "CONFIG" ? "Config" : "Non-Config"}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <ControlStatusChip status={c.status} />
+                        <Typography variant="caption">{c.requirementType === "OE" ? "OE" : "Design"}</Typography>
                       </TableCell>
                       {canManage && (
                         <TableCell align="right">
@@ -563,6 +660,7 @@ export default function ControlSettingsPanel({
         title="Add Control"
         initialValues={EMPTY_FORM}
         users={users}
+        teams={teams}
         isSaving={addMutation.isPending}
         error={mutationError}
         onSave={handleAdd}
@@ -573,10 +671,12 @@ export default function ControlSettingsPanel({
       <ControlFormDialog
         open={editingControl !== null}
         title={`Edit ${editingControl?.controlNumber ?? ""}`}
-        initialValues={editingControl ? controlToForm(editingControl, users) : EMPTY_FORM}
+        initialValues={editingControl ? controlToForm(editingControl, users, teams) : EMPTY_FORM}
         users={users}
+        teams={teams}
         isSaving={updateMutation.isPending}
         error={mutationError}
+        editMode
         onSave={handleEdit}
         onClose={() => setEditingControl(null)}
       />

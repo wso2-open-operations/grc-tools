@@ -124,8 +124,9 @@ export interface AuditControl {
   createdAt: string;
   updatedAt: string;
   samples?: PopulationSample[];
-  // Population-phase fields (OE controls). Optional — populated by the backend
-  // control query via a LEFT JOIN on audit_population; absent controls render "—".
+  // Population-phase fields (OE controls). Joined from the initial audit_population record.
+  populationDescription?: string | null;
+  populationComments?: string | null;
   populationDueDate?: string | null;
   populationOwnerName?: string | null;
   populationTeamName?: string | null;
@@ -163,7 +164,22 @@ export interface PopulationDetails {
   teamId?: number | null;
 }
 
-export interface AddControlRequest {
+/** Template-linked: backend resolves controlNumber/description from the framework library row. */
+export interface TemplateLinkedControlRequest {
+  frameworkControlId: number;
+  controlSource: "COPIED";
+  requirementType: RequirementType;
+  controlType: ControlType;
+  scope: ControlScope;
+  dueDate?: string | null;
+  ownerId?: number | null;
+  teamId?: number | null;
+  auditorId?: number | null;
+  population?: PopulationDetails | null;
+}
+
+/** Explicit: caller supplies controlNumber + description directly (MANUAL, CSV, or audit-copy). */
+export interface ExplicitControlRequest {
   controlNumber: string;
   description: string;
   requirementType: RequirementType;
@@ -174,15 +190,14 @@ export interface AddControlRequest {
   ownerId?: number | null;
   teamId?: number | null;
   auditorId?: number | null;
-  frameworkControlId?: number | null;
   controlSource?: ControlSource;
   population?: PopulationDetails | null;
 }
 
+export type AddControlRequest = TemplateLinkedControlRequest | ExplicitControlRequest;
+
 export interface UpdateControlRequest {
-  controlNumber?: string;
   description?: string;
-  requirementType?: RequirementType;
   controlType?: ControlType;
   scope?: ControlScope;
   evidenceRequirement?: string | null;

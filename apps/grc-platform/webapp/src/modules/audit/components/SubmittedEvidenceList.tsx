@@ -14,12 +14,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { ExternalLink, FileText } from "@wso2/oxygen-ui-icons-react";
-import type { JSX } from "react";
-import { useGetEvidence } from "@modules/audit/api/useGetEvidence";
+import { Alert, Box, Button, CircularProgress, IconButton, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { ExternalLink, FileText, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { useState, type JSX } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useGetEvidence, evidenceQueryKey } from "@modules/audit/api/useGetEvidence";
+import { aiValidationQueryKey } from "@modules/audit/api/useGetAIValidation";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { BACKEND_BASE_URL } from "@config/apiConfig";
+import { formatTimestamp } from "@modules/audit/utils/format";
 
 function sizeLabel(bytes: number | null): string {
   if (bytes === null) return "";
@@ -28,43 +31,55 @@ function sizeLabel(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// createdAt is a full ISO timestamp (not a YYYY-MM-DD date), so parse it directly.
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return (
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
-    " " +
-    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  );
-}
-
 /**
- * Lists the files a team submitted for a control so a reviewer can open/download
- * each one. Uses the short-lived read SAS URL returned by the backend.
+ * Lists the files a team submitted for a control so they can be viewed/downloaded.
+ * Pass `canDelete` to show per-file remove buttons (submitter view at step 1).
  */
 export default function SubmittedEvidenceList({
   auditId,
   controlId,
+  canDelete = false,
 }: {
   auditId: number;
   controlId: number;
+  canDelete?: boolean;
 }): JSX.Element {
   const { data, isLoading, isError } = useGetEvidence(auditId, controlId, true);
   const authFetch = useAuthApiClient();
+  const queryClient = useQueryClient();
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // readUrl is a backend download endpoint (not a public link). Fetch it with the
-  // auth token, then open the returned bytes — the browser never contacts Azure.
   async function handleView(readUrl: string): Promise<void> {
+    setDownloadError(null);
     try {
       const res = await authFetch(`${BACKEND_BASE_URL}${readUrl}`);
-      if (!res.ok) throw new Error(`download failed (${res.status})`);
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       window.open(objectUrl, "_blank", "noopener,noreferrer");
       setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-    } catch {
-      // best-effort; the "View" simply does nothing if the download fails
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Failed to download file");
+    }
+  }
+
+  async function handleDelete(fileId: number, evidenceId: number): Promise<void> {
+    setDeleteError(null);
+    setDeletingId(fileId);
+    try {
+      const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/evidence/files/${fileId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || `Failed to remove file (${res.status})`);
+      }
+      await queryClient.invalidateQueries({ queryKey: evidenceQueryKey(auditId, controlId) });
+      void queryClient.invalidateQueries({ queryKey: aiValidationQueryKey(evidenceId) });
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to remove file");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -76,7 +91,6 @@ export default function SubmittedEvidenceList({
   }
 
   const submissions = data ?? [];
-  // files can be null (a submission round with no files serialises to JSON null).
   const totalFiles = submissions.reduce((n, s) => n + (s.files?.length ?? 0), 0);
 
   if (totalFiles === 0) {
@@ -85,6 +99,15 @@ export default function SubmittedEvidenceList({
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      {(downloadError ?? deleteError) && (
+        <Alert
+          severity="error"
+          onClose={() => { setDownloadError(null); setDeleteError(null); }}
+          sx={{ fontSize: "0.8rem" }}
+        >
+          {downloadError ?? deleteError}
+        </Alert>
+      )}
       {submissions.map((sub) => (
         <Box key={sub.id} sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
@@ -113,6 +136,19 @@ export default function SubmittedEvidenceList({
                 </Button>
               ) : (
                 <Typography variant="caption" color="text.disabled">unavailable</Typography>
+              )}
+              {canDelete && (
+                <IconButton
+                  size="small"
+                  aria-label={`Remove ${f.fileName}`}
+                  disabled={deletingId !== null}
+                  onClick={() => { void handleDelete(f.id, sub.id); }}
+                  sx={{ p: 0.5, color: "error.main", "&:hover": { bgcolor: "rgba(220,38,38,0.06)" } }}
+                >
+                  {deletingId === f.id
+                    ? <CircularProgress size={13} color="inherit" />
+                    : <Trash2 size={14} />}
+                </IconButton>
               )}
             </Box>
           ))}

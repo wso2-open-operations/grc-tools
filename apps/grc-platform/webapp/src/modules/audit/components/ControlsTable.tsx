@@ -349,6 +349,8 @@ interface ColumnDef {
   searchableFilter?: boolean;
   alwaysVisible?: boolean;
   defaultHidden?: boolean;
+  /** Greedy column — absorbs the table's leftover horizontal space. */
+  grow?: boolean;
   render: (c: AuditControl) => ReactNode;
 }
 
@@ -390,7 +392,7 @@ export default function ControlsTable({
   visibleColumnIds,
 }: ControlsTableProps): JSX.Element {
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPage, setRowsPerPage] = useState(50);
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<ListingTableSortDirection>("asc");
 
@@ -412,11 +414,15 @@ export default function ControlsTable({
   const columns: ColumnDef[] = [
     { id: "controlNumber", label: "Control No.", minWidth: 90, sortField: "controlNumber", alwaysVisible: true,
       render: (c) => <Typography variant="body2" fontWeight={600} noWrap>{c.controlNumber}</Typography> },
-    { id: "description", label: "Description", minWidth: 240, sortField: "description",
+    { id: "description", label: "Description", minWidth: 240, sortField: "description", grow: true,
       render: (c) => (
-        <Typography variant="body2" sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", maxWidth: 340 }}>
-          {c.description}
-        </Typography>
+        // Clamp to 2 lines to keep rows compact; the column grows to fill leftover
+        // width (see `grow`), and full text is on hover + the row-click drawer.
+        <Tooltip title={c.description ?? ""} arrow placement="top-start" slotProps={{ tooltip: { sx: { maxWidth: 460 } } }}>
+          <Typography variant="body2" sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            {c.description}
+          </Typography>
+        </Tooltip>
       ) },
     { id: "requirementType", label: "Req. Type", minWidth: 110, sortField: "requirementType",
       filterKey: "requirementType", filterOptions: REQ_TYPE_OPTIONS,
@@ -526,7 +532,7 @@ export default function ControlsTable({
             <ListingTable.Head>
               <ListingTable.Row>
                 {visibleColumns.map((col) => (
-                  <ListingTable.Cell key={col.id} sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: col.minWidth }}>
+                  <ListingTable.Cell key={col.id} sx={{ fontWeight: 600, whiteSpace: "nowrap", minWidth: col.minWidth, width: col.grow ? "100%" : undefined }}>
                     {col.filterKey ? (
                       <Box sx={{ display: "flex", alignItems: "center" }}>
                         <ListingTable.SortLabel field={col.sortField}>{col.label}</ListingTable.SortLabel>
@@ -564,7 +570,7 @@ export default function ControlsTable({
                     sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
                   >
                     {visibleColumns.map((col) => (
-                      <ListingTable.Cell key={col.id}>{col.render(control)}</ListingTable.Cell>
+                      <ListingTable.Cell key={col.id} sx={{ width: col.grow ? "100%" : undefined }}>{col.render(control)}</ListingTable.Cell>
                     ))}
                   </ListingTable.Row>
                 ))

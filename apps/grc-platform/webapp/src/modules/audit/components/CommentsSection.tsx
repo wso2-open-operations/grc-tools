@@ -31,16 +31,7 @@ import { Lock, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useGetEvidence } from "@modules/audit/api/useGetEvidence";
 import { useAddComment, useGetComments } from "@modules/audit/api/useComments";
-
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return (
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
-    " " +
-    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  );
-}
+import { formatTimestamp } from "@modules/audit/utils/format";
 
 /**
  * Comments on a control's latest evidence submission. Ticking "Internal only"

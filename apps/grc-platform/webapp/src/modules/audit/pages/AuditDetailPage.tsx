@@ -158,7 +158,12 @@ export default function AuditDetailPage(): JSX.Element {
   const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(CONTROL_COLUMNS_STORAGE_KEY);
-      if (stored) return JSON.parse(stored) as string[];
+      if (stored) {
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) {
+          return parsed as string[];
+        }
+      }
     } catch { /* ignore malformed storage */ }
     return DEFAULT_VISIBLE_CONTROL_COLUMNS;
   });

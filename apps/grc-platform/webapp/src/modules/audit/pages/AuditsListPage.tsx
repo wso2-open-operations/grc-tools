@@ -35,6 +35,7 @@ import {
   Snackbar,
   TextField,
   Typography,
+  useTheme,
 } from "@wso2/oxygen-ui";
 import { AlertTriangle, ChevronLeft, Plus, Search, ShieldCheck, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
@@ -65,14 +66,11 @@ function filterByStatus(audits: Audit[], statusFilter: StatusFilter): Audit[] {
 
 // ── Framework identity ────────────────────────────────────────────────────────
 
-const FRAMEWORK_PALETTE = ["#1E88E5", "#8E24AA", "#00897B", "#E53935", "#FB8C00", "#3949AB"];
-
-// Deterministic accent color per framework name so cards keep their identity.
-function frameworkColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return FRAMEWORK_PALETTE[Math.abs(hash) % FRAMEWORK_PALETTE.length];
-}
+// Framework card left border follows AuditCard's STATUS_ACCENT convention:
+// green when the framework has active audits, grey when it has none. The icon
+// and progress bars use the active theme's primary colour.
+const FRAMEWORK_ACTIVE_ACCENT = "#2E7D32";
+const FRAMEWORK_IDLE_ACCENT = "#757575";
 
 // Number of active audits previewed on a framework card before "+N more".
 const FRAMEWORK_CARD_PREVIEW = 3;
@@ -89,7 +87,9 @@ interface FrameworkCardProps {
 // FrameworkCard mirrors AuditCard's skeleton (accent border, chip row, title,
 // meta line, divider, progress footer) so the drill-in feels seamless.
 function FrameworkCard({ framework, activeAudits, hasAudits, onClick }: FrameworkCardProps): JSX.Element {
-  const color = frameworkColor(framework.name);
+  const theme = useTheme();
+  const color = theme.palette.primary.main;
+  const borderAccent = activeAudits.length > 0 ? FRAMEWORK_ACTIVE_ACCENT : FRAMEWORK_IDLE_ACCENT;
   const overdue = activeAudits.reduce((s, a) => s + a.controlCounts.overdue, 0);
   const preview = activeAudits.slice(0, FRAMEWORK_CARD_PREVIEW);
   const moreCount = activeAudits.length - preview.length;
@@ -99,7 +99,7 @@ function FrameworkCard({ framework, activeAudits, hasAudits, onClick }: Framewor
       variant="outlined"
       sx={{
         height: "100%",
-        borderLeft: `3px solid ${color}`,
+        borderLeft: `3px solid ${borderAccent}`,
         transition: "box-shadow 0.2s",
         "&:hover": { boxShadow: 4 },
       }}
@@ -126,9 +126,9 @@ function FrameworkCard({ framework, activeAudits, hasAudits, onClick }: Framewor
                   size="small"
                   sx={{
                     fontWeight: 700,
-                    color: "#E53935", bgcolor: "rgba(229,57,53,0.12)",
-                    "[data-color-scheme='dark'] &": { bgcolor: "rgba(229,57,53,0.25)" },
-                    "& .MuiChip-icon": { color: "#E53935" },
+                    color: "#EF4444", bgcolor: "rgba(239,68,68,0.12)",
+                    "[data-color-scheme='dark'] &": { bgcolor: "rgba(239,68,68,0.25)" },
+                    "& .MuiChip-icon": { color: "#EF4444" },
                   }}
                 />
               )}
@@ -145,8 +145,9 @@ function FrameworkCard({ framework, activeAudits, hasAudits, onClick }: Framewor
             </Box>
           </Box>
 
-          {/* Framework name — same slot as the audit name */}
-          <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.3, mt: -0.5 }}>
+          {/* Framework name — heading variant (h5) so its font metrics match the
+              page title / header brand instead of an oversized h6. */}
+          <Typography variant="h5" sx={{ fontWeight: 700, lineHeight: 1.3, mt: -0.5 }}>
             {framework.name}
           </Typography>
 
@@ -281,13 +282,20 @@ export default function AuditsListPage(): JSX.Element {
   const [archiveSnack, setArchiveSnack] = useState<{ severity: "success" | "error"; message: string } | null>(null);
   const handleArchiveToggle = (audit: Audit) => {
     const archiving = audit.status !== "ARCHIVED";
+    // We don't persist the pre-archive status, so infer the restore target from
+    // completion: a fully-approved audit returns to Completed, otherwise Active.
+    const { total, approved } = audit.controlCounts;
+    const restoreStatus: AuditStatus = total > 0 && approved === total ? "COMPLETED" : "ACTIVE";
+    const targetStatus: AuditStatus = archiving ? "ARCHIVED" : restoreStatus;
     updateAuditStatus.mutate(
-      { auditId: audit.id, status: archiving ? "ARCHIVED" : "ACTIVE" },
+      { auditId: audit.id, status: targetStatus },
       {
         onSuccess: () =>
           setArchiveSnack({
             severity: "success",
-            message: archiving ? `"${audit.name}" archived.` : `"${audit.name}" restored to active.`,
+            message: archiving
+              ? `"${audit.name}" archived.`
+              : `"${audit.name}" restored to ${restoreStatus === "COMPLETED" ? "completed" : "active"}.`,
           }),
         onError: () =>
           setArchiveSnack({
@@ -468,9 +476,6 @@ export default function AuditsListPage(): JSX.Element {
             </Box>
           ) : (
             <>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Select a framework to view its audits
-              </Typography>
               <Box
                 sx={{
                   display: "grid",

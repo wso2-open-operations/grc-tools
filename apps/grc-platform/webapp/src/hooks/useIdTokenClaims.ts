@@ -28,9 +28,11 @@ export function useIdTokenClaims(): Record<string, unknown> | null {
       setClaims(null);
       return;
     }
+    let active = true;
     getDecodedIdToken()
-      .then((token) => setClaims(token as Record<string, unknown>))
-      .catch(() => setClaims(null));
+      .then((token) => { if (active) setClaims(token as Record<string, unknown>); })
+      .catch(() => { if (active) setClaims(null); });
+    return () => { active = false; };
   }, [isSignedIn, getDecodedIdToken]);
 
   return claims;

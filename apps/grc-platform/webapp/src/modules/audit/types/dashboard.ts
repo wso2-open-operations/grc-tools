@@ -27,6 +27,8 @@ export interface DashboardStats {
   overdueControls: number;
   evidenceRequiredControls: number;
   completionPercent: number;
+  /** Absent from older backends; treat as 0 if missing. */
+  totalActionItems?: number;
 }
 
 export interface StatusCount {
@@ -38,6 +40,15 @@ export interface TeamCompletion {
   team: string;
   completed: number;
   total: number;
+  /** Controls past due and not yet complete. May be absent from an older backend. */
+  overdue?: number;
+}
+
+/** One team's control count for a single status — feeds the team drill-down. */
+export interface TeamStatusCount {
+  team: string;
+  status: string;
+  count: number;
 }
 
 export interface ActionItem {
@@ -48,6 +59,10 @@ export interface ActionItem {
   description: string;
   status: string;
   dueDate: string;
+  team: string;
+  processOwner: string;
+  teamId?: number | null;
+  ownerId?: number | null;
 }
 
 export interface OverdueControl {
@@ -58,6 +73,10 @@ export interface OverdueControl {
   description: string;
   status: string;
   dueDate: string;
+  team: string;
+  processOwner: string;
+  teamId?: number | null;
+  ownerId?: number | null;
 }
 
 export interface DashboardData {
@@ -65,6 +84,10 @@ export interface DashboardData {
   stats: DashboardStats;
   statusDistribution: StatusCount[];
   teamCompletion: TeamCompletion[];
+  /** Optional: absent until the entity/backend ship the additive field. */
+  teamStatusDistribution?: TeamStatusCount[];
   actionItems: ActionItem[];
+  /** Action items due within 7 days — fetched independently so LIMIT on actionItems doesn't affect this. */
+  dueSoonItems: ActionItem[];
   overdueControls: OverdueControl[];
 }

@@ -23,6 +23,7 @@ export interface AuditUser {
   id: number;
   displayName: string;
   email: string | null;
+  userType: "INTERNAL" | "EXTERNAL";
   /** Thumbnail photo URL, or null if not set. */
   profileUrl: string | null;
 }

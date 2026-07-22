@@ -26,12 +26,15 @@ import AuditProgressList from "@modules/audit/components/dashboard/AuditProgress
 import HeroBand from "@modules/audit/components/dashboard/HeroBand";
 import KpiCards from "@modules/audit/components/dashboard/KpiCards";
 import PhaseDonut from "@modules/audit/components/dashboard/PhaseDonut";
+import PhaseInsightDialog from "@modules/audit/components/dashboard/PhaseInsightDialog";
 import TeamProgress from "@modules/audit/components/dashboard/TeamProgress";
+import TeamInsightDialog from "@modules/audit/components/dashboard/TeamInsightDialog";
 import WorkQueue, {
   QUEUE_TAB_AWAITING,
   QUEUE_TAB_OVERDUE,
 } from "@modules/audit/components/dashboard/WorkQueue";
-import { DUE_SOON_DAYS, dueInfo } from "@modules/audit/components/dashboard/dueDate";
+import type { ControlPhase } from "@modules/audit/utils/controlStatus";
+import type { TeamCompletion } from "@modules/audit/types/dashboard";
 
 // ── Section card ──────────────────────────────────────────────────────────────
 
@@ -82,6 +85,10 @@ export default function AuditDashboard(): JSX.Element {
   const [queueTab, setQueueTab] = useState(QUEUE_TAB_AWAITING);
   const [queueHighlight, setQueueHighlight] = useState(false);
 
+  // Chart drill-downs.
+  const [selectedPhase, setSelectedPhase] = useState<ControlPhase | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<{ team: TeamCompletion; color: string } | null>(null);
+
   const jumpToQueue = (tab: number) => {
     setQueueTab(tab);
     queueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -99,19 +106,16 @@ export default function AuditDashboard(): JSX.Element {
     );
   }
 
-  const { auditStats, stats, statusDistribution, teamCompletion, actionItems, overdueControls } = data;
+  const { auditStats, stats, statusDistribution, teamCompletion } = data;
 
   // Privilege-driven gating (never role names).
   const canSubmit = can(AuditPrivilege.SubmitEvidence);
   const canApprove = can(AuditPrivilege.ReviewEvidence);
   const hasQueue = canSubmit || canApprove;
   const queueTitle = canApprove ? "Review Queue" : canSubmit ? "My Tasks" : "Action Items";
-  const awaitingCount = hasQueue ? actionItems.length : null;
+  const awaitingCount = hasQueue ? stats.totalActionItems : null;
 
-  const dueSoonCount = actionItems.filter((i) => {
-    const d = dueInfo(i.dueDate).days;
-    return d >= 0 && d <= DUE_SOON_DAYS;
-  }).length;
+  const dueSoonCount = data.dueSoonItems?.length ?? 0;
 
   const userName =
     (claims?.given_name as string | undefined) ??
@@ -127,7 +131,7 @@ export default function AuditDashboard(): JSX.Element {
         completionPercent={stats.completionPercent}
         activeAudits={auditStats.activeAudits}
         totalControls={stats.totalControls}
-        overdueCount={overdueControls.length}
+        overdueCount={stats.overdueControls}
         dueSoonCount={dueSoonCount}
         awaitingCount={awaitingCount}
         awaitingLabel={canApprove ? "to review" : "to submit"}
@@ -150,13 +154,16 @@ export default function AuditDashboard(): JSX.Element {
       {/* ③ Charts row */}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr 1fr" }, gap: 2 }}>
         <SectionCard title="Controls by Phase">
-          <PhaseDonut data={statusDistribution} />
+          <PhaseDonut data={statusDistribution} onPhaseClick={setSelectedPhase} />
         </SectionCard>
         <SectionCard title="Audit Progress">
           <AuditProgressList audits={auditsData?.items ?? []} />
         </SectionCard>
         <SectionCard title="Team Progress">
-          <TeamProgress data={teamCompletion} />
+          <TeamProgress
+            data={teamCompletion}
+            onTeamClick={(team, color) => setSelectedTeam({ team, color })}
+          />
         </SectionCard>
       </Box>
 
@@ -173,8 +180,9 @@ export default function AuditDashboard(): JSX.Element {
       >
         <SectionCard title="Work Queue">
           <WorkQueue
-            actionItems={actionItems}
-            overdueControls={overdueControls}
+            totalActionItems={stats.totalActionItems ?? 0}
+            totalDueSoonItems={dueSoonCount}
+            totalOverdueControls={stats.overdueControls}
             canApprove={canApprove}
             queueTitle={queueTitle}
             tab={queueTab}
@@ -182,6 +190,19 @@ export default function AuditDashboard(): JSX.Element {
           />
         </SectionCard>
       </Box>
+
+      {/* Drill-down dialogs */}
+      <PhaseInsightDialog
+        phase={selectedPhase}
+        statusDistribution={statusDistribution}
+        onClose={() => setSelectedPhase(null)}
+      />
+      <TeamInsightDialog
+        team={selectedTeam?.team ?? null}
+        color={selectedTeam?.color ?? "#1E88E5"}
+        teamStatusDistribution={data.teamStatusDistribution ?? []}
+        onClose={() => setSelectedTeam(null)}
+      />
 
     </Box>
   );

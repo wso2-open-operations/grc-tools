@@ -97,6 +97,8 @@ type DashboardControlItem struct {
 	DueDate       string `json:"dueDate"`
 	Team          string `json:"team"`
 	ProcessOwner  string `json:"processOwner"`
+	TeamID        *int   `json:"teamId"`
+	OwnerID       *int   `json:"ownerId"`
 }
 
 // WorkQueueTab identifies which sub-list the caller wants.
@@ -113,8 +115,10 @@ type WorkQueueRequest struct {
 	Roles     []string     `json:"roles"`
 	UserEmail string       `json:"userEmail"`
 	Tab       WorkQueueTab `json:"tab"`
-	Page      int          `json:"page"`  // 1-based
-	Limit     int          `json:"limit"` // rows per page; capped at 100 server-side
+	Page      int          `json:"page"`    // 1-based
+	Limit     int          `json:"limit"`   // rows per page; capped at 100 server-side
+	TeamIDs   []int        `json:"teamIds"` // filter by audit_team.id; nil/empty = all teams
+	OwnerIDs  []int        `json:"ownerIds"` // filter by user.id (process owner); nil/empty = all owners
 }
 
 // PrimaryRole re-uses the same priority logic as AuditDashboardRequest.

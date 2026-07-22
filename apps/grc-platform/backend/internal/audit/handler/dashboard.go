@@ -80,6 +80,16 @@ func (h *dashboardHandler) getWorkQueue(w http.ResponseWriter, r *http.Request) 
 	if limit > 100 {
 		limit = 100
 	}
+	for _, v := range q["teamIds"] {
+		if id, err := strconv.Atoi(v); err == nil {
+			f.TeamIDs = append(f.TeamIDs, id)
+		}
+	}
+	for _, v := range q["ownerIds"] {
+		if id, err := strconv.Atoi(v); err == nil {
+			f.OwnerIDs = append(f.OwnerIDs, id)
+		}
+	}
 
 	p, err := h.svc.GetWorkQueuePage(r.Context(), f, tab, page, limit)
 	if err != nil {

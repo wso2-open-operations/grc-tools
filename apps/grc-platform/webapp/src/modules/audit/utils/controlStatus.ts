@@ -60,27 +60,27 @@ export const PHASE_LABELS: Record<ControlPhase, string> = {
 };
 
 export const PHASE_COLORS: Record<ControlPhase, string> = {
-  NOT_STARTED: "#94A3B8",
-  IN_PROGRESS: "#3B82F6",
-  BLOCKED:     "#EF4444",
-  COMPLETE:    "#22C55E",
+  NOT_STARTED: "#94A3B8", // slate  — neutral / not started
+  IN_PROGRESS: "#6366F1", // indigo — active work
+  BLOCKED:     "#EF4444", // red    — needs clarification
+  COMPLETE:    "#10B981", // emerald — done
 };
 
 export const PHASE_ORDER: ControlPhase[] = ["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "COMPLETE"];
 
 export const CONTROL_STATUS_COLORS: Record<ControlStatus, string> = {
   // OE population phase
-  POPULATION_PENDING:            "#6b7280",
-  POPULATION_INTERNAL_REVIEW:    "#b45309",
-  POPULATION_UNDER_VALIDATION:   "#7c3aed",
-  POPULATION_NEED_CLARIFICATION: "#dc2626",
-  POPULATION_COMPLETE:           "#0891b2",
-  AWAITING_SAMPLE:               "#0369a1",
-  SUBMITTED_SAMPLE:              "#0284c7",
+  POPULATION_PENDING:            "#94A3B8", // slate   — not started
+  POPULATION_INTERNAL_REVIEW:    "#F59E0B", // amber   — under internal review
+  POPULATION_UNDER_VALIDATION:   "#8B5CF6", // violet  — auditor reviewing
+  POPULATION_NEED_CLARIFICATION: "#EF4444", // red     — blocked
+  POPULATION_COMPLETE:           "#14B8A6", // teal    — population approved
+  AWAITING_SAMPLE:               "#14B8A6", // teal    — waiting on auditor (same phase)
+  SUBMITTED_SAMPLE:              "#6366F1", // indigo  — sample sent, team to submit evidence
   // Evidence phase
-  EVIDENCE_PENDING:              "#ea580c",
-  EVIDENCE_INTERNAL_REVIEW:      "#b45309",
-  EVIDENCE_UNDER_VALIDATION:     "#7c3aed",
-  EVIDENCE_NEED_CLARIFICATION:   "#dc2626",
-  COMPLETE:                      "#16a34a",
+  EVIDENCE_PENDING:              "#F59E0B", // amber   — team yet to submit
+  EVIDENCE_INTERNAL_REVIEW:      "#6366F1", // indigo  — under internal review
+  EVIDENCE_UNDER_VALIDATION:     "#8B5CF6", // violet  — auditor reviewing
+  EVIDENCE_NEED_CLARIFICATION:   "#EF4444", // red     — blocked
+  COMPLETE:                      "#10B981", // emerald — approved & closed
 };
