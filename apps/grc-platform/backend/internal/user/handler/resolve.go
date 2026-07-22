@@ -21,6 +21,8 @@ import (
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 	userentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user"
 )
 
@@ -34,8 +36,17 @@ type resolveUserRequest struct {
 // the user row on the fly if one doesn't exist yet. Used wherever a form
 // needs to assign any employee — not just an existing grc-platform
 // user — to an FK field (e.g. a risk's Action Owner).
+//
+// This writes, so it is gated. The privileges are the risk module's because
+// that is the only flow that calls it: an employee is resolved to a user id
+// while creating or editing a risk. Either privilege is enough — a user who
+// may only edit still has to assign an action owner.
 func handleResolveUser(repo userentity.Repository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !auth.RequireAnyPrivilege(r.Context(), w, privilege.CreateRisk, privilege.UpdateRisk) {
+			return
+		}
+
 		var req resolveUserRequest
 		if err := response.DecodeJSON(w, r, &req); err != nil {
 			return
