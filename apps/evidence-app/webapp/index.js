@@ -1,6 +1,6 @@
 // Production web server for Choreo.
 //
-// Serves the built Vite app from ./dist and proxies /api and /uploads to the
+// Serves the built Vite app from ./dist and proxies /api to the
 // backend. The Authorization: Bearer header is forwarded unchanged so the
 // backend can validate the Asgardeo token itself.
 import http from 'http';
@@ -91,7 +91,7 @@ function serveStatic(req, res) {
 http
   .createServer((req, res) => {
     const url = req.url.split('?')[0];
-    if (url.startsWith('/api') || url.startsWith('/uploads')) {
+    if (url.startsWith('/api')) {
       proxyToBackend(req, res);
     } else {
       serveStatic(req, res);

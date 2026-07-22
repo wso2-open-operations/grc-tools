@@ -14,7 +14,6 @@ export default defineConfig({
         target: 'http://localhost:8000',
         rewrite: (path) => path.replace(/\/$/, ''),
       },
-      '/uploads': 'http://localhost:8000',
     },
   },
 })

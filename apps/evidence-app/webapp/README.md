@@ -17,7 +17,7 @@ npm install --legacy-peer-deps
 npm run dev                    # http://localhost:5173
 ```
 
-The Vite dev server proxies `/api` and `/uploads` to `http://localhost:8000`
+The Vite dev server proxies `/api` to `http://localhost:8000`
 (see `vite.config.ts`), so no CORS setup is needed locally. Sign-in always goes
 through Asgardeo, locally and in production.
 
@@ -28,8 +28,8 @@ npm run build     # tsc + vite build → dist/
 npm start         # node index.js — serves dist/ and proxies to the backend
 ```
 
-`index.js` reads **`BACKEND_URL`** from the environment and proxies `/api` and
-`/uploads` to it (falling back to `http://localhost:8000` for local use). On
+`index.js` reads **`BACKEND_URL`** from the environment and proxies `/api`
+to it (falling back to `http://localhost:8000` for local use). On
 Choreo, set `BACKEND_URL` to the backend component's public gateway URL.
 
 ## Environment variables
