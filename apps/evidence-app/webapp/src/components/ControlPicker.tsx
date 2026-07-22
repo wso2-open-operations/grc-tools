@@ -17,6 +17,7 @@ import Tooltip from "@mui/material/Tooltip";
 import { PlusIcon, PenToSquareIcon, TrashIcon } from "@oxygen-ui/react-icons";
 import { controlsApi, evidenceApi, submissionsApi } from "../api/client";
 import ConfirmDeleteDialog from "./ConfirmDeleteDialog";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 
 type Control = {
   id: number;
@@ -62,6 +63,7 @@ export default function ControlPicker({
   helperText,
 }: Props) {
   const queryClient = useQueryClient();
+  const { isAdmin } = useCurrentUser();
   const [createOpen, setCreateOpen] = useState(false);
   const [createInitialText, setCreateInitialText] = useState("");
   const [editTarget, setEditTarget] = useState<Control | null>(null);
@@ -129,7 +131,7 @@ export default function ControlPicker({
         disabled={effectivelyDisabled}
         filterOptions={(options, params) => {
           const filtered = filter(options, params);
-          if (params.inputValue.trim() !== "") {
+          if (isAdmin && params.inputValue.trim() !== "") {
             const exact = options.some(
               (o) =>
                 !("isCreate" in o && o.isCreate) &&
@@ -207,34 +209,38 @@ export default function ControlPicker({
                     </Typography>
                   )}
                 </Box>
-                <Tooltip title="Edit">
-                  <IconButton
-                    size="small"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      setEditTarget(option as Control);
-                    }}
-                  >
-                    <PenToSquareIcon size={14} />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Delete">
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      setDeleteError(null);
-                      setDeleteTarget(option as Control);
-                    }}
-                  >
-                    <TrashIcon size={14} />
-                  </IconButton>
-                </Tooltip>
+                {isAdmin && (
+                  <Tooltip title="Edit">
+                    <IconButton
+                      size="small"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setEditTarget(option as Control);
+                      }}
+                    >
+                      <PenToSquareIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {isAdmin && (
+                  <Tooltip title="Delete">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDeleteError(null);
+                        setDeleteTarget(option as Control);
+                      }}
+                    >
+                      <TrashIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Stack>
             </li>
           );

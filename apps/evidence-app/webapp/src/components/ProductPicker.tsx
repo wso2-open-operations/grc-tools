@@ -20,6 +20,7 @@ import Tooltip from "@mui/material/Tooltip";
 import { PlusIcon, PenToSquareIcon, TrashIcon } from "@oxygen-ui/react-icons";
 import { productsApi, frameworksApi, controlsApi, evidenceApi, submissionsApi } from "../api/client";
 import ConfirmDeleteDialog from "./ConfirmDeleteDialog";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 
 type Product = { id: number; name: string; description?: string | null };
 type Framework = { id: number; product_id: number };
@@ -55,6 +56,7 @@ export default function ProductPicker({
   fullWidth = true,
 }: Props) {
   const queryClient = useQueryClient();
+  const { isAdmin } = useCurrentUser();
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
@@ -150,44 +152,50 @@ export default function ProductPicker({
                 <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {p.name}
                 </Box>
-                <Tooltip title="Edit">
-                  <IconButton
-                    size="small"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditTarget(p);
-                    }}
-                  >
-                    <PenToSquareIcon size={14} />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Delete">
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteError(null);
-                      setDeleteTarget(p);
-                    }}
-                  >
-                    <TrashIcon size={14} />
-                  </IconButton>
-                </Tooltip>
+                {isAdmin && (
+                  <Tooltip title="Edit">
+                    <IconButton
+                      size="small"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditTarget(p);
+                      }}
+                    >
+                      <PenToSquareIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {isAdmin && (
+                  <Tooltip title="Delete">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteError(null);
+                        setDeleteTarget(p);
+                      }}
+                    >
+                      <TrashIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Stack>
             </MenuItem>
           ))}
-          <Divider />
-          <MenuItem value={SENTINEL_CREATE} sx={{ color: "primary.main" }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <PlusIcon size={16} />
-              <Typography variant="body2" fontWeight={600}>
-                Add new product...
-              </Typography>
-            </Stack>
-          </MenuItem>
+          {isAdmin && [
+            <Divider key="div" />,
+            <MenuItem key="create" value={SENTINEL_CREATE} sx={{ color: "primary.main" }}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <PlusIcon size={16} />
+                <Typography variant="body2" fontWeight={600}>
+                  Add new product...
+                </Typography>
+              </Stack>
+            </MenuItem>,
+          ]}
         </Select>
         {helperText && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>

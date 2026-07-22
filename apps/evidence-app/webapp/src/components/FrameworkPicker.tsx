@@ -20,6 +20,7 @@ import Tooltip from "@mui/material/Tooltip";
 import { PlusIcon, PenToSquareIcon, TrashIcon } from "@oxygen-ui/react-icons";
 import { frameworksApi, controlsApi, evidenceApi, submissionsApi } from "../api/client";
 import ConfirmDeleteDialog from "./ConfirmDeleteDialog";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 
 type Framework = { id: number; product_id: number; name: string; description?: string | null };
 type Control = { id: number; framework_id: number };
@@ -50,6 +51,7 @@ export default function FrameworkPicker({
   helperText,
 }: Props) {
   const queryClient = useQueryClient();
+  const { isAdmin } = useCurrentUser();
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Framework | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Framework | null>(null);
@@ -134,36 +136,40 @@ export default function FrameworkPicker({
                 <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {f.name}
                 </Box>
-                <Tooltip title="Edit">
-                  <IconButton
-                    size="small"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditTarget(f);
-                    }}
-                  >
-                    <PenToSquareIcon size={14} />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Delete">
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteError(null);
-                      setDeleteTarget(f);
-                    }}
-                  >
-                    <TrashIcon size={14} />
-                  </IconButton>
-                </Tooltip>
+                {isAdmin && (
+                  <Tooltip title="Edit">
+                    <IconButton
+                      size="small"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditTarget(f);
+                      }}
+                    >
+                      <PenToSquareIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {isAdmin && (
+                  <Tooltip title="Delete">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteError(null);
+                        setDeleteTarget(f);
+                      }}
+                    >
+                      <TrashIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Stack>
             </MenuItem>
           ))}
-          {productId !== "" && [
+          {isAdmin && productId !== "" && [
             <Divider key="div" />,
             <MenuItem key="create" value={SENTINEL_CREATE} sx={{ color: "primary.main" }}>
               <Stack direction="row" spacing={1} alignItems="center">
