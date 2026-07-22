@@ -246,7 +246,7 @@ function FilterBar({
         }}
       />
 
-      <FormControl size="small" sx={{ minWidth: 160 }}>
+      <FormControl sx={{ minWidth: 160 }}>
         <InputLabel>Register</InputLabel>
         <Select
           label="Register"
@@ -262,7 +262,7 @@ function FilterBar({
         </Select>
       </FormControl>
 
-      <FormControl size="small" sx={{ minWidth: 130 }}>
+      <FormControl sx={{ minWidth: 130 }}>
         <InputLabel>Level</InputLabel>
         <Select
           label="Level"
@@ -277,7 +277,7 @@ function FilterBar({
       </FormControl>
 
       {showRiskTypeFilter && (
-        <FormControl size="small" sx={{ minWidth: 150 }}>
+        <FormControl sx={{ minWidth: 150 }}>
           <InputLabel>Risk Type</InputLabel>
           <Select
             label="Risk Type"
@@ -292,7 +292,7 @@ function FilterBar({
       )}
 
       {showApprovedFilter && (
-        <FormControl size="small" sx={{ minWidth: 140 }}>
+        <FormControl sx={{ minWidth: 140 }}>
           <InputLabel>Status</InputLabel>
           <Select
             label="Status"

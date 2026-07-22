@@ -14,10 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { FormControl, InputLabel, MenuItem, Paper, Select } from "@wso2/oxygen-ui";
+import { FormControl, InputLabel, MenuItem, Select } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { RiskTeam } from "../../api/riskApi";
-import { darkCardSx } from "../cardStyles";
 
 interface RegisterFilterProps {
   teams: RiskTeam[];
@@ -25,27 +24,36 @@ interface RegisterFilterProps {
   onChange: (registerId: number) => void;
 }
 
-// Page-level register filter; scopes every chart on the Analytics page.
-// The register-comparison donut only renders when value === 0 ("All").
+// Page-level register filter; scopes every chart on the Analytics and Dashboard
+// pages. The register-comparison donut only renders when value === 0 ("All").
+//
+// No size="small" on the FormControl. Oxygen UI's theme already defaults Select
+// to small and nudges the resting label up 7px to re-centre it against a
+// normal-height FormControl; making the FormControl small as well applies that
+// correction twice and the label sits above centre.
+//
+// A plain outlined Select, matching the filters on the Risk Registers page.
+// It was previously wrapped in a Paper card whose border sat outside the
+// Select's own outline, so the control drew two borders and stood taller than
+// the filters elsewhere. The inner outline was suppressed with a raw MUI class
+// selector, which both stopped working across an Oxygen UI upgrade and removed
+// the notch the floating label needs to sit in.
 export default function RegisterFilter({ teams, value, onChange }: RegisterFilterProps): JSX.Element {
   return (
-    <Paper elevation={0} sx={{ p: 1, ...darkCardSx }}>
-      <FormControl size="small" sx={{ minWidth: 200 }}>
-        <InputLabel>Register</InputLabel>
-        <Select
-          label="Register"
-          value={value || ""}
-          onChange={(e) => onChange(Number(e.target.value) || 0)}
-          sx={{ "& .MuiOutlinedInput-notchedOutline": { border: "none" } }}
-        >
-          <MenuItem value="">All Registers</MenuItem>
-          {teams.map((t) => (
-            <MenuItem key={t.id} value={t.id}>
-              {t.name}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-    </Paper>
+    <FormControl sx={{ minWidth: 200 }}>
+      <InputLabel>Register</InputLabel>
+      <Select
+        label="Register"
+        value={value || ""}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+      >
+        <MenuItem value="">All Registers</MenuItem>
+        {teams.map((t) => (
+          <MenuItem key={t.id} value={t.id}>
+            {t.name}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
   );
 }
