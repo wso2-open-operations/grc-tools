@@ -201,6 +201,8 @@ func (d *Deps) handleUpdateRisk(w http.ResponseWriter, r *http.Request) {
 				response.WriteError(w, http.StatusBadRequest, "identified_by_name is required when identified_by_type is "+req.IdentifiedByType)
 				return
 			}
+			trimmed := strings.TrimSpace(*req.IdentifiedByName)
+			req.IdentifiedByName = &trimmed
 		default:
 			response.WriteError(w, http.StatusBadRequest, "identified_by_type must be "+model.IdentifiedByEmployee+", "+model.IdentifiedByExternalPerson+", or "+model.IdentifiedByTool)
 			return

@@ -100,6 +100,9 @@ func (d *Deps) handleCreateRisk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.IdentifiedByName = &name
+	} else if req.IdentifiedByType == model.IdentifiedByExternalPerson || req.IdentifiedByType == model.IdentifiedByTool {
+		trimmed := strings.TrimSpace(*req.IdentifiedByName)
+		req.IdentifiedByName = &trimmed
 	}
 
 	createdBy := user.Email
@@ -188,7 +191,7 @@ func validateCreateRiskRequest(req model.CreateRiskRequest) error {
 			return errorf("identified_by_email is required when identified_by_type is %s", model.IdentifiedByEmployee)
 		}
 	case model.IdentifiedByExternalPerson, model.IdentifiedByTool:
-		if req.IdentifiedByName == nil || *req.IdentifiedByName == "" {
+		if req.IdentifiedByName == nil || strings.TrimSpace(*req.IdentifiedByName) == "" {
 			return errorf("identified_by_name is required when identified_by_type is %s", req.IdentifiedByType)
 		}
 	default:
