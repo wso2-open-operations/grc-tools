@@ -93,7 +93,7 @@ func (d *Deps) handleCreateRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.IdentifiedByType == "EMPLOYEE" {
+	if req.IdentifiedByType == model.IdentifiedByEmployee {
 		name, err := d.resolveIdentifiedByEmployee(r.Context(), *req.IdentifiedByEmail)
 		if err != nil {
 			response.MapServiceError(r.Context(), w, err, "Unable to verify the identifying employee. Please try again.")
@@ -180,19 +180,19 @@ func validateCreateRiskRequest(req model.CreateRiskRequest) error {
 		}
 	}
 	switch req.IdentifiedByType {
-	case "EMPLOYEE":
+	case model.IdentifiedByEmployee:
 		// IdentifiedByName is deliberately not checked here: it is never
 		// trusted for EMPLOYEE and gets overwritten from hr_entity once this
 		// validation passes — see handleCreateRisk.
 		if req.IdentifiedByEmail == nil || strings.TrimSpace(*req.IdentifiedByEmail) == "" {
-			return errorf("identified_by_email is required when identified_by_type is EMPLOYEE")
+			return errorf("identified_by_email is required when identified_by_type is %s", model.IdentifiedByEmployee)
 		}
-	case "EXTERNAL_PERSON", "TOOL":
+	case model.IdentifiedByExternalPerson, model.IdentifiedByTool:
 		if req.IdentifiedByName == nil || *req.IdentifiedByName == "" {
 			return errorf("identified_by_name is required when identified_by_type is %s", req.IdentifiedByType)
 		}
 	default:
-		return errorf("identified_by_type must be EMPLOYEE, EXTERNAL_PERSON, or TOOL")
+		return errorf("identified_by_type must be %s, %s, or %s", model.IdentifiedByEmployee, model.IdentifiedByExternalPerson, model.IdentifiedByTool)
 	}
 	return nil
 }

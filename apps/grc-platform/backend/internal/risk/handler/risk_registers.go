@@ -185,9 +185,9 @@ func (d *Deps) handleUpdateRisk(w http.ResponseWriter, r *http.Request) {
 	// validate/resolve when the caller is actually setting it this request.
 	if req.IdentifiedByType != "" {
 		switch req.IdentifiedByType {
-		case "EMPLOYEE":
+		case model.IdentifiedByEmployee:
 			if req.IdentifiedByEmail == nil || strings.TrimSpace(*req.IdentifiedByEmail) == "" {
-				response.WriteError(w, http.StatusBadRequest, "identified_by_email is required when identified_by_type is EMPLOYEE")
+				response.WriteError(w, http.StatusBadRequest, "identified_by_email is required when identified_by_type is "+model.IdentifiedByEmployee)
 				return
 			}
 			name, err := d.resolveIdentifiedByEmployee(r.Context(), *req.IdentifiedByEmail)
@@ -196,13 +196,13 @@ func (d *Deps) handleUpdateRisk(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			req.IdentifiedByName = &name
-		case "EXTERNAL_PERSON", "TOOL":
+		case model.IdentifiedByExternalPerson, model.IdentifiedByTool:
 			if req.IdentifiedByName == nil || strings.TrimSpace(*req.IdentifiedByName) == "" {
 				response.WriteError(w, http.StatusBadRequest, "identified_by_name is required when identified_by_type is "+req.IdentifiedByType)
 				return
 			}
 		default:
-			response.WriteError(w, http.StatusBadRequest, "identified_by_type must be EMPLOYEE, EXTERNAL_PERSON, or TOOL")
+			response.WriteError(w, http.StatusBadRequest, "identified_by_type must be "+model.IdentifiedByEmployee+", "+model.IdentifiedByExternalPerson+", or "+model.IdentifiedByTool)
 			return
 		}
 	}

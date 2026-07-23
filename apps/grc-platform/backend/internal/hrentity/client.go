@@ -184,6 +184,7 @@ query SearchEmployees($filter: EmployeeFilter, $limit: Int) {
 		firstName
 		lastName
 		workEmail
+		employeeThumbnail
 	}
 }`
 
@@ -230,49 +231,61 @@ func (c *Client) SearchActiveEmployees(ctx context.Context, emailSearchString st
 	return employees, nil
 }
 
-const employeeByEmailQuery = `
-query GetEmployee($email: String!) {
-	employee(email: $email) {
-		firstName
-		lastName
-		employeeThumbnail
-	}
-}`
+// employeeByEmailSearchLimit is small: emailSearchString is an exact work
+// email, so more than a couple of substring matches would be unexpected.
+const employeeByEmailSearchLimit = 5
 
-// GetEmployeeByEmail looks up a single employee's name and profile photo by
-// their exact work email. Used to show the signed-in user's own name/avatar
-// in the account menu — Asgardeo's ID token/userinfo don't carry those
-// claims for this org's application, so hr_entity is the source of truth
-// instead. Returns (nil, nil) if no employee matches.
+// GetEmployeeByEmail looks up a single active employee's name and profile
+// photo by their exact work email. Used to show the signed-in user's own
+// name/avatar in the account menu (Asgardeo's ID token/userinfo don't carry
+// those claims for this org's application) and, via the risk module, to
+// verify an "Identified By: Employee" or Action Owner email actually
+// belongs to a current employee before attributing anything to it.
+//
+// Reuses the same employees(filter:) query and Active-only employeeStatus
+// filter as SearchActiveEmployees, rather than hr_entity's employee(email:)
+// resolver, which has no status filter of its own — an email belonging to
+// a former employee would otherwise still resolve. Returns (nil, nil) if no
+// active employee matches.
 func (c *Client) GetEmployeeByEmail(ctx context.Context, email string) (*Employee, error) {
-	data, err := c.doQuery(ctx, employeeByEmailQuery, map[string]any{"email": email})
+	data, err := c.doQuery(ctx, employeesQuery, map[string]any{
+		"filter": map[string]any{
+			"emailSearchString": email,
+			"employeeStatus":    []string{"Active"},
+		},
+		"limit": employeeByEmailSearchLimit,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	var result struct {
-		Employee *struct {
+		Employees []struct {
 			FirstName         *string `json:"firstName"`
 			LastName          *string `json:"lastName"`
+			WorkEmail         *string `json:"workEmail"`
 			EmployeeThumbnail *string `json:"employeeThumbnail"`
-		} `json:"employee"`
+		} `json:"employees"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("decode hr entity employee: %w", err)
-	}
-	if result.Employee == nil {
-		return nil, nil
+		return nil, fmt.Errorf("decode hr entity employees: %w", err)
 	}
 
-	emp := &Employee{WorkEmail: email}
-	if result.Employee.FirstName != nil {
-		emp.FirstName = *result.Employee.FirstName
+	for _, e := range result.Employees {
+		if e.WorkEmail == nil || !strings.EqualFold(*e.WorkEmail, email) {
+			continue
+		}
+		emp := &Employee{WorkEmail: *e.WorkEmail}
+		if e.FirstName != nil {
+			emp.FirstName = *e.FirstName
+		}
+		if e.LastName != nil {
+			emp.LastName = *e.LastName
+		}
+		if e.EmployeeThumbnail != nil {
+			emp.Thumbnail = *e.EmployeeThumbnail
+		}
+		return emp, nil
 	}
-	if result.Employee.LastName != nil {
-		emp.LastName = *result.Employee.LastName
-	}
-	if result.Employee.EmployeeThumbnail != nil {
-		emp.Thumbnail = *result.Employee.EmployeeThumbnail
-	}
-	return emp, nil
+	return nil, nil
 }
