@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { type JSX, useEffect, useRef } from "react";
+import { type JSX, useEffect, useRef, useState } from "react";
 import { useAsgardeo } from "@asgardeo/react";
-import { Box, LinearProgress } from "@wso2/oxygen-ui";
+import { Box, Button, LinearProgress, Typography } from "@wso2/oxygen-ui";
 import AppLayout from "@layouts/AppLayout";
 
 const isMockAuth = window.config?.GRC_PLATFORM_MOCK_AUTH === true;
@@ -56,6 +56,19 @@ export default function AuthGuard(): JSX.Element {
 function RealAuthGuard(): JSX.Element {
   const { isSignedIn, signIn } = useAsgardeo();
   const hasTriggeredSignInRef = useRef(false);
+  const [signInError, setSignInError] = useState(false);
+
+  const triggerSignIn = () => {
+    hasTriggeredSignInRef.current = true;
+    setSignInError(false);
+    signIn().catch(() => {
+      // Reset the guard so a manual retry (below) is allowed to call
+      // signIn() again; an uncaught rejection would otherwise leave the
+      // user stuck on the loader forever with no way back to the login page.
+      hasTriggeredSignInRef.current = false;
+      setSignInError(true);
+    });
+  };
 
   useEffect(() => {
     if (isSignedIn) return;
@@ -69,13 +82,32 @@ function RealAuthGuard(): JSX.Element {
     // uninterrupted window.
     const timer = setTimeout(() => {
       if (!hasTriggeredSignInRef.current) {
-        hasTriggeredSignInRef.current = true;
-        signIn();
+        triggerSignIn();
       }
     }, 500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- signIn deliberately omitted: not guaranteed reference-stable, and including it would reset this grace-period timer on every unrelated render, potentially preventing it from ever firing
   }, [isSignedIn]);
+
+  if (signInError) {
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 2,
+          height: "100dvh",
+        }}
+      >
+        <Typography>Sign-in failed. Please check your connection and try again.</Typography>
+        <Button variant="contained" onClick={triggerSignIn}>
+          Try again
+        </Button>
+      </Box>
+    );
+  }
 
   if (!isSignedIn) {
     return authLoader;

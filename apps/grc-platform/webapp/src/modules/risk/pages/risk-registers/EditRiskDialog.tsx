@@ -121,6 +121,11 @@ export default function EditRiskDialog({
   );
   const [identifiedByType, setIdentifiedByType] = useState(detail.identified_by_type ?? "");
   const [identifiedByName, setIdentifiedByName] = useState(detail.identified_by_name ?? "");
+  // Not loaded from `detail` — RiskDetail never carries an email, only the
+  // already-resolved name. Populated only when the user re-picks an employee
+  // via the Autocomplete below; see the identifiedByChanged check in
+  // handleSave for why an unset email here does not block saving.
+  const [identifiedByEmail, setIdentifiedByEmail] = useState("");
   const [assignerId, setAssignerId] = useState<number | "">(detail.assigner_id || "");
   const [ownerId, setOwnerId] = useState<number | "">(detail.owner_id || "");
   const [selectedRefIds, setSelectedRefIds] = useState<number[]>(
@@ -256,6 +261,7 @@ export default function EditRiskDialog({
     setRiskIdentifiedDate(parseDateOnly(detail.risk_identified_date));
     setIdentifiedByType(detail.identified_by_type ?? "");
     setIdentifiedByName(detail.identified_by_name ?? "");
+    setIdentifiedByEmail("");
     setAssignerId(detail.assigner_id || "");
     setOwnerId(detail.owner_id || "");
     setSelectedRefIds(detail.compliance_references.map((r) => r.id));
@@ -329,8 +335,23 @@ export default function EditRiskDialog({
       if (mode === "full") {
         payload.impact_description = impactDescription.trim() || undefined;
         payload.risk_identified_date = toDateOnlyString(riskIdentifiedDate);
-        payload.identified_by_type = identifiedByType || undefined;
-        payload.identified_by_name = identifiedByName.trim() || undefined;
+
+        // Only sent when Identified By actually changed. The backend treats
+        // an omitted identified_by_type as "leave it alone"; sending it
+        // unconditionally would require identified_by_email on every save
+        // (even ones that never touched this section), since that field is
+        // never loaded from `detail` in the first place — see the state
+        // declarations above.
+        const identifiedByChanged =
+          identifiedByType !== (detail.identified_by_type ?? "") ||
+          identifiedByName.trim() !== (detail.identified_by_name ?? "");
+        if (identifiedByChanged) {
+          payload.identified_by_type = identifiedByType || undefined;
+          payload.identified_by_name = identifiedByName.trim() || undefined;
+          payload.identified_by_email =
+            identifiedByType === "EMPLOYEE" ? identifiedByEmail || undefined : undefined;
+        }
+
         payload.assigner_id = assignerId !== "" ? Number(assignerId) : undefined;
         payload.owner_id = ownerId !== "" ? Number(ownerId) : undefined;
         payload.compliance_reference_ids = selectedRefIds;
@@ -556,6 +577,9 @@ export default function EditRiskDialog({
                       }}
                       onChange={(_, newValue) => {
                         setIdentifiedByName(newValue?.name ?? "");
+                        // The backend re-resolves identity from this email and
+                        // ignores the name above on its own — see handleSave.
+                        setIdentifiedByEmail(newValue?.email ?? "");
                         if (errors.identifiedByName) setErrors((p) => ({ ...p, identifiedByName: "" }));
                       }}
                       loadingText="Searching…"

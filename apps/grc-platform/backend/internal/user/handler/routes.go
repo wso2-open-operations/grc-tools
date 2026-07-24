@@ -34,5 +34,5 @@ type Deps struct {
 func RegisterRoutes(mux *http.ServeMux, deps Deps) {
 	mux.HandleFunc("GET /api/v1/me/profile", handleGetMyProfile(deps.HREntity))
 	mux.HandleFunc("GET /api/v1/users", handleListUsers(deps.Users))
-	mux.HandleFunc("POST /api/v1/users/resolve", handleResolveUser(deps.Users))
+	mux.HandleFunc("POST /api/v1/users/resolve", handleResolveUser(deps.Users, deps.HREntity))
 }

@@ -540,7 +540,10 @@ export default function RiskRegisters(): JSX.Element {
   useEffect(() => {
     const riskId = searchParams.get("riskId");
     if (!riskId) return;
-    openDrawer(Number(riskId));
+    const id = Number(riskId);
+    if (Number.isSafeInteger(id) && id > 0) {
+      openDrawer(id);
+    }
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);

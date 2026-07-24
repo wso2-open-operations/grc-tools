@@ -59,16 +59,22 @@ type Risk struct {
 // Dates are YYYY-MM-DD strings. Evidence files are uploaded separately after creation.
 type CreateRiskRequest struct {
 	// Step 1: Basic Information
-	Year                   int     `json:"year"`
-	Quarter                string  `json:"quarter"`
-	SourceRegisterID       int     `json:"source_register_id"`
-	RiskTitle              string  `json:"risk_title"`
-	RiskDescription        string  `json:"risk_description"`
-	ComplianceReferenceIDs []int   `json:"compliance_reference_ids"`
-	IdentifiedByType       string  `json:"identified_by_type"`
-	IdentifiedByName       *string `json:"identified_by_name,omitempty"`
-	AssignerID             int     `json:"assigner_id"`
-	RiskIdentifiedDate     string  `json:"risk_identified_date"`
+	Year                   int    `json:"year"`
+	Quarter                string `json:"quarter"`
+	SourceRegisterID       int    `json:"source_register_id"`
+	RiskTitle              string `json:"risk_title"`
+	RiskDescription        string `json:"risk_description"`
+	ComplianceReferenceIDs []int  `json:"compliance_reference_ids"`
+	IdentifiedByType       string `json:"identified_by_type"`
+	// IdentifiedByName is ignored when IdentifiedByType is "EMPLOYEE": the
+	// server derives it from IdentifiedByEmail via hr_entity instead, so a
+	// client cannot attribute a risk to an employee by name alone. It is
+	// still the source of truth for EXTERNAL_PERSON and TOOL, which have no
+	// directory to verify against.
+	IdentifiedByName   *string `json:"identified_by_name,omitempty"`
+	IdentifiedByEmail  *string `json:"identified_by_email,omitempty"`
+	AssignerID         int     `json:"assigner_id"`
+	RiskIdentifiedDate string  `json:"risk_identified_date"`
 
 	// Step 2: Risk Assessment
 	Likelihood         int    `json:"likelihood"`
@@ -232,11 +238,16 @@ type ActionPlanDetail struct {
 //
 // All other fields are free-edit and do not affect workflow status.
 type UpdateRiskRequest struct {
-	RiskTitle              string  `json:"risk_title"`
-	RiskDescription        string  `json:"risk_description"`
-	RiskIdentifiedDate     string  `json:"risk_identified_date,omitempty"`
+	RiskTitle          string `json:"risk_title"`
+	RiskDescription    string `json:"risk_description"`
+	RiskIdentifiedDate string `json:"risk_identified_date,omitempty"`
+	// IdentifiedByType empty means "leave Identified By unchanged" (matching
+	// the repository's COALESCE-on-empty convention for these two columns).
+	// When set to "EMPLOYEE", IdentifiedByName is ignored in favour of a
+	// server-side lookup of IdentifiedByEmail — see CreateRiskRequest.
 	IdentifiedByType       string  `json:"identified_by_type,omitempty"`
 	IdentifiedByName       *string `json:"identified_by_name,omitempty"`
+	IdentifiedByEmail      *string `json:"identified_by_email,omitempty"`
 	AssignerID             *int    `json:"assigner_id,omitempty"`
 	OwnerID                *int    `json:"owner_id,omitempty"`
 	ImpactDescription      string  `json:"impact_description"`

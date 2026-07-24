@@ -22,6 +22,8 @@ import (
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 // minEmployeeSearchQueryLen avoids firing an HR entity lookup (and returning
@@ -34,7 +36,16 @@ const minEmployeeSearchQueryLen = 2
 // platform's own database. On upstream failure, the caller (Add/Edit Risk
 // form) is expected to show an inline error and block employee selection
 // rather than fall back to free text.
+//
+// Gated on the same privileges as /users/resolve: every caller of this
+// endpoint (the "Identified By" and "Action Owner" pickers, in both Add Risk
+// and Edit Risk) only appears inside the create/update-risk flow, so there is
+// no legitimate caller holding neither privilege.
 func (d *Deps) handleSearchEmployees(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequireAnyPrivilege(r.Context(), w, privilege.CreateRisk, privilege.UpdateRisk) {
+		return
+	}
+
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(q) < minEmployeeSearchQueryLen {
 		response.WriteJSONValue(w, http.StatusOK, []model.EmployeeOption{})

@@ -235,6 +235,9 @@ export interface UpdateRiskPayload {
   risk_identified_date?: string;
   identified_by_type?: string;
   identified_by_name?: string;
+  // Required alongside identified_by_type "EMPLOYEE"; the backend re-resolves
+  // the name from this and ignores identified_by_name on its own.
+  identified_by_email?: string;
   assigner_id?: number;
   owner_id?: number;
   impact_description?: string;
@@ -475,13 +478,17 @@ export async function searchEmployees(authFetch: AuthFetch, query: string): Prom
 // employee who's never logged into grc-platform). Used to let fields
 // like Action Owner assign any real employee, not just existing grc-platform
 // users, while still storing a proper FK rather than free text.
+//
+// Only email is sent: the backend looks the display name up from hr_entity
+// itself rather than trust one supplied here (the search result's `name` is
+// display-only and no longer part of this request) — see resolve.go.
 export async function resolveUserByEmail(
   authFetch: AuthFetch,
   employee: EmployeeOption,
 ): Promise<UserOption> {
   const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/users/resolve`, {
     method: "POST",
-    body: JSON.stringify({ email: employee.email, display_name: employee.name }),
+    body: JSON.stringify({ email: employee.email }),
   });
   return handleResponse<UserOption>(res);
 }
@@ -514,6 +521,13 @@ export function buildCreateRiskPayload(data: AddRiskFormValues): Record<string, 
     compliance_reference_ids: data.complianceReferences,
     identified_by_type: data.identifiedByType,
     identified_by_name: data.identifiedByName !== "" ? data.identifiedByName : undefined,
+    // Only meaningful (and only required by the backend) for EMPLOYEE — the
+    // server derives identified_by_name from this rather than trust the
+    // string above on its own.
+    identified_by_email:
+      data.identifiedByType === "EMPLOYEE" && data.identifiedByEmail !== ""
+        ? data.identifiedByEmail
+        : undefined,
     assigner_id: data.assignedBy !== "" ? data.assignedBy : undefined,
     risk_identified_date: toDateOnlyString(data.riskIdentifiedDate),
     likelihood: data.likelihood,

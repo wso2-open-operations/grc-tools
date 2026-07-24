@@ -87,7 +87,7 @@ export default function BasicInformationStep({
   complianceRefs,
   users,
 }: BasicInformationStepProps): JSX.Element {
-  const { control, clearErrors } = useFormContext<AddRiskFormValues>();
+  const { control, clearErrors, setValue } = useFormContext<AddRiskFormValues>();
   const authFetch = useAuthApiClient();
 
   const year             = useWatch({ control, name: "year" });
@@ -428,6 +428,9 @@ export default function BasicInformationStep({
                     }}
                     onChange={(_, newValue) => {
                       field.onChange(newValue?.name ?? "");
+                      // The backend re-resolves identity from this email and
+                      // ignores the name above on its own — see types.ts.
+                      setValue("identifiedByEmail", newValue?.email ?? "");
                       if (newValue) clearErrors("identifiedByName");
                     }}
                     loadingText="Searching…"

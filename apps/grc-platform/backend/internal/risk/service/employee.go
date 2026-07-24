@@ -32,6 +32,12 @@ const employeeSearchLimit = 20
 // service for the Risk module's "Risk Identified By: Employee" field.
 type EmployeeSearchService interface {
 	Search(ctx context.Context, query string) ([]model.EmployeeOption, error)
+	// Resolve verifies a single employee by work email and returns their
+	// canonical name, or nil if no active employee has that email. Unlike
+	// Search, this is the server-side trust boundary: it is used to derive
+	// identified_by_name from hr_entity rather than accept a client-supplied
+	// string, so a risk cannot be attributed to a fabricated employee name.
+	Resolve(ctx context.Context, email string) (*model.EmployeeOption, error)
 }
 
 type employeeSearchService struct {
@@ -59,4 +65,19 @@ func (s *employeeSearchService) Search(ctx context.Context, query string) ([]mod
 		options = append(options, model.EmployeeOption{Name: name, Email: e.WorkEmail})
 	}
 	return options, nil
+}
+
+func (s *employeeSearchService) Resolve(ctx context.Context, email string) (*model.EmployeeOption, error) {
+	emp, err := s.hrClient.GetEmployeeByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if emp == nil {
+		return nil, nil
+	}
+	name := strings.TrimSpace(strings.TrimSpace(emp.FirstName) + " " + strings.TrimSpace(emp.LastName))
+	if name == "" {
+		return nil, nil
+	}
+	return &model.EmployeeOption{Name: name, Email: emp.WorkEmail}, nil
 }

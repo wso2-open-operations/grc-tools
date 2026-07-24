@@ -218,6 +218,35 @@ func (d *Deps) handleUpdateRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// IdentifiedByType == "" means "leave Identified By unchanged" — see the
+	// COALESCE-on-empty convention this maps onto in the repository. Only
+	// validate/resolve when the caller is actually setting it this request.
+	if req.IdentifiedByType != "" {
+		switch req.IdentifiedByType {
+		case model.IdentifiedByEmployee:
+			if req.IdentifiedByEmail == nil || strings.TrimSpace(*req.IdentifiedByEmail) == "" {
+				response.WriteError(w, http.StatusBadRequest, "identified_by_email is required when identified_by_type is "+model.IdentifiedByEmployee)
+				return
+			}
+			name, err := d.resolveIdentifiedByEmployee(r.Context(), *req.IdentifiedByEmail)
+			if err != nil {
+				response.MapServiceError(r.Context(), w, err, "Unable to verify the identifying employee. Please try again.")
+				return
+			}
+			req.IdentifiedByName = &name
+		case model.IdentifiedByExternalPerson, model.IdentifiedByTool:
+			if req.IdentifiedByName == nil || strings.TrimSpace(*req.IdentifiedByName) == "" {
+				response.WriteError(w, http.StatusBadRequest, "identified_by_name is required when identified_by_type is "+req.IdentifiedByType)
+				return
+			}
+			trimmed := strings.TrimSpace(*req.IdentifiedByName)
+			req.IdentifiedByName = &trimmed
+		default:
+			response.WriteError(w, http.StatusBadRequest, "identified_by_type must be "+model.IdentifiedByEmployee+", "+model.IdentifiedByExternalPerson+", or "+model.IdentifiedByTool)
+			return
+		}
+	}
+
 	if err := d.Risk.Update(r.Context(), id, req, by); err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return

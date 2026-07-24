@@ -131,6 +131,7 @@ export default function AddRisk(): JSX.Element {
       complianceReferences: [],
       identifiedByType: "EMPLOYEE",
       identifiedByName: "",
+      identifiedByEmail: "",
       assignedBy: "",
       riskIdentifiedDate: null,
       // ── Step 2 defaults ───────────────────────────────────────────────────

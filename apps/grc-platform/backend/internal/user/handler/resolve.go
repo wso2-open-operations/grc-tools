@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
@@ -27,21 +28,29 @@ import (
 )
 
 type resolveUserRequest struct {
-	Email       string `json:"email"`
-	DisplayName string `json:"display_name"`
+	Email string `json:"email"`
 }
 
-// handleResolveUser links an HR entity employee (name + email, from
-// GET /api/v1/employees/search) to an internal user.id by email, creating
+// handleResolveUser links an HR entity employee (identified by email, as
+// returned by GET /api/v1/employees/search) to an internal user.id, creating
 // the user row on the fly if one doesn't exist yet. Used wherever a form
 // needs to assign any employee — not just an existing grc-platform
 // user — to an FK field (e.g. a risk's Action Owner).
+//
+// The display name is always looked up from hr_entity here, never taken from
+// the request body. Upsert's write is `ON DUPLICATE KEY UPDATE display_name
+// = VALUES(display_name)` — it overwrites the row unconditionally when the
+// email already exists — so a client-supplied name would let any caller
+// holding CreateRisk/UpdateRisk rename an arbitrary existing platform user
+// (their real email is often guessable) rather than only provisioning new
+// ones. Rejecting an email hr_entity doesn't recognise closes the same gap
+// for newly-created rows.
 //
 // This writes, so it is gated. The privileges are the risk module's because
 // that is the only flow that calls it: an employee is resolved to a user id
 // while creating or editing a risk. Either privilege is enough — a user who
 // may only edit still has to assign an action owner.
-func handleResolveUser(repo userentity.Repository) http.HandlerFunc {
+func handleResolveUser(repo userentity.Repository, hrClient *hrentity.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !auth.RequireAnyPrivilege(r.Context(), w, privilege.CreateRisk, privilege.UpdateRisk) {
 			return
@@ -53,9 +62,23 @@ func handleResolveUser(repo userentity.Repository) http.HandlerFunc {
 		}
 
 		req.Email = strings.TrimSpace(req.Email)
-		req.DisplayName = strings.TrimSpace(req.DisplayName)
-		if req.Email == "" || req.DisplayName == "" {
-			response.WriteError(w, http.StatusBadRequest, "email and display_name are required")
+		if req.Email == "" {
+			response.WriteError(w, http.StatusBadRequest, "email is required")
+			return
+		}
+
+		emp, err := hrClient.GetEmployeeByEmail(r.Context(), req.Email)
+		if err != nil {
+			response.MapServiceError(r.Context(), w, err, "Unable to reach the employee directory. Please try again.")
+			return
+		}
+		if emp == nil {
+			response.WriteError(w, http.StatusUnprocessableEntity, "email does not match an active WSO2 employee")
+			return
+		}
+		displayName := strings.TrimSpace(strings.TrimSpace(emp.FirstName) + " " + strings.TrimSpace(emp.LastName))
+		if displayName == "" {
+			response.WriteError(w, http.StatusUnprocessableEntity, "email does not match an active WSO2 employee")
 			return
 		}
 
@@ -67,7 +90,7 @@ func handleResolveUser(repo userentity.Repository) http.HandlerFunc {
 			actorEmail = info.Email
 		}
 
-		u, err := repo.Upsert(r.Context(), req.Email, req.DisplayName, actorEmail)
+		u, err := repo.Upsert(r.Context(), req.Email, displayName, actorEmail)
 		if err != nil {
 			response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 			return
