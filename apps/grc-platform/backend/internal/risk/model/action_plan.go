@@ -25,7 +25,8 @@ type ActionPlan struct {
 	Description   *string `json:"description"`
 	Status        string  `json:"status"`
 	CompletedDate *string `json:"completed_date"`
-	PlanType      string  `json:"plan_type"`
+	PlanType      string  `json:"plan_type"` // STANDARD | MANAGEMENT
+	CreatedBy     *string `json:"created_by"`
 }
 
 // ActionPlanStep represents an individual step within an action plan,

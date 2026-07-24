@@ -76,7 +76,20 @@ export default function RejectDialog({
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth="sm"
+      fullWidth
+      PaperProps={{
+        sx: {
+          backdropFilter: "none",
+          backgroundImage: "none",
+          backgroundColor: "#ffffff",
+          "[data-color-scheme='dark'] &": { backgroundColor: "#1a1a24" },
+        },
+      }}
+    >
       <DialogTitle>
         <Typography variant="h6" fontWeight={700}>
           {title}

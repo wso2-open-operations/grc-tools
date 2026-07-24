@@ -26,12 +26,16 @@ import (
 )
 
 type riskActionStepService struct {
-	repo repository.RiskActionStepRepository
+	repo     repository.RiskActionStepRepository
+	planRepo repository.RiskActionPlanRepository
+	riskSvc  RiskService
 }
 
-// NewRiskActionStepService constructs a RiskActionStepService.
-func NewRiskActionStepService(repo repository.RiskActionStepRepository) RiskActionStepService {
-	return &riskActionStepService{repo: repo}
+// NewRiskActionStepService constructs a RiskActionStepService. planRepo and
+// riskSvc back UpdateRiskActionStep's check that the parent risk is actively
+// being remediated before its steps can be touched.
+func NewRiskActionStepService(repo repository.RiskActionStepRepository, planRepo repository.RiskActionPlanRepository, riskSvc RiskService) RiskActionStepService {
+	return &riskActionStepService{repo: repo, planRepo: planRepo, riskSvc: riskSvc}
 }
 
 var validStepStatuses = map[string]bool{
@@ -82,6 +86,19 @@ func (s *riskActionStepService) UpdateRiskActionStep(ctx context.Context, planID
 	if req.Status != nil && !validStepStatuses[strings.ToUpper(*req.Status)] {
 		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "invalid status: " + *req.Status}
 	}
+
+	plan, err := s.planRepo.GetRiskActionPlanByID(ctx, planID)
+	if err != nil {
+		return domain.RiskActionStep{}, err
+	}
+	risk, err := s.riskSvc.GetRiskByID(ctx, plan.RiskID)
+	if err != nil {
+		return domain.RiskActionStep{}, err
+	}
+	if risk.WorkflowStatus != "IN_REMEDIATION" && risk.WorkflowStatus != "ESCALATED" {
+		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "action steps can only be updated while the risk is IN_REMEDIATION or ESCALATED"}
+	}
+
 	step, err := s.repo.UpdateRiskActionStep(ctx, planID, stepID, req)
 	if err != nil {
 		return domain.RiskActionStep{}, err

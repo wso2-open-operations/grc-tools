@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,6 +79,29 @@ func splitCSVInts(raw string) []int {
 	return out
 }
 
+// isActionOwnerOnly reports whether the caller holds CompleteActionSteps but
+// none of the broader viewer privileges — the privilege-driven equivalent of
+// "this is an Action Owner, not a Risk Assigner/Owner/Compliance/Management/
+// Admin user," without checking a role name (this module never does).
+func isActionOwnerOnly(ctx context.Context) bool {
+	if !auth.HasPrivilege(ctx, privilege.CompleteActionSteps) {
+		return false
+	}
+	broader := []string{
+		privilege.CreateRisk,
+		privilege.OwnerApproveRisk,
+		privilege.ComplianceApproveRisk,
+		privilege.ManagementApproveRisk,
+		privilege.EscalateRisk,
+	}
+	for _, p := range broader {
+		if auth.HasPrivilege(ctx, p) {
+			return false
+		}
+	}
+	return true
+}
+
 // handleListRisks serves GET /api/v1/risks.
 // Query params:
 //   - statuses:        comma-separated workflow status values
@@ -107,6 +131,20 @@ func (d *Deps) handleListRisks(w http.ResponseWriter, r *http.Request) {
 	filter.DueFrom = q.Get("due_from")
 	filter.DueTo = q.Get("due_to")
 	filter.DueOverdueOnly = q.Get("due_overdue") == "true"
+
+	// Action Owner list scoping: a caller who can only complete action steps
+	// (not create/approve/escalate risks) sees just the risks where they own
+	// a plan — implementing what the grc-platform-risk-action-owner role's
+	// own seed-data description promises. Broader-privilege holders (Risk
+	// Assigner, Risk Owner, Compliance, Management, Admin) see everything,
+	// same as before; this never narrows their view.
+	if isActionOwnerOnly(r.Context()) {
+		if userInfo := auth.FromContext(r.Context()); userInfo != nil {
+			if caller, err := d.Users.GetByEmail(r.Context(), userInfo.Email); err == nil && caller != nil {
+				filter.ActionOwnerID = &caller.ID
+			}
+		}
+	}
 
 	filter.Limit = 50
 	if l := q.Get("limit"); l != "" {

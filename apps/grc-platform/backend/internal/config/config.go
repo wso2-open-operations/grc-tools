@@ -26,7 +26,6 @@ import (
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
 	Port                    string
-	DB                      DBConfig
 	Auth                    AuthConfig
 	ComplianceEntityBaseURL string
 	HREntity                HREntityConfig
@@ -40,10 +39,6 @@ type AIValidationConfig struct {
 	Enabled      bool
 	AgentBaseURL string
 	AgentAPIKey  string
-}
-
-type DBConfig struct {
-	DSN string
 }
 
 // Auth scope values classify what an IdP's tokens are allowed to reach.
@@ -88,6 +83,9 @@ type HREntityConfig struct {
 }
 
 // Load reads configuration from environment variables.
+//
+// There is no database configuration: the backend reaches all data through the
+// Compliance Entity, so DB_DSN is neither read nor required.
 // AUTH_JWKS_ENDPOINT, AUTH_ISSUER, and AUTH_AUDIENCE are only required when
 // AUTH_TOKEN_VALIDATOR_ENABLED is true (the default). They are not needed for
 // local development (set AUTH_TOKEN_VALIDATOR_ENABLED=false).
@@ -104,11 +102,6 @@ func Load() (Config, error) {
 			return Config{}, err
 		}
 		authCfg.IdPs = idps
-	}
-
-	dsn, err := mustEnv("DB_DSN")
-	if err != nil {
-		return Config{}, err
 	}
 
 	hrEntityGraphQLURL, err := mustEnv("HR_ENTITY_GRAPHQL_URL")
@@ -129,10 +122,7 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Port: envOrDefault("PORT", ":8080"),
-		DB: DBConfig{
-			DSN: dsn,
-		},
+		Port:                    envOrDefault("PORT", ":8080"),
 		Auth:                    authCfg,
 		ComplianceEntityBaseURL: envOrDefault("COMPLIANCE_ENTITY_BASE_URL", "http://localhost:8081"),
 		HREntity: HREntityConfig{
