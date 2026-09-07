@@ -58,17 +58,22 @@ var externalVisible = map[string]bool{
 	"POST /api/v1/audits/reminders/run": false,
 
 	// ── Audit Hub: audits ────────────────────────────────────────────────────
-	"GET /api/v1/audits":            true,
-	"GET /api/v1/audits/{id}":       true,
-	"POST /api/v1/audits":           false,
-	"PUT /api/v1/audits/{id}":       false,
-	"DELETE /api/v1/audits/{id}":    false,
-	"GET /api/v1/audits/{id}/trail": true,
+	"GET /api/v1/audits":         true,
+	"GET /api/v1/audits/{id}":    true,
+	"POST /api/v1/audits":        false,
+	"PUT /api/v1/audits/{id}":    false,
+	"DELETE /api/v1/audits/{id}": false,
+	// The audit-wide Activity Log. Status transitions, rejections and
+	// overrides are internal deliberation — gated on
+	// AUDIT_VIEW_INTERNAL_COMMENTS in the handler, which the auditor lacks.
+	"GET /api/v1/audits/{id}/trail": false,
 
 	// ── Audit Hub: controls ──────────────────────────────────────────────────
-	"GET /api/v1/audits/{id}/controls":                              true,
-	"GET /api/v1/audits/{id}/controls/{controlId}":                  true,
-	"GET /api/v1/audits/{id}/controls/{controlId}/trail":            true,
+	"GET /api/v1/audits/{id}/controls":             true,
+	"GET /api/v1/audits/{id}/controls/{controlId}": true,
+	// The control History tab — same internal-only history as the audit-wide
+	// Activity Log above.
+	"GET /api/v1/audits/{id}/controls/{controlId}/trail":            false,
 	"POST /api/v1/audits/{id}/controls":                             false,
 	"POST /api/v1/audits/{id}/controls/bulk":                        false,
 	"PUT /api/v1/audits/{id}/controls/{controlId}":                  false,
