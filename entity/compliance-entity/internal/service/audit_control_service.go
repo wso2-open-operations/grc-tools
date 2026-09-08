@@ -317,7 +317,7 @@ func (s *controlService) pushControlToFramework(ctx context.Context, frameworkID
 	return err
 }
 
-func (s *controlService) DeleteControl(ctx context.Context, auditID, controlID int) error {
+func (s *controlService) DeleteControl(ctx context.Context, auditID, controlID int, force bool) error {
 	if auditID <= 0 {
 		return &apierror.ValidationError{Msg: "auditId must be a positive integer"}
 	}
@@ -326,7 +326,12 @@ func (s *controlService) DeleteControl(ctx context.Context, auditID, controlID i
 	}
 	// audit_evidence and audit_population both cascade-delete with the control at
 	// the DB level (see audit_schema.sql), so once work has started on a control
-	// deleting it silently destroys that work. Block it here instead.
+	// deleting it silently destroys that work. Block it here instead — unless the
+	// caller passed force, which is the deliberate "delete it anyway" confirmation
+	// an admin gives after being shown what the cascade will take with it.
+	if force {
+		return s.repo.DeleteControl(ctx, auditID, controlID)
+	}
 	evidenceCount, activePopulationCount, err := s.repo.CountDeletionBlockers(ctx, controlID)
 	if err != nil {
 		return err
@@ -339,8 +344,11 @@ func (s *controlService) DeleteControl(ctx context.Context, auditID, controlID i
 		if activePopulationCount > 0 {
 			reasons = append(reasons, fmt.Sprintf("%d population(s) in progress", activePopulationCount))
 		}
+		// Phrased as a statement of what exists, not a flat refusal: force=true
+		// gets past it, and the webapp shows this same text as the warning on
+		// the "Remove anyway" confirmation.
 		return &apierror.ConflictError{
-			Msg: fmt.Sprintf("cannot delete control: %s exist for this control", strings.Join(reasons, " and ")),
+			Msg: fmt.Sprintf("this control has %s", strings.Join(reasons, " and ")),
 		}
 	}
 	return s.repo.DeleteControl(ctx, auditID, controlID)
