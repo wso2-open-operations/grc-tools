@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
@@ -329,27 +330,30 @@ func (s *controlService) DeleteControl(ctx context.Context, auditID, controlID i
 	// deleting it silently destroys that work. Block it here instead — unless the
 	// caller passed force, which is the deliberate "delete it anyway" confirmation
 	// an admin gives after being shown what the cascade will take with it.
-	if force {
-		return s.repo.DeleteControl(ctx, auditID, controlID)
-	}
 	evidenceCount, activePopulationCount, err := s.repo.CountDeletionBlockers(ctx, controlID)
 	if err != nil {
 		return err
 	}
 	if evidenceCount > 0 || activePopulationCount > 0 {
-		var reasons []string
-		if evidenceCount > 0 {
-			reasons = append(reasons, fmt.Sprintf("%d evidence submission(s)", evidenceCount))
+		if !force {
+			var reasons []string
+			if evidenceCount > 0 {
+				reasons = append(reasons, fmt.Sprintf("%d evidence submission(s)", evidenceCount))
+			}
+			if activePopulationCount > 0 {
+				reasons = append(reasons, fmt.Sprintf("%d population(s) in progress", activePopulationCount))
+			}
+			// Phrased as a statement of what exists, not a flat refusal: force=true
+			// gets past it, and the webapp shows this same text as the warning on
+			// the "Remove anyway" confirmation.
+			return &apierror.ConflictError{
+				Msg: fmt.Sprintf("this control has %s", strings.Join(reasons, " and ")),
+			}
 		}
-		if activePopulationCount > 0 {
-			reasons = append(reasons, fmt.Sprintf("%d population(s) in progress", activePopulationCount))
-		}
-		// Phrased as a statement of what exists, not a flat refusal: force=true
-		// gets past it, and the webapp shows this same text as the warning on
-		// the "Remove anyway" confirmation.
-		return &apierror.ConflictError{
-			Msg: fmt.Sprintf("this control has %s", strings.Join(reasons, " and ")),
-		}
+		// force is deleting through real work; the DELETED trail row only records
+		// forced=true, so log the magnitude the cascade takes with it.
+		log.Printf("forced delete: control %d (audit %d) cascades away %d evidence submission(s) and %d population(s)",
+			controlID, auditID, evidenceCount, activePopulationCount)
 	}
 	return s.repo.DeleteControl(ctx, auditID, controlID)
 }
