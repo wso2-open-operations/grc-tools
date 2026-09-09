@@ -470,9 +470,12 @@ interface EditableControlsTableProps {
   // under the "Copy from Framework" top source — Copy from Previous
   // Audit never pushes, so the caller passes false there.
   showPushColumn: boolean;
+  // Lifts the "due date in the past" warning/min when the audit period has
+  // already ended (a retrospective engagement).
+  allowPastDueDate: boolean;
 }
 
-function EditableControlsTable({ drafts, onChange, users, auditorCandidates, teams, showPushColumn }: EditableControlsTableProps): JSX.Element {
+function EditableControlsTable({ drafts, onChange, users, auditorCandidates, teams, showPushColumn, allowPastDueDate }: EditableControlsTableProps): JSX.Element {
   const [populationDialogId, setPopulationDialogId] = useState<string | null>(null);
   const dialogDraft = drafts.find((d) => d.localId === populationDialogId);
 
@@ -729,19 +732,20 @@ function EditableControlsTable({ drafts, onChange, users, auditorCandidates, tea
                 </Select>
               </TableCell>
               {/* Due Date — at the end. Must be today or later (never in the
-                  past) — `min` blocks it in the native picker, `error`
-                  catches a past date typed/pasted directly. */}
+                  past) for a live audit — `min` blocks it in the native picker,
+                  `error` catches a past date typed/pasted directly. Both are
+                  lifted for a retrospective audit (period already ended). */}
               <TableCell>
-                <Tooltip title={d.dueDate && d.dueDate < todayISO() ? "Due Date cannot be in the past" : ""}>
+                <Tooltip title={!allowPastDueDate && d.dueDate && d.dueDate < todayISO() ? "Due Date cannot be in the past" : ""}>
                   <TextField
                     value={d.dueDate}
                     onChange={(e) => update(d.localId, "dueDate", e.target.value)}
                     type="date"
                     size="small"
                     variant="standard"
-                    error={Boolean(d.dueDate && d.dueDate < todayISO())}
+                    error={Boolean(!allowPastDueDate && d.dueDate && d.dueDate < todayISO())}
                     InputLabelProps={{ shrink: true }}
-                    inputProps={{ style: FS, min: todayISO() }}
+                    inputProps={{ style: FS, min: allowPastDueDate ? undefined : todayISO() }}
                   />
                 </Tooltip>
               </TableCell>
@@ -1771,6 +1775,7 @@ function Step2Controls({
             auditorCandidates={auditorCandidates}
             teams={teams}
             showPushColumn={topSource === "framework"}
+            allowPastDueDate={periodEnd.length > 0 && periodEnd < todayISO()}
           />
         </Box>
       )}
@@ -2009,6 +2014,12 @@ export default function CreateAuditPage(): JSX.Element {
     periodEnd.length > 0 &&
     periodEnd >= periodStart;
 
+  // The "due date not in the past" guard is for live/upcoming audits. A
+  // completed historical period legitimately has every due date in the past —
+  // and blank CSV due dates fall back to that past periodEnd — so the guard is
+  // lifted once periodEnd is before today. Active/future periods are unchanged.
+  const allowPastDueDate = periodEnd.length > 0 && periodEnd < todayISO();
+
   // Step 2 → 3: every draft row must be complete (blank rows are not allowed).
   const draftErrors: string[] = drafts
     .flatMap((d) => {
@@ -2018,11 +2029,11 @@ export default function CreateAuditPage(): JSX.Element {
       if (!d.description.trim())         errs.push(`${label}: Description is required`);
       if (!d.evidenceRequirement.trim()) errs.push(`${label}: Evidence Requirement is required`);
       if (!d.dueDate)                    errs.push(`${label}: Due Date is required`);
-      else if (d.dueDate < todayISO())   errs.push(`${label}: Due Date cannot be in the past`);
+      else if (!allowPastDueDate && d.dueDate < todayISO()) errs.push(`${label}: Due Date cannot be in the past`);
       if (d.requirementType === "OE") {
         if (!d.population?.description.trim()) errs.push(`${label}: Population Requirement is required`);
         if (!d.population?.dueDate)            errs.push(`${label}: Population Due Date is required`);
-        else if (d.population.dueDate < todayISO()) errs.push(`${label}: Population Due Date cannot be in the past`);
+        else if (!allowPastDueDate && d.population.dueDate < todayISO()) errs.push(`${label}: Population Due Date cannot be in the past`);
       }
       return errs;
     });
