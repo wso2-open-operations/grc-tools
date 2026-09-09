@@ -107,9 +107,10 @@ var externalVisible = map[string]bool{
 	"POST /api/v1/audits/{id}/controls/{controlId}/population/submit":           false,
 	"POST /api/v1/audits/{id}/controls/{controlId}/population/review":           false,
 	"DELETE /api/v1/audits/{id}/controls/{controlId}/population/attestation":    false,
-	// Same pre-existing gap: no assigned-auditor branch, unlike its evidence
-	// sibling, so the auditor cannot download the file they must sample from.
-	"GET /api/v1/audits/{id}/controls/{controlId}/population/files/{fileId}/download": false,
+	// The auditor downloads the population file to draw the sample from it.
+	// downloadPopulationFile falls back to the id-matched auditor of the
+	// owning control, exactly as its evidence sibling does.
+	"GET /api/v1/audits/{id}/controls/{controlId}/population/files/{fileId}/download": true,
 
 	// ── Audit Hub: sampling ──────────────────────────────────────────────────
 	"GET /api/v1/audits/{id}/controls/{controlId}/sample/upload-link":   true,
