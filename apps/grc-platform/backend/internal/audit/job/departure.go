@@ -144,10 +144,11 @@ func (h *DepartureHub) controlDetailURL(auditID, controlID int) string {
 	return fmt.Sprintf("%s/audit/audits/%d?control=%d", h.frontendBaseURL, auditID, controlID)
 }
 
-// Recipients is holders of the control-management privilege — the one that
-// actually permits reassigning a control — plus platform admins, GLOBAL only.
+// Recipients is the users who can both reassign a control and administer
+// accounts — holding AUDIT_MANAGE_CONTROLS and MANAGE_USERS together, GLOBAL
+// only. Either privilege on its own is not enough.
 func (h *DepartureHub) Recipients(ctx context.Context) ([]int, error) {
-	return grant.CandidateIDs(ctx, h.grants, privilege.ManageControls, privilege.ManageUsers)
+	return grant.CandidateIDsAll(ctx, h.grants, privilege.ManageControls, privilege.ManageUsers)
 }
 
 // Notify emails one admin the audit half of a run, grouped by person. An
