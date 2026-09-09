@@ -251,6 +251,8 @@ function draftToRequest(d: DraftControl): AddControlRequest {
 // ── CSV parsing ───────────────────────────────────────────────────────────────
 
 // Required CSV columns. Optional: requirement_type, control_type, scope, due_date.
+// A blank due_date / population_due_date is left "" here and defaulted to the
+// audit period end by the import handler (which has that date in scope).
 // Columns for auditor_poc, process_owner, team are not supported via CSV
 // because they require database IDs — set them manually after upload.
 const CSV_REQUIRED_COLS = ["control_number", "description", "evidence_requirement"];
@@ -1281,6 +1283,8 @@ interface Step2Props {
   onCsvErrorChange: (e: string | null) => void;
   framework: AuditFramework | null;
   frameworks: AuditFramework[];
+  /** Audit period end — the fallback due date for CSV rows that omit due_date. */
+  periodEnd: string;
 }
 
 function Step2Controls({
@@ -1298,6 +1302,7 @@ function Step2Controls({
   onCsvErrorChange,
   framework,
   frameworks,
+  periodEnd,
 }: Step2Props): JSX.Element {
   const { data: auditsData } = useGetAudits();
   const { data: sourceControlsData, isLoading: sourceControlsLoading } = useGetControls(
@@ -1435,7 +1440,17 @@ function Step2Controls({
       } else {
         onCsvErrorChange(null);
         // Empty catalog → every CSV row auto-seeds the library, no choice.
-        onDraftsChange(result.map((d) => ({ ...d, pushToFramework: catalogEmpty, pushLocked: catalogEmpty })));
+        // due_date / population_due_date are optional in the CSV; a row that
+        // omits them falls back to the audit period end, still editable per row.
+        onDraftsChange(result.map((d) => ({
+          ...d,
+          dueDate: d.dueDate || periodEnd,
+          population: d.population
+            ? { ...d.population, dueDate: d.population.dueDate || periodEnd }
+            : null,
+          pushToFramework: catalogEmpty,
+          pushLocked: catalogEmpty,
+        })));
       }
     };
     reader.readAsText(file);
@@ -1579,6 +1594,7 @@ function Step2Controls({
                 <strong>Required columns:</strong> control_number, description, evidence_requirement<br />
                 <strong>Optional columns:</strong> requirement_type (DESIGN/OE), control_type, scope, due_date<br />
                 <strong>OE population columns (optional):</strong> population_description, population_due_date, population_comments<br />
+                Rows that leave due_date / population_due_date blank default to the audit period end ({periodEnd || "—"}); adjust any row before creating.<br />
                 Process Owner, Auditor POC, and Team must be set manually after upload.
                 {catalogEmpty && <><br /><strong>{framework.name}'s library is empty</strong> — every uploaded control is added to it.</>}
               </Alert>
@@ -2115,6 +2131,7 @@ export default function CreateAuditPage(): JSX.Element {
             onCsvErrorChange={setCsvError}
             framework={framework}
             frameworks={frameworks}
+            periodEnd={periodEnd}
           />
         )}
 
