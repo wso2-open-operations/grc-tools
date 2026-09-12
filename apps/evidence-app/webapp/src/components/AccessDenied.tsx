@@ -62,7 +62,11 @@ export default function AccessDenied({ message }: AccessDeniedProps) {
         px: 3,
       }}
     >
-      <Typography variant="h4">You don't have access to the Evidence App</Typography>
+      {/* The heading names the cause rather than restating the message
+          below it. It used to read "You don't have access to the Evidence
+          App", which is the first sentence of `message` word for word, so
+          the page opened by saying the same thing twice. */}
+      <Typography variant="h4">No role assigned yet</Typography>
       <Typography color="text.secondary" sx={{ maxWidth: 480 }}>
         {message}
       </Typography>
@@ -71,9 +75,13 @@ export default function AccessDenied({ message }: AccessDeniedProps) {
           Signed in as <strong>{account}</strong>.
         </Typography>
       )}
+      {/* Says why reloading is pointless and what to do instead. Kept clear
+          of the word "administrator", which `message` has already used, so
+          this reads as the next step rather than the same instruction
+          again. */}
       <Typography color="text.secondary" sx={{ maxWidth: 480 }}>
-        Your role is granted the moment you sign in, so reloading this page will not help. Once an
-        administrator has assigned you a role, sign out and sign in again to pick it up.
+        Reloading will not help, because your role is read when you sign in. Once you have the role,
+        sign out and sign in again.
       </Typography>
       <Button variant="contained" size="large" onClick={handleSignOut} sx={{ mt: 1 }}>
         Sign Out

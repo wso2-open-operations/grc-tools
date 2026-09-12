@@ -9,10 +9,24 @@ from app.models.evidence_file import EvidenceFile
 from app.models.submission import Submission
 from app.schemas.evidence import EvidenceResponse, EvidenceUpdate
 from app.storage.blob_paths import build_control_prefix, sanitize_title
-from app.storage.blob_storage import save_file, delete_file, delete_files
+from app.storage.blob_storage import save_file, delete_files
 from app.storage.evidence_zip import archive_size, build_evidence_zip, stream_archive
 
 router = APIRouter(prefix="/evidence", tags=["Evidence"])
+
+# How many files one submission can carry. Storing one blob takes roughly 5
+# seconds from Choreo to the East US storage account, and uploads happen one
+# after another rather than concurrently, so four files cost about 20
+# seconds against Choreo's 30,000 ms endpoint timeout -- comfortably under
+# it with a third of the budget still spare. Raise this once uploads are
+# made concurrent the way evidence_zip.py's reads already are.
+MAX_FILES_PER_SUBMISSION = 4
+
+# Per file is already capped at MAX_UPLOAD_SIZE_BYTES (15 MB) inside
+# save_file; this bounds the submission as a whole, since a few files each
+# under the per-file cap could otherwise still add up to more than the
+# storage account and the request as a whole should take.
+MAX_TOTAL_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 
 
 def _authorize_evidence_access(evidence: Evidence | None, user: User) -> None:
@@ -43,7 +57,11 @@ def create_evidence(
     title: str = Form(...),
     control_id: int = Form(...),
     description: str | None = Form(default=None),
-    file: UploadFile = File(...),
+    # The parameter is still named `file`, singular, on purpose: FastAPI
+    # collects every multipart part named "file" into this list, and a
+    # single part still arrives as a list of one, so existing callers that
+    # send exactly one file under the name "file" are unaffected.
+    file: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -60,9 +78,47 @@ def create_evidence(
     if control is None:
         raise HTTPException(status_code=404, detail="Control not found")
 
-    file_name, file_url = save_file(
-        file, prefix=build_control_prefix(control), label=sanitize_title(title)
-    )
+    # Validate the whole submission before uploading anything, same as the
+    # Control check above: a doomed request should never leave a stray blob
+    # behind. `UploadFile.size` here is the multipart parser's own running
+    # byte count for the part (accumulated in UploadFile.write as the body
+    # is parsed), not a client-supplied Content-Length -- it is set to 0
+    # when the part starts and only grows as real bytes are parsed, so it
+    # can be trusted the same way `save_file` already trusts its own byte
+    # count rather than a header.
+    if not file or len(file) > MAX_FILES_PER_SUBMISSION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Choose between 1 and {MAX_FILES_PER_SUBMISSION} files.",
+        )
+    total_bytes = sum(f.size or 0 for f in file)
+    if total_bytes > MAX_TOTAL_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "These files add up to more than "
+                f"{MAX_TOTAL_UPLOAD_BYTES // (1024 * 1024)} MB combined."
+            ),
+        )
+
+    prefix = build_control_prefix(control)
+    label = sanitize_title(title)
+
+    # Upload every file before touching the database, in the order they were
+    # submitted -- the first is what fills Evidence's own legacy singular
+    # file_name/file_url below. `save_file` itself rejects a bad content
+    # type or an oversized file (400/413) before writing that file's blob,
+    # but it can't know about files already written earlier in this loop, so
+    # a rejection partway through still has to clean up what came before it.
+    uploaded: list[tuple[str, str]] = []
+    try:
+        for f in file:
+            uploaded.append(save_file(f, prefix=prefix, label=label))
+    except Exception:
+        delete_files(name for name, _ in uploaded)
+        raise
+
+    file_name, file_url = uploaded[0]
     try:
         evidence = Evidence(
             title=title,
@@ -78,12 +134,13 @@ def create_evidence(
         # in the same uncommitted transaction.
         db.flush()
 
-        db.add(EvidenceFile(
-            evidence_id=evidence.id,
-            file_name=file_name,
-            file_url=file_url,
-            sort_order=0,
-        ))
+        for i, (uploaded_name, uploaded_url) in enumerate(uploaded):
+            db.add(EvidenceFile(
+                evidence_id=evidence.id,
+                file_name=uploaded_name,
+                file_url=uploaded_url,
+                sort_order=i,
+            ))
         db.add(Submission(
             evidence_id=evidence.id,
             submitted_by=user.email,
@@ -93,12 +150,12 @@ def create_evidence(
         db.commit()
     except Exception:
         db.rollback()
-        # The upload happens before the transaction and isn't something the
+        # The uploads happen before the transaction and aren't something the
         # database can roll back, so a failed write would otherwise strand
-        # the blob we just uploaded with nothing left to reference it. Clean
-        # it up explicitly so a failed submission leaves nothing behind in
-        # storage either, not just in the database.
-        delete_file(file_name)
+        # the blobs we just uploaded with nothing left to reference them.
+        # Clean them up explicitly so a failed submission leaves nothing
+        # behind in storage either, not just in the database.
+        delete_files(name for name, _ in uploaded)
         raise HTTPException(
             status_code=500,
             detail="Failed to create evidence. Please try again.",

@@ -10,6 +10,7 @@ than whether some internal function was called.
 """
 import httpx
 
+from app.api.routes.evidence import MAX_FILES_PER_SUBMISSION, MAX_TOTAL_UPLOAD_BYTES
 from app.models.evidence import Evidence
 from app.storage.blob_storage import MAX_UPLOAD_SIZE_BYTES
 
@@ -120,6 +121,82 @@ def test_upload_with_still_disallowed_content_type_is_rejected_with_allowed_type
 
     assert response.status_code == 400
     assert "application/pdf" in response.json()["detail"]
+
+    assert db_session.query(Evidence).count() == 0
+    assert uploaded_blob_names() == blobs_before
+
+
+def test_more_than_the_file_count_cap_is_rejected_and_writes_no_blob(
+    db_session, engineer_client
+):
+    """One file more than MAX_FILES_PER_SUBMISSION is rejected before any of
+    them are uploaded -- checked, as above, by diffing the container's real
+    contents rather than trusting the response alone."""
+    control = make_control(db_session)
+    blobs_before = uploaded_blob_names()
+
+    response = engineer_client.post(
+        "/api/evidence",
+        data={"title": "Console screenshots", "control_id": str(control.id)},
+        files=[
+            ("file", (f"shot-{i}.png", b"x", "image/png"))
+            for i in range(MAX_FILES_PER_SUBMISSION + 1)
+        ],
+    )
+
+    assert response.status_code == 400
+
+    assert db_session.query(Evidence).count() == 0
+    assert uploaded_blob_names() == blobs_before
+
+
+def test_total_over_the_size_cap_is_rejected_and_writes_no_blob(
+    db_session, engineer_client
+):
+    """Several files, each under the per-file MAX_UPLOAD_SIZE_BYTES cap, but
+    adding up to more than MAX_TOTAL_UPLOAD_BYTES combined, are rejected
+    before any of them are uploaded."""
+    control = make_control(db_session)
+    blobs_before = uploaded_blob_names()
+    each = MAX_TOTAL_UPLOAD_BYTES // 2 + 1024
+
+    response = engineer_client.post(
+        "/api/evidence",
+        data={"title": "Console screenshots", "control_id": str(control.id)},
+        files=[
+            ("file", ("a.png", b"a" * each, "image/png")),
+            ("file", ("b.png", b"b" * each, "image/png")),
+        ],
+    )
+
+    assert response.status_code == 413
+
+    assert db_session.query(Evidence).count() == 0
+    assert uploaded_blob_names() == blobs_before
+
+
+def test_one_disallowed_file_among_several_leaves_no_blobs_behind(
+    db_session, engineer_client
+):
+    """The first two files are allowed image types and would each upload
+    fine on their own; the third is a disallowed type. The whole submission
+    must be rejected, and the blobs already written for the first two must
+    not survive -- proving the mid-loop cleanup, not just the per-file
+    guard."""
+    control = make_control(db_session)
+    blobs_before = uploaded_blob_names()
+
+    response = engineer_client.post(
+        "/api/evidence",
+        data={"title": "Console screenshots", "control_id": str(control.id)},
+        files=[
+            ("file", ("shot-1.png", b"first", "image/png")),
+            ("file", ("shot-2.png", b"second", "image/png")),
+            ("file", ("not-an-image.exe", b"MZ not an image", "application/octet-stream")),
+        ],
+    )
+
+    assert response.status_code == 400
 
     assert db_session.query(Evidence).count() == 0
     assert uploaded_blob_names() == blobs_before

@@ -23,10 +23,13 @@ import io
 import zipfile
 
 import azure.storage.blob
+import pytest
+from azure.core.exceptions import ResourceNotFoundError
 
 from app.models.evidence import Evidence
 from app.models.evidence_file import EvidenceFile
 from app.storage.blob_paths import FALLBACK_TITLE_LABEL
+from app.storage.evidence_zip import build_evidence_zip
 
 from tests.conftest import build_evidence, make_control, upload_blob
 
@@ -282,3 +285,72 @@ def test_streamed_archive_declares_its_length_and_matches_the_body(db_session, e
     archive = _open_zip(response)
     assert archive.testzip() is None
     assert len(archive.namelist()) == 2
+
+
+# --- Concurrent batch reads (chala2001/grc-tools#141) -----------------------
+#
+# `build_evidence_zip` reads its files in batches of `_MAX_CONCURRENT_READS`
+# through a shared thread pool instead of one at a time -- see that name's
+# comment in `evidence_zip.py` for why. Batching must not be visible from
+# the outside: entry order, `NN` numbering and failure behaviour must come
+# out exactly as if every file were still read one at a time in one loop.
+
+
+def test_order_and_numbering_are_preserved_across_batch_boundaries(db_session, engineer_client):
+    """45 files means this download crosses two batch boundaries
+    (20 + 20 + 5, `_MAX_CONCURRENT_READS` is 20). Checking every entry's
+    number against its position in the zip's write order catches both a
+    numbering restart at each batch (e.g. 01..20, then 01..20, then 01..05)
+    and a batch's files landing in the archive out of order."""
+    file_count = 45
+    files = [(f"shot-{i}.png", f"content-{i:02d}".encode()) for i in range(1, file_count + 1)]
+    evidence, _files = build_evidence(db_session, *files)
+
+    response = engineer_client.get(f"/api/evidence/{evidence.id}/download")
+
+    assert response.status_code == 200
+    archive = _open_zip(response)
+    names = archive.namelist()
+    assert len(names) == file_count
+
+    for position, name in enumerate(names, start=1):
+        assert name.startswith(f"console-screenshot/{position:02d}-console-screenshot-"), (
+            position,
+            name,
+        )
+        assert archive.read(name) == f"content-{position:02d}".encode()
+
+
+def test_a_missing_blob_raises_instead_of_producing_a_short_zip(db_session, monkeypatch):
+    """A blob that's gone from storage by the time this runs (deleted,
+    corrupted metadata, whatever) must fail the whole download loudly --
+    never silently produce a zip with fewer files than the Evidence has.
+    `read_file` already lets `ResourceNotFoundError` propagate
+    (`blob_storage.py`); this proves the batched, thread-pooled read loop in
+    `build_evidence_zip` still lets that through rather than swallowing it or
+    wrapping it in something else.
+
+    Calls `build_evidence_zip` directly rather than through the route: the
+    route has no error handling of its own for this (by design -- see the
+    ticket), so this checks the exact property that matters, that the
+    exception comes out of this function, instead of depending on how
+    `TestClient` happens to surface an unhandled exception raised inside a
+    route."""
+    evidence, files = build_evidence(
+        db_session,
+        ("first.png", b"first"),
+        ("missing.png", b"missing"),
+        ("third.png", b"third"),
+    )
+    missing_name = files[1].file_name
+    original_download_blob = azure.storage.blob.BlobClient.download_blob
+
+    def fake_download_blob(self, *args, **kwargs):
+        if self.blob_name == missing_name:
+            raise ResourceNotFoundError(f"simulated missing blob {self.blob_name!r}")
+        return original_download_blob(self, *args, **kwargs)
+
+    monkeypatch.setattr(azure.storage.blob.BlobClient, "download_blob", fake_download_blob)
+
+    with pytest.raises(ResourceNotFoundError):
+        build_evidence_zip(evidence, files)

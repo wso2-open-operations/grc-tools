@@ -91,6 +91,80 @@ def test_create_evidence_end_to_end(db_session, engineer_client, engineer_user):
     assert fetch.content == b"fake screenshot bytes"
 
 
+def test_create_evidence_with_four_files_creates_four_evidence_files_in_order(
+    db_session, engineer_client, engineer_user
+):
+    """Four files in one submission create one Evidence, one Submission, and
+    four EvidenceFile rows in the order they were submitted, each with the
+    sort_order that matches its position. The Evidence's own legacy
+    file_name is the first file, exactly as Agent Runner submissions already
+    do it (see app/api/routes/agent.py)."""
+    control = make_control(db_session)
+
+    response = engineer_client.post(
+        "/api/evidence",
+        data={"title": "Console screenshots", "control_id": str(control.id)},
+        files=[
+            ("file", ("shot-1.png", b"first shot", "image/png")),
+            ("file", ("shot-2.png", b"second shot", "image/png")),
+            ("file", ("shot-3.png", b"third shot", "image/png")),
+            ("file", ("shot-4.png", b"fourth shot", "image/png")),
+        ],
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+
+    evidence = db_session.query(Evidence).filter(Evidence.id == body["id"]).one()
+
+    evidence_files = (
+        db_session.query(EvidenceFile)
+        .filter(EvidenceFile.evidence_id == evidence.id)
+        .order_by(EvidenceFile.sort_order)
+        .all()
+    )
+    assert [ef.sort_order for ef in evidence_files] == [0, 1, 2, 3]
+    assert evidence.file_name == evidence_files[0].file_name
+
+    submission = (
+        db_session.query(Submission).filter(Submission.evidence_id == evidence.id).one()
+    )
+    assert submission.status == "pending"
+
+    for ef, content in zip(
+        evidence_files, [b"first shot", b"second shot", b"third shot", b"fourth shot"]
+    ):
+        fetch = httpx.get(get_signed_url(ef.file_name))
+        assert fetch.status_code == 200
+        assert fetch.content == content
+
+
+def test_create_evidence_with_a_single_file_behaves_exactly_as_before(
+    db_session, engineer_client
+):
+    """A single-file submission still produces exactly one EvidenceFile at
+    sort_order 0, unaffected by the multi-file support added alongside this
+    test."""
+    control = make_control(db_session)
+
+    response = engineer_client.post(
+        "/api/evidence",
+        data={"title": "Console screenshot", "control_id": str(control.id)},
+        files={"file": ("screenshot.png", b"a single shot", "image/png")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+
+    evidence_files = (
+        db_session.query(EvidenceFile)
+        .filter(EvidenceFile.evidence_id == body["id"])
+        .all()
+    )
+    assert len(evidence_files) == 1
+    assert evidence_files[0].sort_order == 0
+
+
 def test_deleting_evidence_file_really_removes_it_from_storage(
     db_session, engineer_client, admin_client
 ):

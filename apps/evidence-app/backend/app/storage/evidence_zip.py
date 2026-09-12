@@ -40,6 +40,7 @@ import re
 import tempfile
 import zipfile
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from app.storage.blob_paths import build_control_prefix, sanitize_title
@@ -82,11 +83,43 @@ def _uuid_and_extension(blob_name: str) -> str:
 # (`blob_storage.MAX_UPLOAD_SIZE_BYTES`) but the number of files on one
 # Evidence is not capped, so an agent collection can total far more than any
 # one file. Holding all of that per concurrent download would put the ceiling
-# on worker memory rather than on disk, where it belongs.
+# on worker memory rather than on disk, where it belongs. This bound is about
+# the finished archive only; `_MAX_CONCURRENT_READS` below is what bounds the
+# separate, transient memory a batch of not-yet-written file bytes uses while
+# it's being read.
 _SPOOL_MAX_BYTES = 16 * 1024 * 1024
 
 # Size of each chunk handed to the response while streaming the archive back.
 _STREAM_CHUNK_BYTES = 64 * 1024
+
+# Reading a blob one at a time, as this function used to, costs about 5
+# seconds per file against the real Stage storage account -- Azure's own
+# work is ~20ms of that; the rest is round-trip network distance to the East
+# US storage account. Sequentially, an Evidence with 38 files takes roughly
+# 190 seconds, and Choreo's endpoint timeout is 30 seconds, so anything past
+# about a dozen files 504s before the zip is ever built. Reading a batch of
+# files concurrently turns that per-file network cost into a per-batch cost
+# instead: 20 files at ~5 seconds each in parallel is ~5 seconds, not ~100.
+#
+# 20 is also the batch size (see `build_evidence_zip`), not just the pool's
+# worker cap -- the two are the same number on purpose, so that reading one
+# batch never holds more than 20 files' bytes in memory at a time, no matter
+# how many files the whole Evidence has.
+_MAX_CONCURRENT_READS = 20
+
+# Shared by the whole application (created once, at import time) rather than
+# a fresh pool per request. A per-request pool would let the number of
+# concurrent blob reads grow with the number of people downloading at once --
+# ten simultaneous downloads would mean ten pools of up to 20 threads each,
+# 200 reads hitting the storage account (and holding memory) at the same
+# time. A single module-level pool keeps that ceiling fixed at
+# `_MAX_CONCURRENT_READS` reads in flight across the whole process, however
+# many downloads are running concurrently -- the number this function is
+# trying to protect is per-storage-account concurrency, not per-request
+# concurrency.
+_read_pool = ThreadPoolExecutor(
+    max_workers=_MAX_CONCURRENT_READS, thread_name_prefix="evidence-zip-read"
+)
 
 
 def build_evidence_zip(
@@ -110,12 +143,34 @@ def build_evidence_zip(
 
     buffer = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_BYTES)
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for position, evidence_file in enumerate(files, start=1):
-            entry_name = (
-                f"{folder}/{position:0{width}d}-{title}-"
-                f"{_uuid_and_extension(evidence_file.file_name)}"
-            )
-            archive.writestr(entry_name, read_file(evidence_file.file_name))
+        # Batches of `_MAX_CONCURRENT_READS` files at a time, read through
+        # the shared `_read_pool` -- see that name's comment for why 20 and
+        # why shared rather than per-request. `position` is still each
+        # file's 1-based index across the WHOLE `files` list (`batch_start`
+        # plus its offset within the batch), not its index within the
+        # batch -- entry numbering and ordering must come out byte-for-byte
+        # the same as the old single-file-at-a-time loop, batching is purely
+        # an internal read-scheduling detail.
+        for batch_start in range(0, len(files), _MAX_CONCURRENT_READS):
+            batch = files[batch_start : batch_start + _MAX_CONCURRENT_READS]
+
+            # `ThreadPoolExecutor.map` returns results in the same order as
+            # its inputs (not completion order) and, if any call raised,
+            # re-raises the first such exception -- in input order -- once
+            # that result is reached. Wrapping it in `list()` forces the
+            # whole batch to finish (or raise) before this batch writes
+            # anything to the archive, so a missing blob still fails the
+            # whole download loudly instead of producing a short zip with
+            # only the files read before the failure.
+            batch_contents = list(_read_pool.map(read_file, (ef.file_name for ef in batch)))
+
+            for offset, (evidence_file, content) in enumerate(zip(batch, batch_contents)):
+                position = batch_start + offset + 1
+                entry_name = (
+                    f"{folder}/{position:0{width}d}-{title}-"
+                    f"{_uuid_and_extension(evidence_file.file_name)}"
+                )
+                archive.writestr(entry_name, content)
 
     buffer.seek(0)
     return buffer

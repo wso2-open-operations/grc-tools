@@ -25,12 +25,15 @@ import Divider from "@mui/material/Divider";
 import Switch from "@mui/material/Switch";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Collapse from "@mui/material/Collapse";
+import Checkbox from "@mui/material/Checkbox";
 import { BoltIcon, ArrowRightIcon, CircleCheckFilledIcon, LightbulbOnIcon, XMarkIcon } from "@oxygen-ui/react-icons";
 import { agentApi, getAuthToken } from "../api/client";
 import { BACKEND_BASE_URL } from "../config/apiConfig";
 import ControlPicker from "../components/ControlPicker";
 import ProductPicker from "../components/ProductPicker";
 import FrameworkPicker from "../components/FrameworkPicker";
+import { computeAgentRunnerFormState } from "../utils/computeAgentRunnerFormState";
+import { detectChangingSteps, type ChangingStepFlag } from "../utils/detectChangingSteps";
 import "../index.css";
 
 // ── Portal presets ────────────────────────────────────────────────────────
@@ -96,6 +99,33 @@ function parseSubtasksClient(prompt: string): string[] {
   if (current.length) tasks.push(current);
   const joined = tasks.map((t) => t.join("\n").trim()).filter(Boolean);
   return joined.length ? joined : prompt.trim() ? [prompt.trim()] : [];
+}
+
+// ── Changing step banner text ───────────────────────────────────────────────
+// Turns detectChangingSteps' plain data into the sentence shown above the
+// primary button. Never echoes the prompt text — only step numbers and verb
+// group names, both of which are safe and short. See chala2001/grc-tools#140.
+
+function joinWithAnd(items: string[]): string {
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function describeChangingSteps(flagged: ChangingStepFlag[]): string {
+  // Deliberately does NOT name the step number, even though
+  // detectChangingSteps reports one. The number is the position in the
+  // PARSED list, and the parser only splits a numbered line when there is a
+  // space after the marker — so a prompt typed "1.foo" over two lines is one
+  // step, and a banner saying "Step 1" reads as wrong to someone who just
+  // typed a "2." they can see. Naming no step is never wrong; the prompt is
+  // right there to read.
+  const groups = Array.from(new Set(flagged.map((f) => f.group)));
+  return (
+    `This prompt looks like it changes something (${joinWithAnd(groups)}). ` +
+    "The Runner acts in your own signed in browser and can carry this out for real. " +
+    "Evidence capture only needs to view and screenshot."
+  );
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -236,11 +266,36 @@ export default function AgentRunner() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpSeen, setHelpSeen] = useSessionState<boolean>("helpSeen", false);
 
+  // The exact prompt text the Engineer last ticked the changing step
+  // checkbox for, or null before any tick. Deliberately plain useState, not
+  // useSessionState: a prompt restored after a reload must be presented for
+  // a fresh decision, not arrive already acknowledged. Deliberately not a
+  // boolean flag either — "acknowledged" is derived below by comparing this
+  // against the current prompt, so editing the prompt clears it with no
+  // extra bookkeeping. See chala2001/grc-tools#140.
+  const [acknowledgedPrompt, setAcknowledgedPrompt] = useState<string | null>(null);
+
   const parsedTasks = parseSubtasksClient(prompt);
   const maxStepsForComplexity = complexity === "quick" ? 15 : complexity === "thorough" ? 40 : 25;
 
   const isDone = taskOut ? ["completed", "failed", "cancelled"].includes(taskOut.status) : false;
-  const isRunning = !!taskOut && !isDone;
+
+  // Steps that look like they change something, from the same parsed list
+  // rendered below — never re-parses the prompt itself. See
+  // chala2001/grc-tools#140.
+  const changingSteps = detectChangingSteps(parsedTasks);
+  const changingStepsAcknowledged = acknowledgedPrompt === prompt;
+
+  // Rendering only — what the form should look like. The polling and SSE
+  // effects below keep consulting isDone directly, because they decide
+  // whether to keep talking to the backend, not what's drawn.
+  const formState = computeAgentRunnerFormState({
+    loginDone,
+    taskStatus: taskOut?.status ?? null,
+    queueing,
+    promptEmpty: !prompt.trim(),
+    unacknowledgedChangingSteps: changingSteps.length > 0 && !changingStepsAcknowledged,
+  });
 
   // Poll runner status every 10 s
   useEffect(() => {
@@ -472,9 +527,13 @@ export default function AgentRunner() {
     }
   };
 
-  const handleQueue = async (e: React.FormEvent) => {
+  const handleQueue = async (e: React.SyntheticEvent) => {
     e.preventDefault();
-    if (!loginDone || !prompt.trim() || isRunning) return;
+    // Refuses whenever the primary button itself would refuse — including
+    // once a task has finished, when the button's face has moved on to New
+    // Task. Keeps the rule in one place (computeAgentRunnerFormState)
+    // instead of restating it here. See chala2001/grc-tools#139.
+    if (formState.primaryAction !== "queue" || !formState.primaryActionEnabled) return;
     setQueueing(true);
     setError(null);
     lastInvalidatedRef.current = 0;
@@ -525,14 +584,17 @@ export default function AgentRunner() {
   };
 
   const handleNewTask = () => {
-    clearSessionState("taskId", "taskOut", "prompt", "productId", "frameworkId", "controlId", "title", "useVision", "maxActionsPerStep");
+    // Clears the finished Agent Task from view only — the prompt, the linked
+    // Control (and its Framework/Product), the title and the advanced
+    // settings are left exactly as they are, so the bottom panel's "edit the
+    // prompt above and run again" is actually true. useVision and
+    // maxActionsPerStep used to be dropped from session storage here without
+    // their state being reset, so they stayed on screen and then quietly
+    // reverted on the next reload; they are simply left alone now. See
+    // chala2001/grc-tools#139.
+    clearSessionState("taskId", "taskOut");
     setTaskId(null);
     setTaskOut(null);
-    setPrompt("");
-    setProductId("");
-    setFrameworkId("");
-    setControlId("");
-    setTitle("");
     setError(null);
     lastInvalidatedRef.current = 0;
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -762,7 +824,7 @@ export default function AgentRunner() {
           </FormControl>
 
           {/* ── Agent Settings (collapsible) ──────────────────────────── */}
-          <Box sx={{ opacity: (isRunning || isDone) ? 0.45 : 1, pointerEvents: (isRunning || isDone) ? "none" : "auto" }}>
+          <Box sx={{ opacity: formState.advancedSettingsEditable ? 1 : 0.45, pointerEvents: formState.advancedSettingsEditable ? "auto" : "none" }}>
             <Button
               size="small"
               variant="text"
@@ -899,6 +961,7 @@ export default function AgentRunner() {
             rows={6}
             required
             fullWidth
+            disabled={!formState.promptEditable}
           />
 
           {prompt.trim() && (
@@ -931,21 +994,69 @@ export default function AgentRunner() {
 
           {error && <Alert severity="error">{error}</Alert>}
 
+          {/* Only shown while the form can actually queue — a finished,
+              locked task has nothing left for this warning to govern, and
+              formState.promptEditable is false in exactly that state. See
+              chala2001/grc-tools#140. */}
+          {formState.promptEditable && changingSteps.length > 0 && (
+            <Alert severity="warning">
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {describeChangingSteps(changingSteps)}
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={changingStepsAcknowledged}
+                    onChange={(e) => setAcknowledgedPrompt(e.target.checked ? prompt : null)}
+                  />
+                }
+                label="I have checked this and want to run it anyway."
+              />
+            </Alert>
+          )}
+
+          {/* Never a submit button, in either face. It used to be one while
+              offering to queue, and an ordinary button while offering New
+              Task — but the face changes DURING the click: pressing New
+              Task clears the task, which makes the form queueable again,
+              and React had swapped the type back to "submit" before the
+              browser finished handling the press, so the browser then
+              submitted the form and re-queued the prompt. Dispatching from
+              onClick instead removes that whole class of bug, and the
+              preventDefault is a second lock so a future edit that
+              reintroduces type="submit" still can't bring it back. The form
+              keeps its own onSubmit, so Enter in a single line field
+              behaves exactly as before. See chala2001/grc-tools#139. */}
           <Button
-            type="submit"
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              if (formState.primaryAction === "newTask") handleNewTask();
+              else void handleQueue(e);
+            }}
             variant="contained"
             size="large"
-            disabled={!loginDone || queueing || !prompt.trim() || isRunning || isDone}
-            startIcon={(queueing || isRunning) ? <CircularProgress size={16} color="inherit" /> : <ArrowRightIcon size={18} />}
+            disabled={!formState.primaryActionEnabled}
+            startIcon={
+              formState.primaryAction === "queue" || formState.primaryAction === "newTask"
+                ? <ArrowRightIcon size={18} />
+                : <CircularProgress size={16} color="inherit" />
+            }
             sx={{ py: 1.25 }}
           >
-            {queueing ? "Queuing..." : isRunning ? (taskOut?.status === "queued" ? "Queued..." : "Agent running...") : "Queue Task for Runner"}
+            {formState.primaryAction === "queuing" ? "Queuing..." :
+              formState.primaryAction === "waitingForRunner" ? "Queued..." :
+              formState.primaryAction === "runningAgent" ? "Agent running..." :
+              formState.primaryAction === "newTask" ? "New Task" :
+              "Queue Task for Runner"}
           </Button>
 
           <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center" }}>
-            {loginDone
-              ? "The task is added to the queue. Your local runner picks it up and reuses your logged-in browser session."
-              : 'Complete Step 1 and click "I\'ve logged in" above to unlock this form.'}
+            {!loginDone
+              ? 'Complete Step 1 and click "I\'ve logged in" above to unlock this form.'
+              : formState.primaryAction === "newTask"
+                ? "This run is finished. Start a new task to run again, with your prompt and login session kept."
+                : "The task is added to the queue. Your local runner picks it up and reuses your logged-in browser session."}
             <br />Max steps this run: <strong>{maxStepsForComplexity}</strong> ({complexity})
           </Typography>
         </Stack>
@@ -962,26 +1073,26 @@ export default function AgentRunner() {
             </Box>
           )}
 
-          <Paper variant="outlined" sx={{ mt: 3, p: 2.5, backgroundColor: isDone ? "rgba(255,115,0,0.05)" : "rgba(0,0,0,0.02)" }}>
+          <Paper variant="outlined" sx={{ mt: 3, p: 2.5, backgroundColor: formState.resultPanelAction === "newTask" ? "rgba(255,115,0,0.05)" : "rgba(0,0,0,0.02)" }}>
             <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ xs: "stretch", sm: "center" }} spacing={2}>
               <Box sx={{ flex: 1 }}>
                 <Typography variant="subtitle1" fontWeight={700}>
-                  {isDone ? "Task finished. Queue another?" : "Start a new task?"}
+                  {formState.resultPanelAction === "newTask" ? "Task finished. Queue another?" : "Start a new task?"}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {isDone
+                  {formState.resultPanelAction === "newTask"
                     ? "Your login session and environment context are kept. Just edit the prompt above and run again."
                     : "Clear this task from the view and start fresh. The current task will keep running in the background."}
                 </Typography>
               </Box>
               <Button
-                variant={isDone ? "contained" : "outlined"}
+                variant={formState.resultPanelAction === "newTask" ? "contained" : "outlined"}
                 size="large"
                 onClick={handleNewTask}
                 startIcon={<ArrowRightIcon size={18} />}
                 sx={{ minWidth: 200 }}
               >
-                {isDone ? "New Task" : "Start Fresh"}
+                {formState.resultPanelAction === "newTask" ? "New Task" : "Start Fresh"}
               </Button>
             </Stack>
           </Paper>
