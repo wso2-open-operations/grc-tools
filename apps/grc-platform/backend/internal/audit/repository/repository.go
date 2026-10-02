@@ -285,10 +285,15 @@ type TrailRepository interface {
 	ListByAudit(ctx context.Context, auditID int, filter model.TrailFilter, limit, offset int) ([]*model.AuditTrailEntry, int, error)
 }
 
-// AIValidationLogRepository reads AI evidence-validation rows from the
-// Compliance Entity (advisory hints written by the async validation agent).
+// AIValidationLogRepository reads and writes AI validation rows against the
+// Compliance Entity. A row belongs to either an evidence round or a
+// population round — never both — hence the parallel evidence/population
+// method pairs.
 type AIValidationLogRepository interface {
 	ListByEvidence(ctx context.Context, evidenceID int) ([]*model.AIValidationLog, error)
+	ListByPopulation(ctx context.Context, populationID int) ([]*model.AIValidationLog, error)
+	CreateForEvidence(ctx context.Context, evidenceID int, req model.CreateAIValidationLogRequest) error
+	CreateForPopulation(ctx context.Context, populationID int, req model.CreateAIValidationLogRequest) error
 }
 
 // ReviewRepository is the data-access contract for audit_item_review.

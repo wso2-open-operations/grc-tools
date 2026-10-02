@@ -954,14 +954,14 @@ type UpdateEvidenceRequest struct {
 
 // AuditEvidenceFile is one uploaded file attached to an evidence submission or population.
 type AuditEvidenceFile struct {
-	ID           int       `json:"id"`
-	EvidenceID   *int      `json:"evidenceId"`
-	PopulationID *int      `json:"populationId"`
-	FileKind     *string   `json:"fileKind"` // POPULATION | SAMPLE (only when populationId is set)
-	FileName     string    `json:"fileName"`
-	FilePath     string    `json:"filePath"`
-	FileType     *string   `json:"fileType"`
-	FileSize     *int64    `json:"fileSize"`
+	ID           int     `json:"id"`
+	EvidenceID   *int    `json:"evidenceId"`
+	PopulationID *int    `json:"populationId"`
+	FileKind     *string `json:"fileKind"` // POPULATION | SAMPLE (only when populationId is set)
+	FileName     string  `json:"fileName"`
+	FilePath     string  `json:"filePath"`
+	FileType     *string `json:"fileType"`
+	FileSize     *int64  `json:"fileSize"`
 	// CreatedBy is the raw uuid of whoever uploaded this file — the submitting
 	// team member for a POPULATION or evidence file, the auditor for a SAMPLE
 	// one. Populated by the file list reads (ListPopulationFiles /
@@ -1791,33 +1791,49 @@ type ListAuditCommentsResponse struct {
 // Audit AI Validation Log (audit_ai_validation_log) — append-only
 // =============================================================================
 
-// AuditAIValidationLog is one AI validation run against an evidence submission.
-// Written by the async validation agent; read by compliance as review hints.
+// AuditAIValidationLog is one AI validation run against an evidence or
+// population submission. Written in-process by the GRC backend; read by
+// compliance as review hints. Exactly one of EvidenceID / PopulationID is set
+// (chk_ai_owner), mirroring AuditEvidenceFile's evidence/population split.
 type AuditAIValidationLog struct {
-	ID              int64     `json:"id"`
-	EvidenceID      int       `json:"evidenceId"`
-	ControlID       int       `json:"controlId"`
-	Result          string    `json:"result"`    // PASS | FAIL | UNCERTAIN | PENDING | ERROR
-	GapsFound       *string   `json:"gapsFound"` // JSON array of gap objects
-	Feedback        *string   `json:"feedback"`  // JSON array of submitter-facing action strings
-	Summary         *string   `json:"summary"`
-	ConfidenceScore *float64  `json:"confidenceScore"`
-	CreatedBy       *string   `json:"createdBy"`
-	CreatedOn       time.Time `json:"createdOn"`
+	ID           int64     `json:"id"`
+	EvidenceID   *int      `json:"evidenceId"`
+	PopulationID *int      `json:"populationId"`
+	ControlID    int       `json:"controlId"`
+	Result       string    `json:"result"`    // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
+	GapsFound    *string   `json:"gapsFound"` // JSON array of gap objects
+	Summary      *string   `json:"summary"`
+	CreatedBy    *string   `json:"createdBy"`
+	CreatedOn    time.Time `json:"createdOn"`
+	// Anthropic token accounting for this call (nil on lifecycle rows that
+	// never reached a completed LLM response).
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
+	OutputTokens             *int64 `json:"outputTokens,omitempty"`
+	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
-// CreateAuditAIValidationLogRequest is the payload for POST /evidence/{evidenceId}/ai-validations.
+// CreateAuditAIValidationLogRequest is the payload for
+// POST /evidence/{evidenceId}/ai-validations and
+// POST /populations/{populationId}/ai-validations — the owning id comes from
+// the path, not the body, on either route.
 type CreateAuditAIValidationLogRequest struct {
-	ControlID       int      `json:"controlId"`
-	Result          string   `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR
-	GapsFound       *string  `json:"gapsFound"`
-	Feedback        *string  `json:"feedback"`
-	Summary         *string  `json:"summary"`
-	ConfidenceScore *float64 `json:"confidenceScore"`
-	CreatedBy       string   `json:"createdBy"`
+	ControlID int     `json:"controlId"`
+	Result    string  `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
+	GapsFound *string `json:"gapsFound"`
+	Summary   *string `json:"summary"`
+	CreatedBy string  `json:"createdBy"`
+	// Anthropic token accounting for this call; left nil on lifecycle rows
+	// (PENDING/SKIPPED/ERROR) that never reached a completed LLM response.
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
+	OutputTokens             *int64 `json:"outputTokens,omitempty"`
+	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
-// ListAuditAIValidationLogsResponse is returned by GET /evidence/{evidenceId}/ai-validations.
+// ListAuditAIValidationLogsResponse is returned by
+// GET /evidence/{evidenceId}/ai-validations and
+// GET /populations/{populationId}/ai-validations.
 type ListAuditAIValidationLogsResponse struct {
 	Validations []AuditAIValidationLog `json:"validations"`
 }

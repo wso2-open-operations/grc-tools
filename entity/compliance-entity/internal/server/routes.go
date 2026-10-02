@@ -281,9 +281,13 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	mux.HandleFunc("GET /audits/{auditId}/controls/{controlId}/comments", commentH.ListComments)
 	mux.HandleFunc("DELETE /comments/{commentId}", commentH.DeleteComment)
 
-	// Evidence AI validation log (written by the async validation agent; read as review hints)
+	// AI validation log (written in-process by the GRC backend; read as review
+	// hints). A row belongs to either an evidence round or a population round —
+	// never both — hence the two owner-keyed route families below.
 	mux.HandleFunc("POST /evidence/{evidenceId}/ai-validations", aiValidationH.CreateValidation)
 	mux.HandleFunc("GET /evidence/{evidenceId}/ai-validations", aiValidationH.ListValidations)
+	mux.HandleFunc("POST /populations/{populationId}/ai-validations", aiValidationH.CreateValidationForPopulation)
+	mux.HandleFunc("GET /populations/{populationId}/ai-validations", aiValidationH.ListValidationsForPopulation)
 
 	// Populations (nested creation under controls; flat access by population ID)
 	mux.HandleFunc("POST /audits/{auditId}/controls/{controlId}/populations", populationH.CreatePopulation)

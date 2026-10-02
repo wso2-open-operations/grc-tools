@@ -20,13 +20,13 @@ package handler
 import (
 	"context"
 
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/aivalidation"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/routeguard"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/adminactivity"
-	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aiagent"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/applink"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/emailer"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/grant"
@@ -49,9 +49,11 @@ type Deps struct {
 	Trail        auditservice.TrailService
 	AIValidation auditservice.AIValidationService
 
-	// AIAgent triggers async AI validation after an evidence submission.
-	// Nil when AI_VALIDATION_ENABLED is false — the trigger becomes a no-op.
-	AIAgent *aiagent.Client
+	// AIValidationRun triggers the in-process AI validation job after an
+	// evidence or population submission (internal/audit/aivalidation). Its
+	// Trigger* methods are no-ops when AI_VALIDATION_ENABLED is false or no
+	// ANTHROPIC_API_KEY is configured — see cmd/server/audit_deps.go.
+	AIValidationRun *aivalidation.Service
 
 	// Email sends every audit-module notification (owner assigned, reminder
 	// digest, resubmission needed, sample submitted) — see notify.go.
@@ -78,8 +80,7 @@ type Deps struct {
 	Links applink.Links
 	// HR resolves an overdue item owner's lead (their line manager) for the
 	// overdue lead escalation. Nil when LEAD_ESCALATION_EMAILS_ENABLED is
-	// false, in which case no lead is ever resolved — same nil-when-disabled
-	// pattern as AIAgent.
+	// false, in which case no lead is ever resolved.
 	HR *hrentity.Client
 	// TriggerReminderJob runs the daily due-date reminder sweep on demand —
 	// wired in cmd/server/main.go to the reminder job's RunOnce method, kept
@@ -102,7 +103,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	dh := &dashboardHandler{svc: deps.Dashboard}
 	eh := newEvidenceHandler(&deps)
 	cmh := &commentHandler{svc: deps.Comment, controlSvc: deps.Control, notify: &deps, directory: deps.Directory}
-	avh := &aiValidationHandler{svc: deps.AIValidation, evidenceSvc: deps.Evidence}
+	avh := &aiValidationHandler{svc: deps.AIValidation, evidenceSvc: deps.Evidence, controlSvc: deps.Control, popSvc: deps.Population}
 	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
 
 	// Current user (shared by both hubs — resolved privilege set unions RISK_*
@@ -217,6 +218,10 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	mux.HandleFunc("POST /api/v1/audits/{id}/controls/{controlId}/comments", cmh.addComment)
 	mux.HandleFunc("DELETE /api/v1/audits/{id}/controls/{controlId}/comments/{commentId}", cmh.deleteComment)
 
-	// AI validation advisory results (read-only hint; SUBMIT or REVIEW evidence).
+	// AI validation advisory results (read-only hint, internal-only — see
+	// aivalidation.go). The population route carries auditId/controlId
+	// directly, unlike the evidence one, which predates this internal-only
+	// simplification and still resolves them from evidenceId.
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/evidence/{evidenceId}/ai-validations", avh.listValidations)
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}/population/{populationId}/ai-validations", avh.listPopulationValidations)
 }

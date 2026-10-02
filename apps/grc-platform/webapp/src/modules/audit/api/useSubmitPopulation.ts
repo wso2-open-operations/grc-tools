@@ -30,6 +30,9 @@ interface SubmitPopulationPayload {
   // attestation, there's no privilege gate: anyone who can submit population
   // files can use this too (mirrors sample selection's own files-or-note rule).
   attestation?: string;
+  // Opts this one submission out of AI validation — see
+  // SubmitEvidencePayload.skipAiValidation.
+  skipAiValidation?: boolean;
 }
 
 async function errText(res: Response, action: string): Promise<string> {
@@ -49,7 +52,7 @@ export function useSubmitPopulation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ auditId, controlId, files, attestation }: SubmitPopulationPayload): Promise<void> => {
+    mutationFn: async ({ auditId, controlId, files, attestation, skipAiValidation }: SubmitPopulationPayload): Promise<void> => {
       if (files.length === 0 && !attestation) throw new Error("Select at least one file, or add a note, to submit.");
       const base = `${BACKEND_BASE_URL}/api/v1/audits/${auditId}/controls/${controlId}/population`;
 
@@ -72,7 +75,11 @@ export function useSubmitPopulation() {
       const submitRes = await authFetch(`${base}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folderPath, attestation: attestation ?? undefined }),
+        body: JSON.stringify({
+          folderPath,
+          attestation: attestation ?? undefined,
+          skipAiValidation: skipAiValidation ?? undefined,
+        }),
       });
       if (!submitRes.ok) throw new Error(await errText(submitRes, "submit population"));
     },

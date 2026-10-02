@@ -25,6 +25,8 @@ interface AddEvidenceFilesPayload {
   auditId: number;
   controlId: number;
   files: File[];
+  // Opts this one submission out of AI validation — see SubmitEvidencePayload.
+  skipAiValidation?: boolean;
 }
 
 async function errText(res: Response, action: string): Promise<string> {
@@ -48,7 +50,7 @@ export function useAddEvidenceFiles() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ auditId, controlId, files }: AddEvidenceFilesPayload): Promise<void> => {
+    mutationFn: async ({ auditId, controlId, files, skipAiValidation }: AddEvidenceFilesPayload): Promise<void> => {
       if (files.length === 0) throw new Error("Select at least one file to add.");
       const base = `${BACKEND_BASE_URL}/api/v1/audits/${auditId}/controls/${controlId}/evidence`;
 
@@ -71,7 +73,7 @@ export function useAddEvidenceFiles() {
       const addRes = await authFetch(`${base}/files`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: uploaded }),
+        body: JSON.stringify({ files: uploaded, skipAiValidation: skipAiValidation ?? undefined }),
       });
       if (!addRes.ok) throw new Error(await errText(addRes, "add evidence files"));
     },

@@ -79,7 +79,10 @@ func (d *Deps) SubmitPortalEvidence(ctx context.Context, auditID, controlID int,
 			return nil, err
 		}
 	}
-	evidence, err := eh.finalizeEvidenceSubmission(ctx, auditID, controlID, refs, "", false, actorUUID, channelEvidencePortal, clientID)
+	// The Evidence Portal ingress has no opt-out checkbox — it's an
+	// internal-submitter-only control on the web app form — so AI validation
+	// always runs for a portal submission.
+	evidence, err := eh.finalizeEvidenceSubmission(ctx, auditID, controlID, refs, "", false, actorUUID, channelEvidencePortal, clientID, false)
 	if err != nil {
 		// A round whose rollback could not be confirmed may still reference
 		// these blobs — deleting them would leave that round pointing at

@@ -19,21 +19,23 @@ import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { BACKEND_BASE_URL } from "@config/apiConfig";
 import { extractErrorMessage } from "@modules/audit/api/apiError";
 
-/** One AI validation run against an evidence submission (advisory only). */
+/**
+ * One AI validation run against an evidence or population submission
+ * (advisory only). Exactly one of evidenceId / populationId is set.
+ */
 export interface AIValidationLog {
   id: number;
-  evidenceId: number;
+  evidenceId: number | null;
+  populationId: number | null;
   controlId: number;
-  result: "PASS" | "FAIL" | "UNCERTAIN" | "PENDING" | "ERROR";
+  result: "PASS" | "FAIL" | "UNCERTAIN" | "PENDING" | "ERROR" | "SKIPPED";
   gapsFound: string | null; // JSON array of AIGap, stored as a string
-  feedback: string | null; // JSON array of strings, stored as a string
-  summary: string | null;
-  confidenceScore: number | null;
+  summary: string | null; // one-line headline; empty for a clean PASS
   createdBy: string | null;
   createdOn: string;
 }
 
-/** A single requirement gap the AI flagged. */
+/** A single problem the AI flagged. */
 export interface AIGap {
   requirementAspect: string;
   issue: string;
@@ -78,21 +80,11 @@ export function parseGaps(gapsFound: string | null): AIGap[] {
   }
 }
 
-/** Parses the feedback JSON string; returns [] on absence or malformed data. */
-export function parseFeedback(feedback: string | null): string[] {
-  if (!feedback) return [];
-  try {
-    const parsed = JSON.parse(feedback);
-    return Array.isArray(parsed)
-      ? parsed.filter((e): e is string => typeof e === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
 export const aiValidationQueryKey = (evidenceId: number) =>
-  ["audit", "ai-validation", evidenceId] as const;
+  ["audit", "ai-validation", "evidence", evidenceId] as const;
+
+export const populationAIValidationQueryKey = (populationId: number) =>
+  ["audit", "ai-validation", "population", populationId] as const;
 
 /**
  * Fetches the AI validation rows for an evidence submission, latest first.
@@ -119,6 +111,47 @@ export function useGetAIValidation(auditId: number, controlId: number, evidenceI
     refetchInterval: (query) => {
       const latest = query.state.data?.[0];
       return isFreshPending(latest) ? 5000 : false;
+    },
+  });
+}
+
+// The backend writes the first (PENDING) row from a detached goroutine after
+// the submit returns, so a just-updated round can briefly have no rows yet.
+const FIRST_ROW_WINDOW_MS = 60_000;
+
+/**
+ * useGetAIValidation for a population submission. Also polls, bounded to
+ * FIRST_ROW_WINDOW_MS after `roundUpdatedAt`, while no row exists yet.
+ */
+export function useGetPopulationAIValidation(
+  auditId: number,
+  controlId: number,
+  populationId: number | null,
+  roundUpdatedAt: string | null = null,
+) {
+  const authFetch = useAuthApiClient();
+
+  return useQuery({
+    queryKey: populationAIValidationQueryKey(populationId ?? 0),
+    enabled: populationId !== null,
+    queryFn: async (): Promise<AIValidationLog[]> => {
+      const res = await authFetch(
+        `${BACKEND_BASE_URL}/api/v1/audits/${auditId}/controls/${controlId}/population/${populationId}/ai-validations`,
+      );
+      if (!res.ok) {
+        throw new Error(await extractErrorMessage(res, `Failed to load AI validation (${res.status})`));
+      }
+      const body = (await res.json()) as AIValidationListResponse;
+      return body.validations ?? [];
+    },
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data?.length === 0 && roundUpdatedAt) {
+        // abs() so client/server clock skew can't make the window unbounded.
+        const age = Date.now() - new Date(roundUpdatedAt).getTime();
+        if (Math.abs(age) < FIRST_ROW_WINDOW_MS) return 5000;
+      }
+      return isFreshPending(data?.[0]) ? 5000 : false;
     },
   });
 }

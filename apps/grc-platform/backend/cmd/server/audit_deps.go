@@ -19,6 +19,7 @@ package main
 import (
 	"log/slog"
 
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/aivalidation"
 	audithandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/handler"
 	auditentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository/entity"
 	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
@@ -26,12 +27,12 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/adminactivity"
-	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aiagent"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/applink"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/emailer"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/entityclient"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/file"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/grant"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/llm"
 )
 
 // buildAuditDeps wires Audit Hub dependencies. The audit module now reads/writes
@@ -77,30 +78,37 @@ func buildAuditDeps(fileSvc *file.Service, ec *entityclient.Client, aiCfg config
 	aiValidationSvc := auditservice.NewAIValidationService(aiValidationRepo)
 	notificationSvc := auditservice.NewNotificationService(notificationRepo)
 
-	// AI validation trigger client — only when explicitly enabled per env.
-	var aiAgent *aiagent.Client
-	if aiCfg.Enabled {
-		if aiCfg.AgentAPIKey == "" {
-			slog.Error("AI_VALIDATION_ENABLED=true but AI_AGENT_API_KEY is not set — disabling AI validation to avoid per-request 401s")
-		} else {
-			aiAgent = aiagent.New(aiCfg.AgentBaseURL, aiCfg.AgentAPIKey)
-		}
+	// In-process AI validation trigger — only when explicitly enabled and a
+	// key is present. A misconfigured deployment (enabled with no key) is
+	// disabled rather than failing startup, mirroring the old
+	// AI_AGENT_API_KEY guard this replaces.
+	aiValidationEnabled := aiCfg.Enabled
+	if aiCfg.Enabled && aiCfg.APIKey == "" {
+		slog.Error("AI_VALIDATION_ENABLED=true but ANTHROPIC_API_KEY is not set — disabling AI validation")
+		aiValidationEnabled = false
 	}
+	var llmClient llm.Caller
+	if aiValidationEnabled {
+		llmClient = llm.New(aiCfg.APIKey, aiCfg.BaseURL, aivalidation.JobTimeout)
+	}
+	aiValidation := aivalidation.NewService(
+		llmClient, aiValidationRepo, controlSvc, evidenceSvc, populationSvc, commentSvc, aiValidationEnabled,
+	)
 
 	return audithandler.Deps{
-		Audit:        auditSvc,
-		Control:      controlSvc,
-		Framework:    frameworkSvc,
-		User:         userSvc,
-		Team:         teamSvc,
-		Dashboard:    dashboardSvc,
-		Evidence:     evidenceSvc,
-		Population:   populationSvc,
-		Trail:        trailSvc,
-		Comment:      commentSvc,
-		Notification: notificationSvc,
-		AIValidation: aiValidationSvc,
-		AIAgent:      aiAgent,
+		Audit:           auditSvc,
+		Control:         controlSvc,
+		Framework:       frameworkSvc,
+		User:            userSvc,
+		Team:            teamSvc,
+		Dashboard:       dashboardSvc,
+		Evidence:        evidenceSvc,
+		Population:      populationSvc,
+		Trail:           trailSvc,
+		Comment:         commentSvc,
+		Notification:    notificationSvc,
+		AIValidation:    aiValidationSvc,
+		AIValidationRun: aiValidation,
 		// Reuses the same email-service credentials already loaded for risk —
 		// one email-service client for the whole backend, no new env vars.
 		Email:       emailer.New(emailCfg.ServiceURL, emailCfg.FromAddress, emailCfg.TokenURL, emailCfg.ClientID, emailCfg.ClientSecret, emailCfg.Enabled),

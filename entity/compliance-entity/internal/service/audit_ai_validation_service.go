@@ -35,26 +35,31 @@ func NewAIValidationService(repo repository.AIValidationRepository) AIValidation
 }
 
 // PASS/FAIL/UNCERTAIN are verdicts; PENDING/ERROR are lifecycle rows written
-// by the async validation agent (append-only — a terminal row is appended
-// later rather than updating the PENDING one).
-var validAIResults = map[string]bool{"PASS": true, "FAIL": true, "UNCERTAIN": true, "PENDING": true, "ERROR": true}
+// by the in-process validation trigger (append-only — a terminal row is
+// appended later rather than updating the PENDING one). SKIPPED is written
+// when the submitter opted out via the checkbox — no LLM call is made.
+var validAIResults = map[string]bool{"PASS": true, "FAIL": true, "UNCERTAIN": true, "PENDING": true, "ERROR": true, "SKIPPED": true}
+
+func (s *aiValidationService) validateRequest(req *domain.CreateAuditAIValidationLogRequest) error {
+	if req.ControlID <= 0 {
+		return &apierror.ValidationError{Msg: "controlId must be a positive integer"}
+	}
+	req.Result = strings.ToUpper(req.Result)
+	if !validAIResults[req.Result] {
+		return &apierror.ValidationError{Msg: "invalid result: " + req.Result + " (must be PASS, FAIL, UNCERTAIN, PENDING, ERROR, or SKIPPED)"}
+	}
+	if req.CreatedBy == "" {
+		return &apierror.ValidationError{Msg: "createdBy is required"}
+	}
+	return nil
+}
 
 func (s *aiValidationService) CreateValidation(ctx context.Context, evidenceID int, req domain.CreateAuditAIValidationLogRequest) (domain.AuditAIValidationLog, error) {
 	if evidenceID <= 0 {
 		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "evidenceId must be a positive integer"}
 	}
-	if req.ControlID <= 0 {
-		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "controlId must be a positive integer"}
-	}
-	req.Result = strings.ToUpper(req.Result)
-	if !validAIResults[req.Result] {
-		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "invalid result: " + req.Result + " (must be PASS, FAIL, UNCERTAIN, PENDING, or ERROR)"}
-	}
-	if req.CreatedBy == "" {
-		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "createdBy is required"}
-	}
-	if req.ConfidenceScore != nil && (*req.ConfidenceScore < 0 || *req.ConfidenceScore > 1) {
-		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "confidenceScore must be between 0 and 1"}
+	if err := s.validateRequest(&req); err != nil {
+		return domain.AuditAIValidationLog{}, err
 	}
 	l, err := s.repo.CreateValidation(ctx, evidenceID, req)
 	if err != nil {
@@ -68,6 +73,34 @@ func (s *aiValidationService) ListValidationsByEvidence(ctx context.Context, evi
 		return domain.ListAuditAIValidationLogsResponse{}, &apierror.ValidationError{Msg: "evidenceId must be a positive integer"}
 	}
 	logs, err := s.repo.ListValidationsByEvidence(ctx, evidenceID)
+	if err != nil {
+		return domain.ListAuditAIValidationLogsResponse{}, err
+	}
+	if logs == nil {
+		logs = []domain.AuditAIValidationLog{}
+	}
+	return domain.ListAuditAIValidationLogsResponse{Validations: logs}, nil
+}
+
+func (s *aiValidationService) CreateValidationForPopulation(ctx context.Context, populationID int, req domain.CreateAuditAIValidationLogRequest) (domain.AuditAIValidationLog, error) {
+	if populationID <= 0 {
+		return domain.AuditAIValidationLog{}, &apierror.ValidationError{Msg: "populationId must be a positive integer"}
+	}
+	if err := s.validateRequest(&req); err != nil {
+		return domain.AuditAIValidationLog{}, err
+	}
+	l, err := s.repo.CreateValidationForPopulation(ctx, populationID, req)
+	if err != nil {
+		return domain.AuditAIValidationLog{}, err
+	}
+	return *l, nil
+}
+
+func (s *aiValidationService) ListValidationsByPopulation(ctx context.Context, populationID int) (domain.ListAuditAIValidationLogsResponse, error) {
+	if populationID <= 0 {
+		return domain.ListAuditAIValidationLogsResponse{}, &apierror.ValidationError{Msg: "populationId must be a positive integer"}
+	}
+	logs, err := s.repo.ListValidationsByPopulation(ctx, populationID)
 	if err != nil {
 		return domain.ListAuditAIValidationLogsResponse{}, err
 	}

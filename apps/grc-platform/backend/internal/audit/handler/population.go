@@ -173,6 +173,10 @@ func (h *evidenceHandler) submitPopulation(w http.ResponseWriter, r *http.Reques
 	// Best-effort audit-trail attribution: this submission came through the web app.
 	recordEvidenceTrail(r.Context(), h.trailSvc, auditID, controlID, 0, actor, channelWebApp, user.Issuer, nil)
 
+	// Fire AI validation — population phase, same fire-and-forget semantics
+	// as the evidence submit path (finalizeEvidenceSubmission).
+	h.aiValidation.TriggerPopulation(auditID, controlID, populationID, actor, req.SkipAiValidation)
+
 	response.WriteJSONValue(w, http.StatusCreated, result)
 }
 

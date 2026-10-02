@@ -341,31 +341,45 @@ CREATE TABLE IF NOT EXISTS audit_comment (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
--- audit_ai_validation_log  (async AI validation results, append-only)
+-- audit_ai_validation_log  (in-process AI validation results, append-only)
 --
--- Rows are hints only — they never block or change evidence status.
--- The AI service writes here after async analysis of the evidence file.
+-- Rows are hints only — they never block or change evidence/population status.
+-- The backend writes here after in-process analysis of a submission's files.
+-- Exactly one of evidence_id / population_id is set (chk_ai_owner), mirroring
+-- audit_evidence_file.chk_file_owner — a row belongs to either an evidence
+-- round or a population round, never both.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS audit_ai_validation_log (
   id               BIGINT       NOT NULL AUTO_INCREMENT,
-  evidence_id      INT          NOT NULL,
+  evidence_id      INT          NULL,
+  population_id    INT          NULL,
   control_id       INT          NOT NULL,
   -- PASS/FAIL/UNCERTAIN are verdicts; PENDING (job started) and ERROR (job
-  -- failed) are lifecycle rows appended by the validation agent (append-only,
-  -- no UPDATEs — the UI reads the latest row per evidence).
-  result           ENUM('PASS','FAIL','UNCERTAIN','PENDING','ERROR') NOT NULL,
+  -- failed) are lifecycle rows appended by the validation trigger (append-only,
+  -- no UPDATEs — the UI reads the latest row per evidence/population).
+  -- SKIPPED is recorded when the submitter opted out via the checkbox — no
+  -- LLM call is made for that row.
+  result           ENUM('PASS','FAIL','UNCERTAIN','PENDING','ERROR','SKIPPED') NOT NULL,
   gaps_found       TEXT         NULL,     -- JSON array of gap objects
-  feedback         TEXT         NULL,     -- JSON array of submitter-facing action strings
   summary          TEXT         NULL,
-  confidence_score DECIMAL(5,4) NULL,
+  -- Anthropic token accounting for this call, for observing prompt-cache
+  -- effectiveness. NULL on lifecycle rows (PENDING/ERROR/SKIPPED) that never
+  -- reached a completed LLM response.
+  input_tokens                 BIGINT NULL,
+  output_tokens                BIGINT NULL,
+  cache_read_input_tokens      BIGINT NULL,
+  cache_creation_input_tokens  BIGINT NULL,
   created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by       VARCHAR(255) NULL,
   PRIMARY KEY (id),
   KEY idx_ai_evidence (evidence_id),
+  KEY idx_ai_population (population_id),
   KEY idx_ai_control  (control_id),
-  CONSTRAINT fk_ai_evidence FOREIGN KEY (evidence_id) REFERENCES audit_evidence(id) ON DELETE CASCADE,
-  CONSTRAINT fk_ai_control  FOREIGN KEY (control_id)  REFERENCES audit_control(id)  ON DELETE CASCADE
+  CONSTRAINT fk_ai_evidence   FOREIGN KEY (evidence_id)   REFERENCES audit_evidence(id)   ON DELETE CASCADE,
+  CONSTRAINT fk_ai_population FOREIGN KEY (population_id) REFERENCES audit_population(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ai_control    FOREIGN KEY (control_id)    REFERENCES audit_control(id)    ON DELETE CASCADE,
+  CONSTRAINT chk_ai_owner CHECK ((evidence_id IS NOT NULL) <> (population_id IS NOT NULL))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================

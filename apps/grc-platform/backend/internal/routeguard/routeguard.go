@@ -94,9 +94,10 @@ var externalVisible = map[string]bool{
 	"POST /api/v1/audits/{id}/controls/{controlId}/evidence/review":                 false,
 	"DELETE /api/v1/audits/{id}/controls/{controlId}/evidence/files/{fileId}":       false,
 	"DELETE /api/v1/audits/{id}/controls/{controlId}/evidence/{evidenceId}":         false,
-	// A pre-existing gap, not a decision: the handler has no assigned-auditor
-	// branch. Flip to true when that is fixed.
-	"GET /api/v1/audits/{id}/controls/{controlId}/evidence/{evidenceId}/ai-validations": false,
+	// AI validation results are internal-only — an external auditor gets no
+	// AI validation data at all, for any evidence or population, in any state.
+	"GET /api/v1/audits/{id}/controls/{controlId}/evidence/{evidenceId}/ai-validations":     false,
+	"GET /api/v1/audits/{id}/controls/{controlId}/population/{populationId}/ai-validations": false,
 
 	// ── Audit Hub: population ────────────────────────────────────────────────
 	"GET /api/v1/audits/{id}/controls/{controlId}/population":                   true,

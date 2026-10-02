@@ -1309,6 +1309,36 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/audits/{id}/controls/{controlId}/population/{populationId}/ai-validations:
+    get:
+      tags:
+      - AI Validations
+      summary: List AI validation results for a population round
+      description: Advisory review hints only; the frontend never gates the workflow on these.
+      operationId: listPopulationAIValidations
+      parameters:
+      - $ref: '#/components/parameters/AuditId'
+      - $ref: '#/components/parameters/ControlId'
+      - name: populationId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: AI validation results, latest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIValidationListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /api/v1/audits/{id}/controls/{controlId}/population/upload-link:
     get:
       tags:
@@ -4651,6 +4681,9 @@ components:
         attestation:
           type: string
           description: Fileless-completion justification. Only honored when files is empty AND the caller holds ManageControls.
+        skipAiValidation:
+          type: boolean
+          description: Opts this one submission out of AI validation. Decided fresh per submission; never persisted.
     PopulationSubmitRequest:
       type: object
       properties:
@@ -4659,6 +4692,9 @@ components:
         attestation:
           type: string
           description: Written note standing in for population files — required when the folder has none.
+        skipAiValidation:
+          type: boolean
+          description: Opts this one submission out of AI validation. Decided fresh per submission; never persisted.
     AuditPopulation:
       type: object
       description: One population round for an OE control. A control normally has exactly one round for its whole lifecycle.
@@ -4891,13 +4927,20 @@ components:
           type: integer
     AIValidationLog:
       type: object
-      description: One AI evidence-validation run. Advisory only — never gates the workflow.
+      description: >-
+        One AI validation run against an evidence or population submission.
+        Advisory only — never gates the workflow. Exactly one of evidenceId /
+        populationId is set.
       properties:
         id:
           type: integer
           format: int64
         evidenceId:
           type: integer
+          nullable: true
+        populationId:
+          type: integer
+          nullable: true
         controlId:
           type: integer
         result:
@@ -4908,20 +4951,13 @@ components:
           - UNCERTAIN
           - PENDING
           - ERROR
+          - SKIPPED
         gapsFound:
           type: string
           nullable: true
           description: JSON array of gap objects.
-        feedback:
-          type: string
-          nullable: true
-          description: JSON array of submitter-facing action strings.
         summary:
           type: string
-          nullable: true
-        confidenceScore:
-          type: number
-          format: double
           nullable: true
         createdBy:
           type: string
@@ -4929,6 +4965,22 @@ components:
         createdOn:
           type: string
           format: date-time
+        inputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        outputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheReadInputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheCreationInputTokens:
+          type: integer
+          format: int64
+          nullable: true
     AIValidationListResponse:
       type: object
       properties:

@@ -20,12 +20,12 @@ import "time"
 
 // AuditEvidenceFile represents a single uploaded file attached to an evidence submission.
 type AuditEvidenceFile struct {
-	ID         int       `json:"id"`
-	EvidenceID int       `json:"evidenceId"`
-	FileName   string    `json:"fileName"`
-	FilePath   string    `json:"filePath"`
-	FileType   *string   `json:"fileType"`
-	FileSize   *int64    `json:"fileSize"`
+	ID         int     `json:"id"`
+	EvidenceID int     `json:"evidenceId"`
+	FileName   string  `json:"fileName"`
+	FilePath   string  `json:"filePath"`
+	FileType   *string `json:"fileType"`
+	FileSize   *int64  `json:"fileSize"`
 	// CreatedBy is the raw uuid of whoever uploaded this file. It is not
 	// always the round's CreatedBy: "Add Files" appends to an open round, so a
 	// round can hold files from several people and several moments.
@@ -127,6 +127,13 @@ type EvidenceFileRef struct {
 type SubmitEvidenceRequest struct {
 	Files       []EvidenceFileRef `json:"files"`
 	Attestation string            `json:"attestation,omitempty"`
+	// SkipAiValidation opts this one submission out of AI validation (the
+	// submission form's checkbox — decided fresh per submission, never
+	// persisted). Not a security control: at worst, trusting it skips an
+	// advisory check, so it needs no separate server-side role gate beyond
+	// the ordinary SubmitEvidence privilege this endpoint already requires.
+	// The checkbox itself is only rendered for internal submitter roles.
+	SkipAiValidation bool `json:"skipAiValidation,omitempty"`
 }
 
 // PopulationSubmitRequest is the body for POST .../population/submit and
@@ -144,4 +151,7 @@ type SubmitEvidenceRequest struct {
 type PopulationSubmitRequest struct {
 	FolderPath  string `json:"folderPath"`
 	Attestation string `json:"attestation,omitempty"`
+	// SkipAiValidation is SubmitEvidenceRequest.SkipAiValidation for a
+	// population submission — same checkbox, same rules.
+	SkipAiValidation bool `json:"skipAiValidation,omitempty"`
 }

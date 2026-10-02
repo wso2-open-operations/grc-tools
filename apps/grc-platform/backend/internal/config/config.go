@@ -214,12 +214,27 @@ type EmailConfig struct {
 	Enabled bool
 }
 
-// AIValidationConfig configures the fire-and-forget trigger to the AI Validation
-// Agent. When Enabled is false the backend never contacts the agent.
+// AIValidationConfig configures the in-process AI Validation trigger
+// (internal/audit/aivalidation), which calls the Anthropic API directly and
+// holds ANTHROPIC_API_KEY in this backend. When Enabled is false the backend
+// never calls the LLM.
 type AIValidationConfig struct {
-	Enabled      bool
-	AgentBaseURL string
-	AgentAPIKey  string
+	Enabled bool
+	// APIKey is ANTHROPIC_API_KEY. Required when Enabled is true — see Load,
+	// which force-disables the feature (logs an error, leaves Enabled true
+	// but the caller must still check APIKey) rather than failing startup,
+	// mirroring the old AI_AGENT_API_KEY guard.
+	APIKey string
+	// BaseURL overrides the Anthropic API root (ANTHROPIC_BASE_URL), e.g. an
+	// AI gateway; "" means the public Anthropic API. The gateway manages
+	// model selection itself — there is no model override here; llm.Client
+	// always sends llm.DefaultModel, a fixed value the Anthropic SDK's
+	// request shape requires but which the gateway is free to ignore.
+	BaseURL string
+	// Per-job timeout and worker-pool size are NOT here — they're engineering
+	// tuning knobs with no real per-environment variance, so they're Go
+	// constants (aivalidation.JobTimeout, the unexported maxConcurrent)
+	// instead of two more env vars every deployment has to keep in step.
 }
 
 // IdPConfig describes one trusted identity provider (Asgardeo organization).
@@ -532,9 +547,9 @@ func Load() (Config, error) {
 		// could boot with email links pointing somewhere CORS doesn't trust.
 		CORSAllowedOrigin: frontendBaseURL,
 		AIValidation: AIValidationConfig{
-			Enabled:      os.Getenv("AI_VALIDATION_ENABLED") == "true",
-			AgentBaseURL: envOrDefault("AI_AGENT_BASE_URL", "http://localhost:8090"),
-			AgentAPIKey:  os.Getenv("AI_AGENT_API_KEY"),
+			Enabled: os.Getenv("AI_VALIDATION_ENABLED") == "true",
+			APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
+			BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
 		},
 		Email: EmailConfig{
 			ServiceURL:       emailServiceURL,

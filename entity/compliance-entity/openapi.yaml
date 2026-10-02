@@ -1688,6 +1688,59 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /populations/{populationId}/ai-validations:
+    post:
+      tags:
+      - AI Validations
+      summary: Record an AI validation result for a population submission
+      operationId: createValidationForPopulation
+      parameters:
+      - name: populationId
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAuditAIValidationLogRequest'
+      responses:
+        '201':
+          description: Record an AI validation result for a population submission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditAIValidationLog'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      tags:
+      - AI Validations
+      summary: List AI validation results for a population submission
+      operationId: listValidationsForPopulation
+      parameters:
+      - name: populationId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: List AI validation results for a population submission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAuditAIValidationLogsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /audits/{auditId}/controls/{controlId}/populations:
     post:
       tags:
@@ -4708,6 +4761,10 @@ components:
           format: int64
         evidenceId:
           type: integer
+          nullable: true
+        populationId:
+          type: integer
+          nullable: true
         controlId:
           type: integer
         result:
@@ -4718,17 +4775,12 @@ components:
           - UNCERTAIN
           - PENDING
           - ERROR
+          - SKIPPED
         gapsFound:
-          type: string
-          nullable: true
-        feedback:
           type: string
           nullable: true
         summary:
           type: string
-          nullable: true
-        confidenceScore:
-          type: number
           nullable: true
         createdBy:
           type: string
@@ -4736,6 +4788,22 @@ components:
         createdOn:
           type: string
           format: date-time
+        inputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        outputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheReadInputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheCreationInputTokens:
+          type: integer
+          format: int64
+          nullable: true
     CreateAuditAIValidationLogRequest:
       type: object
       properties:
@@ -4749,20 +4817,31 @@ components:
           - UNCERTAIN
           - PENDING
           - ERROR
+          - SKIPPED
         gapsFound:
-          type: string
-          nullable: true
-        feedback:
           type: string
           nullable: true
         summary:
           type: string
           nullable: true
-        confidenceScore:
-          type: number
-          nullable: true
         createdBy:
           type: string
+        inputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        outputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheReadInputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheCreationInputTokens:
+          type: integer
+          format: int64
+          nullable: true
     ListAuditAIValidationLogsResponse:
       type: object
       properties:

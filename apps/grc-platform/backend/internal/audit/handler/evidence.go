@@ -26,14 +26,13 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/aivalidation"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
-	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aiagent"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
@@ -122,9 +121,10 @@ type evidenceHandler struct {
 	popSvc service.PopulationService
 	// trailSvc records best-effort attribution entries on submit. May be nil.
 	trailSvc service.TrailService
-	// aiClient triggers async AI validation after a submission. It is nil when
-	// AI_VALIDATION_ENABLED is false, which disables the trigger entirely.
-	aiClient *aiagent.Client
+	// aiValidation triggers the in-process AI validation job after a
+	// submission. Its Trigger* methods are no-ops when AI_VALIDATION_ENABLED
+	// is false or unconfigured — see cmd/server/audit_deps.go.
+	aiValidation *aivalidation.Service
 	// notify sends resubmission-needed and sample-submitted notification
 	// emails from decideRound and submitSample — see notify.go.
 	notify    *Deps
@@ -135,13 +135,13 @@ type evidenceHandler struct {
 // RegisterRoutes and the Evidence Portal bridge so both build it identically.
 func newEvidenceHandler(deps *Deps) *evidenceHandler {
 	return &evidenceHandler{
-		svc:        deps.Evidence,
-		controlSvc: deps.Control,
-		popSvc:     deps.Population,
-		trailSvc:   deps.Trail,
-		aiClient:   deps.AIAgent,
-		notify:     deps,
-		directory:  deps.Directory,
+		svc:          deps.Evidence,
+		controlSvc:   deps.Control,
+		popSvc:       deps.Population,
+		trailSvc:     deps.Trail,
+		aiValidation: deps.AIValidationRun,
+		notify:       deps,
+		directory:    deps.Directory,
 	}
 }
 
@@ -159,7 +159,7 @@ var errRoundRollbackFailed = errors.New("evidence round rollback unconfirmed")
 //
 // Submit and the status transition aren't one transaction, so a failed
 // transition discards the round instead of leaving it for a retry to duplicate.
-func (h *evidenceHandler) finalizeEvidenceSubmission(ctx context.Context, auditID, controlID int, files []model.EvidenceFileRef, attestation string, isAdmin bool, actor, via, issuer string) (*model.AuditEvidence, error) {
+func (h *evidenceHandler) finalizeEvidenceSubmission(ctx context.Context, auditID, controlID int, files []model.EvidenceFileRef, attestation string, isAdmin bool, actor, via, issuer string, skipAI bool) (*model.AuditEvidence, error) {
 	evidence, err := h.svc.Submit(ctx, auditID, controlID, files, attestation, isAdmin, actor)
 	if err != nil {
 		return nil, err
@@ -181,7 +181,7 @@ func (h *evidenceHandler) finalizeEvidenceSubmission(ctx context.Context, auditI
 	recordEvidenceTrail(ctx, h.trailSvc, auditID, controlID, evidence.ID, actor, via, issuer, trailFileNames(evidence))
 
 	if len(evidence.Files) > 0 {
-		h.triggerAIValidation(auditID, controlID, evidence.ID, actor)
+		h.aiValidation.TriggerEvidence(auditID, controlID, evidence.ID, actor, skipAI)
 	}
 	return evidence, nil
 }
@@ -443,7 +443,7 @@ func (h *evidenceHandler) submitEvidence(w http.ResponseWriter, r *http.Request)
 	// fire AI validation — the shared path the Evidence Portal ingress also
 	// runs, so both channels stay in step. channelWebApp / user.Issuer tag
 	// this submission as a web-app one.
-	evidence, err := h.finalizeEvidenceSubmission(r.Context(), auditID, controlID, req.Files, req.Attestation, isAdmin, actor, channelWebApp, user.Issuer)
+	evidence, err := h.finalizeEvidenceSubmission(r.Context(), auditID, controlID, req.Files, req.Attestation, isAdmin, actor, channelWebApp, user.Issuer, req.SkipAiValidation)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
@@ -500,7 +500,7 @@ func (h *evidenceHandler) addEvidenceFiles(w http.ResponseWriter, r *http.Reques
 
 	// Re-run AI validation now that more files are attached — same best-effort,
 	// fire-and-forget semantics as the initial submission.
-	h.triggerAIValidation(auditID, controlID, evidence.ID, actor)
+	h.aiValidation.TriggerEvidence(auditID, controlID, evidence.ID, actor, req.SkipAiValidation)
 
 	response.WriteJSONValue(w, http.StatusOK, evidence)
 }
@@ -618,33 +618,6 @@ func (h *evidenceHandler) validateEvidence(w http.ResponseWriter, r *http.Reques
 		rejectRoundStatus:    "AUDITOR_REJECTED",
 		rejectControlStatus:  "EVIDENCE_NEED_CLARIFICATION",
 	})
-}
-
-// triggerAIValidation kicks off an advisory AI validation in the background.
-// No-op when the AI agent client is not configured (AI_VALIDATION_ENABLED=false).
-func (h *evidenceHandler) triggerAIValidation(auditID, controlID, evidenceID int, actor string) {
-	triggerAIValidation(h.aiClient, auditID, controlID, evidenceID, actor)
-}
-
-// triggerAIValidation kicks off an advisory AI validation, detached from the
-// request context so a client disconnect cannot cancel it. Best-effort and a
-// no-op when the AI agent client is nil (AI_VALIDATION_ENABLED=false).
-func triggerAIValidation(aiClient *aiagent.Client, auditID, controlID, evidenceID int, actor string) {
-	if aiClient == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		err := aiClient.Trigger(ctx, aiagent.TriggerRequest{
-			Task:        "validate_evidence",
-			Scope:       aiagent.Scope{AuditID: auditID, ControlID: controlID, EvidenceID: evidenceID},
-			RequestedBy: actor,
-		})
-		if err != nil {
-			slog.Warn("ai validation trigger failed", "evidenceId", evidenceID, "err", err)
-		}
-	}()
 }
 
 // teamEditableControlStatuses are the control statuses from which the team may

@@ -32,4 +32,8 @@ window.config = {
   GRC_PLATFORM_BACKEND_BASE_URL: "http://localhost:8081",
 
   GRC_PLATFORM_THEME: "acrylicOrange",
+
+  // Shows the AI validation card. Set true only where the backend runs with
+  // AI_VALIDATION_ENABLED=true and ANTHROPIC_API_KEY set; absent means off.
+  GRC_PLATFORM_AI_VALIDATION_ENABLED: false,
 };

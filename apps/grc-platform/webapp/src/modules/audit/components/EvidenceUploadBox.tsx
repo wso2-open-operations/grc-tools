@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Alert, Box, Button, CircularProgress, IconButton, TextField, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Button, Checkbox, CircularProgress, FormControlLabel, IconButton, TextField, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { FileUp, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { useRef, useState, type JSX } from "react";
 import { useSubmitEvidence } from "@modules/audit/api/useSubmitEvidence";
@@ -81,6 +81,7 @@ export default function EvidenceUploadBox({
   const [sizeError, setSizeError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [attestation, setAttestation] = useState("");
+  const [skipAiValidation, setSkipAiValidation] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   // dragenter/dragleave also fire when the cursor crosses child elements, so
   // count them or the highlight flickers once file rows live inside the box.
@@ -102,6 +103,8 @@ export default function EvidenceUploadBox({
   const allowAttestation =
     evidenceMode === "new" &&
     (phase === "population" || (phase === "evidence" && can(AuditPrivilege.ManageControls)));
+  // Opt-out is for internal submitters; ViewInternalComments is the internal proxy.
+  const canSkipAiValidation = can(AuditPrivilege.ViewInternalComments);
 
   function addFiles(list: FileList | null) {
     if (!list) return;
@@ -126,16 +129,31 @@ export default function EvidenceUploadBox({
   }
 
   function handleSubmit() {
-    const onDone = { onSuccess: () => { setFiles([]); setSizeError(null); setAttestation(""); onSubmitted(); } };
+    const onDone = {
+      onSuccess: () => {
+        setFiles([]);
+        setSizeError(null);
+        setAttestation("");
+        setSkipAiValidation(false);
+        onSubmitted();
+      },
+    };
+    const skip = canSkipAiValidation && skipAiValidation;
     if (allowAttestation && files.length === 0) {
       if (phase === "population") {
-        submitPopulation.mutate({ auditId, controlId, files, attestation }, onDone);
+        submitPopulation.mutate({ auditId, controlId, files, attestation, skipAiValidation: skip }, onDone);
       } else {
-        submitEvidence.mutate({ auditId, controlId, files, attestation }, onDone);
+        submitEvidence.mutate({ auditId, controlId, files, attestation, skipAiValidation: skip }, onDone);
       }
       return;
     }
-    submit.mutate({ auditId, controlId, files }, onDone);
+    if (phase === "population") {
+      submitPopulation.mutate({ auditId, controlId, files, skipAiValidation: skip }, onDone);
+    } else if (evidenceMode === "append") {
+      addEvidenceFiles.mutate({ auditId, controlId, files, skipAiValidation: skip }, onDone);
+    } else {
+      submitEvidence.mutate({ auditId, controlId, files, skipAiValidation: skip }, onDone);
+    }
   }
 
   const fileless = allowAttestation && files.length === 0;
@@ -254,6 +272,23 @@ export default function EvidenceUploadBox({
           size="small"
           sx={{ mb: 1.5 }}
         />
+      )}
+
+      {canSkipAiValidation && (
+        <Tooltip title="AI Validation runs automatically after you submit, flagging gaps before internal review. Checking this skips it for this submission only - nothing is remembered for next time.">
+          <FormControlLabel
+            sx={{ mb: 1.5, ml: 0 }}
+            control={
+              <Checkbox
+                size="small"
+                checked={skipAiValidation}
+                disabled={busy}
+                onChange={(e) => setSkipAiValidation(e.target.checked)}
+              />
+            }
+            label={<Typography variant="body2">Skip AI validation for this submission</Typography>}
+          />
+        </Tooltip>
       )}
 
       {(submit.isError || (fileless && phase === "evidence" && submitEvidence.isError)) && (

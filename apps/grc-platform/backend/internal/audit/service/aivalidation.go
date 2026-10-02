@@ -24,12 +24,17 @@ import (
 )
 
 // AIValidationService reads advisory AI validation results for an evidence
-// submission. It is a thin proxy over the Compliance Entity — results are
-// hints; this service never mutates evidence or control status.
+// or population submission. It is a thin proxy over the Compliance Entity —
+// results are hints; this service never mutates evidence, population, or
+// control status. Writing a result row is the aivalidation package's job
+// (internal/audit/aivalidation), not this service's — it talks to the same
+// repository directly.
 type AIValidationService interface {
 	// ListByEvidence returns the validation rows for an evidence submission,
 	// latest first (the UI reads the first element as the current state).
 	ListByEvidence(ctx context.Context, evidenceID int) ([]*model.AIValidationLog, error)
+	// ListByPopulation is ListByEvidence for a population submission.
+	ListByPopulation(ctx context.Context, populationID int) ([]*model.AIValidationLog, error)
 }
 
 type aiValidationService struct {
@@ -43,4 +48,8 @@ func NewAIValidationService(repo repository.AIValidationLogRepository) AIValidat
 
 func (s *aiValidationService) ListByEvidence(ctx context.Context, evidenceID int) ([]*model.AIValidationLog, error) {
 	return s.repo.ListByEvidence(ctx, evidenceID)
+}
+
+func (s *aiValidationService) ListByPopulation(ctx context.Context, populationID int) ([]*model.AIValidationLog, error) {
+	return s.repo.ListByPopulation(ctx, populationID)
 }

@@ -70,3 +70,40 @@ func (h *AIValidationHandler) ListValidations(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// CreateValidationForPopulation handles POST /populations/{populationId}/ai-validations.
+func (h *AIValidationHandler) CreateValidationForPopulation(w http.ResponseWriter, r *http.Request) {
+	populationID, err := strconv.Atoi(r.PathValue("populationId"))
+	if err != nil {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "populationId must be a positive integer"})
+		return
+	}
+	var req domain.CreateAuditAIValidationLogRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	l, err := h.svc.CreateValidationForPopulation(r.Context(), populationID, req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(l)
+}
+
+// ListValidationsForPopulation handles GET /populations/{populationId}/ai-validations.
+func (h *AIValidationHandler) ListValidationsForPopulation(w http.ResponseWriter, r *http.Request) {
+	populationID, err := strconv.Atoi(r.PathValue("populationId"))
+	if err != nil {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "populationId must be a positive integer"})
+		return
+	}
+	resp, err := h.svc.ListValidationsByPopulation(r.Context(), populationID)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

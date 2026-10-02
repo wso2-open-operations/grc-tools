@@ -241,7 +241,7 @@ func controlThreadSubject(i AuditEventInfo) string {
 
 func reminderSubject(tier string) func(AuditEventInfo) string {
 	return func(i AuditEventInfo) string {
-		return fmt.Sprintf("Audit Reminder — %s: %d item(s) due", tier, len(i.Items))
+		return fmt.Sprintf("[GRC Platform] Audit Reminder - %s: %d item(s) due", tier, len(i.Items))
 	}
 }
 
@@ -251,7 +251,7 @@ func reminderSubject(tier string) func(AuditEventInfo) string {
 // controls in that audit, so a stable audit-only string threads each day's
 // digest with the previous ones instead of splintering per control.
 func overdueAdminSubject(i AuditEventInfo) string {
-	return fmt.Sprintf("[GRC Platform] Overdue — %s", i.AuditName)
+	return fmt.Sprintf("[GRC Platform] Overdue - %s", i.AuditName)
 }
 
 // overdueLeadSubject names the owner rather than the audit — a lead digest is
@@ -262,7 +262,7 @@ func overdueLeadSubject(i AuditEventInfo) string {
 	if name == "" {
 		return "[GRC Platform] Overdue"
 	}
-	return fmt.Sprintf("[GRC Platform] Overdue — %s", name)
+	return fmt.Sprintf("[GRC Platform] Overdue - %s", name)
 }
 
 // Counts the people in the body, not the rows. A deliberate exception to the

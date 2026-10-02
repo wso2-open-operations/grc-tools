@@ -231,10 +231,14 @@ type CommentService interface {
 	DeleteComment(ctx context.Context, commentID int) error
 }
 
-// AIValidationService defines operations on audit_ai_validation_log (append-only).
+// AIValidationService defines operations on audit_ai_validation_log
+// (append-only). A row belongs to either an evidence round or a population
+// round, never both — see domain.AuditAIValidationLog.
 type AIValidationService interface {
 	CreateValidation(ctx context.Context, evidenceID int, req domain.CreateAuditAIValidationLogRequest) (domain.AuditAIValidationLog, error)
 	ListValidationsByEvidence(ctx context.Context, evidenceID int) (domain.ListAuditAIValidationLogsResponse, error)
+	CreateValidationForPopulation(ctx context.Context, populationID int, req domain.CreateAuditAIValidationLogRequest) (domain.AuditAIValidationLog, error)
+	ListValidationsByPopulation(ctx context.Context, populationID int) (domain.ListAuditAIValidationLogsResponse, error)
 }
 
 // RiskActionStepService defines operations on risk_action_step.

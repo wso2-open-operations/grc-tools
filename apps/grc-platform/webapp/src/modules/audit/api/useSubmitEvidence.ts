@@ -29,6 +29,9 @@ interface SubmitEvidencePayload {
   // when the caller holds ManageControls. Everyone else submitting zero files
   // still gets the ordinary "select at least one file" rejection.
   attestation?: string;
+  // Opts this one submission out of AI validation — the submission form's
+  // checkbox, decided fresh each time (never persisted).
+  skipAiValidation?: boolean;
 }
 
 async function errText(res: Response, action: string): Promise<string> {
@@ -55,7 +58,7 @@ export function useSubmitEvidence() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ auditId, controlId, files, attestation }: SubmitEvidencePayload): Promise<void> => {
+    mutationFn: async ({ auditId, controlId, files, attestation, skipAiValidation }: SubmitEvidencePayload): Promise<void> => {
       if (files.length === 0 && !attestation) throw new Error("Select at least one file to submit.");
       const base = `${BACKEND_BASE_URL}/api/v1/audits/${auditId}/controls/${controlId}/evidence`;
 
@@ -84,7 +87,11 @@ export function useSubmitEvidence() {
       const submitRes = await authFetch(`${base}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: uploaded, attestation: attestation ?? undefined }),
+        body: JSON.stringify({
+          files: uploaded,
+          attestation: attestation ?? undefined,
+          skipAiValidation: skipAiValidation ?? undefined,
+        }),
       });
       if (!submitRes.ok) throw new Error(await errText(submitRes, "submit evidence"));
     },

@@ -41,3 +41,21 @@ func (r *aiValidationRepo) ListByEvidence(ctx context.Context, evidenceID int) (
 	}
 	return resp.Validations, nil
 }
+
+func (r *aiValidationRepo) ListByPopulation(ctx context.Context, populationID int) ([]*model.AIValidationLog, error) {
+	var resp struct {
+		Validations []*model.AIValidationLog `json:"validations"`
+	}
+	if err := r.c.Get(ctx, fmt.Sprintf("/populations/%d/ai-validations", populationID), &resp); err != nil {
+		return nil, err
+	}
+	return resp.Validations, nil
+}
+
+func (r *aiValidationRepo) CreateForEvidence(ctx context.Context, evidenceID int, req model.CreateAIValidationLogRequest) error {
+	return r.c.Post(ctx, fmt.Sprintf("/evidence/%d/ai-validations", evidenceID), req, nil)
+}
+
+func (r *aiValidationRepo) CreateForPopulation(ctx context.Context, populationID int, req model.CreateAIValidationLogRequest) error {
+	return r.c.Post(ctx, fmt.Sprintf("/populations/%d/ai-validations", populationID), req, nil)
+}
