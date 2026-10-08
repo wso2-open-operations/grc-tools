@@ -87,19 +87,27 @@ func (r *riskAISuggestionRepo) GetRiskAISuggestionByID(ctx context.Context, id i
 
 // DecideRiskAISuggestion records that a user accepted or overrode the
 // suggestion — the only update this row ever receives; everything else about
-// it is immutable once created.
+// it is immutable once created. The WHERE clause enforces that invariant:
+// scoped to status = SUGGESTED, so a row that was already decided (e.g. by a
+// concurrent reassessment racing this one) can't be silently overwritten.
 func (r *riskAISuggestionRepo) DecideRiskAISuggestion(ctx context.Context, id int, req domain.DecideRiskAISuggestionRequest) (*domain.RiskAISuggestion, error) {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE risk_ai_suggestion
 		 SET status = ?, override_reason = ?, decided_by = ?, decided_at = NOW()
-		 WHERE id = ?`,
-		req.Status, nullableString(req.OverrideReason), req.DecidedBy, id)
+		 WHERE id = ? AND status = ?`,
+		req.Status, nullableString(req.OverrideReason), req.DecidedBy, id, domain.RiskAISuggestionStatusSuggested)
 	if err != nil {
 		return nil, fmt.Errorf("risk_ai_suggestion.Decide(%d): %w", id, err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("risk AI suggestion %d not found", id)}
+		// Distinguish "no such row" from "row exists but was already decided"
+		// (or never SUGGESTED) — GetRiskAISuggestionByID returns NotFoundError
+		// for the former, which we pass straight through.
+		if _, getErr := r.GetRiskAISuggestionByID(ctx, id); getErr != nil {
+			return nil, getErr
+		}
+		return nil, &apierror.ConflictError{Msg: fmt.Sprintf("risk AI suggestion %d was already decided", id)}
 	}
 	return r.GetRiskAISuggestionByID(ctx, id)
 }

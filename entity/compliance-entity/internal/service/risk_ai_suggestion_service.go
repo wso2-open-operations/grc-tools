@@ -43,6 +43,12 @@ func (s *riskAISuggestionService) CreateRiskAISuggestion(ctx context.Context, re
 	if req.SuggestedValue == "" {
 		return domain.RiskAISuggestion{}, &apierror.ValidationError{Msg: "suggestedValue is required"}
 	}
+	if req.Confidence != nil &&
+		*req.Confidence != domain.RiskAISuggestionConfidenceHigh &&
+		*req.Confidence != domain.RiskAISuggestionConfidenceMedium &&
+		*req.Confidence != domain.RiskAISuggestionConfidenceLow {
+		return domain.RiskAISuggestion{}, &apierror.ValidationError{Msg: "confidence must be HIGH, MEDIUM, or LOW"}
+	}
 	s2, err := s.repo.CreateRiskAISuggestion(ctx, req)
 	if err != nil {
 		return domain.RiskAISuggestion{}, err
