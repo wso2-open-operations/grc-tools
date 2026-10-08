@@ -117,6 +117,25 @@ type CreateRiskRequest struct {
 	DeploymentTypeID *int     `json:"deployment_type_id,omitempty"`
 	ProductIDs       []int    `json:"product_ids,omitempty"`
 	Environments     []string `json:"environments,omitempty"` // PRODUCTION | NON_PRODUCTION | DR
+
+	// AICategorySuggestion is set only when the user clicked "Suggest
+	// category" on this form before saving — nil if they never did. See
+	// model.AICategorySuggestion's doc comment for why this is recorded at
+	// save time rather than when the suggestion was generated.
+	AICategorySuggestion *AICategorySuggestion `json:"ai_category_suggestion,omitempty"`
+	// AILikelihoodSuggestion is the Gross Likelihood suggestion equivalent —
+	// set only when the user clicked "Suggest Likelihood" before saving.
+	// Creation-only: Gross is immutable once the risk exists (risk.go's
+	// needsManagementSignOff comment), so this is the only moment a
+	// Likelihood suggestion can ever be recorded against Gross — see
+	// AILikelihoodSuggestion's doc comment for the Residual equivalent on
+	// CreateAssessmentRequest.
+	AILikelihoodSuggestion *AILikelihoodSuggestion `json:"ai_likelihood_suggestion,omitempty"`
+	// AIActionPlanSuggestion is set only when the user clicked "Suggest
+	// action plan" on the Action Plan step before saving — nil if they never
+	// did. See AIActionPlanSuggestion's doc comment for why this is recorded
+	// at save time rather than when the suggestion was generated.
+	AIActionPlanSuggestion *AIActionPlanSuggestion `json:"ai_action_plan_suggestion,omitempty"`
 }
 
 // CreateActionStepRequest represents one step in the action plan.
@@ -353,6 +372,17 @@ type RiskDetail struct {
 	// Never populated on list responses — only on a single risk — because it is
 	// meaningless without a specific register in hand.
 	EffectivePrivileges []string `json:"effective_privileges"`
+
+	// PendingLikelihoodSuggestion is set when this risk has an unresolved
+	// (SUGGESTED, not yet accepted or overridden) LIKELIHOOD suggestion on
+	// record — written either by the quarterly re-check sweep finding the
+	// evidence has moved, or (in principle) a suggestion shown but never
+	// acted on. The UI surfaces this as an in-page "this risk's score may
+	// need reassessment" indicator — the doc's "reminder," reworked as a
+	// query against the existing suggestion table rather than an email (see
+	// docs/plans/auto-categorisation-plan.md). Never populated on list
+	// responses, same reasoning as EffectivePrivileges.
+	PendingLikelihoodSuggestion *Suggestion `json:"pending_likelihood_suggestion,omitempty"`
 }
 
 // MigrationMarker is the created_by the risk register migration tool
@@ -441,6 +471,12 @@ type UpdateRiskRequest struct {
 	DeploymentTypeID *int     `json:"deployment_type_id,omitempty"`
 	ProductIDs       []int    `json:"product_ids,omitempty"`
 	Environments     []string `json:"environments,omitempty"`
+
+	// AICategorySuggestion is set only when the user clicked "Suggest
+	// category" on this form before saving — nil if they never did. See
+	// model.AICategorySuggestion's doc comment for why this is recorded at
+	// save time rather than when the suggestion was generated.
+	AICategorySuggestion *AICategorySuggestion `json:"ai_category_suggestion,omitempty"`
 }
 
 // LookupRef is a register-template lookup value (platform, customer, product

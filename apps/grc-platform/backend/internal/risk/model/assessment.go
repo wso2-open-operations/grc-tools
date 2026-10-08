@@ -47,4 +47,10 @@ type CreateAssessmentRequest struct {
 	Impact           int    `json:"impact"`
 	Progress         string `json:"progress"`
 	ReassessmentDate string `json:"reassessment_date"`
+	// AILikelihoodSuggestion is the Residual counterpart to
+	// CreateRiskRequest.AILikelihoodSuggestion — set only when the user
+	// clicked "Suggest Likelihood" during this reassessment. Every
+	// reassessment is a fresh opportunity to suggest (unlike Gross, which is
+	// creation-only), since Likelihood is re-checked live each time.
+	AILikelihoodSuggestion *AILikelihoodSuggestion `json:"ai_likelihood_suggestion,omitempty"`
 }

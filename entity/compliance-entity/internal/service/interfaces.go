@@ -157,6 +157,13 @@ type RiskLookupService interface {
 	DeleteRiskLookup(ctx context.Context, id int) error
 }
 
+// RiskAISuggestionService defines operations on risk_ai_suggestion.
+type RiskAISuggestionService interface {
+	CreateRiskAISuggestion(ctx context.Context, req domain.CreateRiskAISuggestionRequest) (domain.RiskAISuggestion, error)
+	DecideRiskAISuggestion(ctx context.Context, id int, req domain.DecideRiskAISuggestionRequest) (domain.RiskAISuggestion, error)
+	ListRiskAISuggestionsByRisk(ctx context.Context, riskID int, feature domain.RiskAISuggestionFeature, status *domain.RiskAISuggestionStatus) ([]domain.RiskAISuggestion, error)
+}
+
 // RiskReferenceService defines operations on risk_security_compliance_reference.
 type RiskReferenceService interface {
 	SearchRiskReferences(ctx context.Context, req domain.SearchRiskReferencesRequest) (domain.SearchRiskReferencesResponse, error)

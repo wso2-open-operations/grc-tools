@@ -484,6 +484,15 @@ func (d *Deps) handleGetRisk(w http.ResponseWriter, r *http.Request) {
 	}
 	detail.EffectivePrivileges = effectivePrivilegesFor(r.Context(), detail.SourceRegisterID, detail.AssignmentTeamID)
 	d.enrichDetail(r.Context(), detail)
+	if d.LikelihoodSuggestionEnabled {
+		if pending, err := d.LikelihoodSuggestion.PendingSuggestion(r.Context(), id); err != nil {
+			// Advisory only — never let a lookup failure for the reminder
+			// banner break loading the risk itself.
+			slog.Error("pending likelihood suggestion lookup", "risk_id", id, "err", err)
+		} else {
+			detail.PendingLikelihoodSuggestion = pending
+		}
+	}
 	response.WriteJSONValue(w, http.StatusOK, detail)
 }
 
@@ -575,6 +584,13 @@ func (d *Deps) handleUpdateRisk(w http.ResponseWriter, r *http.Request) {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
+
+	// Advisory only — the risk is already saved successfully at this point,
+	// so a failure here is logged, never returned to the caller as an error.
+	if err := d.CategorySuggestion.RecordDecision(r.Context(), id, req.AICategorySuggestion, req.RiskCategoryIDs, by); err != nil {
+		slog.Error("record category suggestion decision", "risk_id", id, "err", err)
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

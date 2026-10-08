@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -134,6 +135,18 @@ func (d *Deps) handleCreateRisk(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
+	}
+
+	// Advisory only — the risk is already saved successfully at this point,
+	// so a failure here is logged, never returned to the caller as an error.
+	if err := d.CategorySuggestion.RecordDecision(r.Context(), result.ID, req.AICategorySuggestion, req.RiskCategoryIDs, createdBy); err != nil {
+		slog.Error("record category suggestion decision", "risk_id", result.ID, "err", err)
+	}
+	if err := d.LikelihoodSuggestion.RecordDecision(r.Context(), result.ID, req.AILikelihoodSuggestion, req.Likelihood, createdBy); err != nil {
+		slog.Error("record likelihood suggestion decision", "risk_id", result.ID, "err", err)
+	}
+	if err := d.ActionPlanSuggestion.RecordDecision(r.Context(), result.ID, req.AIActionPlanSuggestion, createdBy); err != nil {
+		slog.Error("record action plan suggestion decision", "risk_id", result.ID, "err", err)
 	}
 
 	// The entity already writes a bare CREATE row inside the same transaction

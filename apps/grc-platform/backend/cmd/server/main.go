@@ -172,7 +172,7 @@ func main() {
 	}
 
 	userhandler.RegisterRoutes(mux, userDeps)
-	riskDeps := buildRiskDeps(entityCli, fileSvc, hrClient, grantRepo, dirSvc, scimClient, cfg.Email, cfg.LeadEscalationEmailsEnabled, activityLog)
+	riskDeps := buildRiskDeps(entityCli, fileSvc, hrClient, grantRepo, dirSvc, scimClient, cfg.Email, cfg.LeadEscalationEmailsEnabled, activityLog, cfg.AIGateway)
 	// Overdue-risk escalation sweep. Constructed here regardless of
 	// SCHEDULER_ENABLED: the scheduler below runs it on the daily tick, and
 	// riskDeps.TriggerEscalationJob exposes the same RunOnce behind
@@ -192,6 +192,17 @@ func main() {
 		riskDeps.SendDueReminderSync,
 	)
 	riskDeps.TriggerReminderJob = riskReminderJob.RunOnce
+	// Quarterly Likelihood re-check sweep — registered as an ordinary daily
+	// scheduler.Sweep like the two above; it self-gates on both
+	// AI_LIKELIHOOD_ENABLED and the quarter-end window, so most days it's a
+	// no-op. See internal/risk/job/likelihood_recheck_job.go.
+	likelihoodRecheckJob := riskjob.NewLikelihoodRecheckJob(
+		riskDeps.Risk,
+		riskDeps.Risk,
+		riskDeps.LikelihoodSuggestion,
+		func() bool { return cfg.AIGateway.LikelihoodEnabled },
+	)
+	riskDeps.TriggerLikelihoodRecheckJob = likelihoodRecheckJob.RunOnce
 	riskhandler.RegisterRoutes(mux, riskDeps)
 	// The HR client reaches the audit module only when lead-escalation emails
 	// are on; nil otherwise, so no lead (line manager) is ever resolved there.
@@ -254,6 +265,7 @@ func main() {
 		sweeps := []scheduler.Sweep{
 			{Name: "overdue-risk-escalation", Run: escalationJob.RunOnce},
 			{Name: "risk-due-date-reminders", Run: riskReminderJob.RunOnce},
+			{Name: "risk-likelihood-recheck", Run: likelihoodRecheckJob.RunOnce},
 			{Name: "audit-due-date-reminders", Run: reminderJob.RunOnce},
 		}
 		if runDirectorySync != nil {

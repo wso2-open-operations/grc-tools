@@ -44,6 +44,30 @@ type Deps struct {
 	History    riskservice.HistoryService
 	Compliance riskservice.ComplianceReferenceService
 	Category   riskservice.RiskCategoryService
+	// CategorySuggestion powers POST /api/v1/risks/categories/suggest and the
+	// decision-recording call in handleCreateRisk/handleUpdateRisk. Always
+	// non-nil (unlike most optional Deps fields) — RecordDecision must be
+	// safely callable unconditionally from both of those, and it already
+	// no-ops when no suggestion was shown, so there is nothing AI-gateway-
+	// specific for it to fail on even when the feature is off.
+	// CategorySuggestionEnabled gates the HTTP endpoint only — see
+	// handleSuggestCategory.
+	CategorySuggestion        riskservice.CategorySuggestionService
+	CategorySuggestionEnabled bool
+	// LikelihoodSuggestion/LikelihoodSuggestionEnabled mirror
+	// CategorySuggestion/CategorySuggestionEnabled exactly — always non-nil,
+	// independent enable switch (AI_LIKELIHOOD_ENABLED, deliberately separate
+	// from AI_CATEGORIZATION_ENABLED — see config.AIGatewayConfig's doc
+	// comment for why).
+	LikelihoodSuggestion        riskservice.LikelihoodSuggestionService
+	LikelihoodSuggestionEnabled bool
+	// ActionPlanSuggestion/ActionPlanSuggestionEnabled mirror
+	// CategorySuggestion/CategorySuggestionEnabled exactly — always non-nil,
+	// independent enable switch (AI_ACTION_PLAN_ENABLED, deliberately
+	// separate from the other two — see config.AIGatewayConfig's doc comment
+	// for why).
+	ActionPlanSuggestion        riskservice.ActionPlanSuggestionService
+	ActionPlanSuggestionEnabled bool
 	// Register-template lookups (RISK_MODULE_DESIGN.md §14), served by the
 	// generic handlers in lookup.go.
 	Platforms       riskservice.LookupService
@@ -114,6 +138,11 @@ type Deps struct {
 	// plain function for the same no-import-cycle reason as
 	// TriggerEscalationJob. Nil disables the manual-trigger endpoint.
 	TriggerReminderJob func(ctx context.Context) error
+	// TriggerLikelihoodRecheckJob runs the quarterly Likelihood re-check sweep
+	// on demand — wired in cmd/server/main.go to the job's RunOnce, same
+	// no-import-cycle reasoning as TriggerReminderJob. Nil disables the
+	// manual-trigger endpoint.
+	TriggerLikelihoodRecheckJob func(ctx context.Context) error
 	// ActivityLog records reference-data mutations to admin_activity_log.
 	ActivityLog *adminactivity.Client
 }
@@ -132,6 +161,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	d := &deps
 	ejh := &escalationJobHandler{trigger: deps.TriggerEscalationJob}
 	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
+	lrjh := &likelihoodRecheckJobHandler{trigger: deps.TriggerLikelihoodRecheckJob}
 
 	// Teams
 	mux.HandleFunc("GET /api/v1/risks/teams", d.handleListTeams)
@@ -154,6 +184,9 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	mux.HandleFunc("POST /api/v1/risks/categories", d.handleCreateRiskCategory)
 	mux.HandleFunc("PUT /api/v1/risks/categories/{id}", d.handleUpdateRiskCategory)
 	mux.HandleFunc("DELETE /api/v1/risks/categories/{id}", d.handleDeleteRiskCategory)
+	mux.HandleFunc("POST /api/v1/risks/categories/suggest", d.handleSuggestCategory)
+	mux.HandleFunc("POST /api/v1/risks/likelihood/suggest", d.handleSuggestLikelihood)
+	mux.HandleFunc("POST /api/v1/risks/action-plans/suggest", d.handleSuggestActionPlan)
 
 	// Register-template lookups: platforms, customers, products, deployment types
 	mux.HandleFunc("POST /api/v1/risks/customer-requests", d.handleRequestCustomer)
@@ -233,6 +266,12 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	mux.HandleFunc("POST /api/v1/risks/{id}/escalate", d.handleEscalateRisk)
 	mux.HandleFunc("GET /api/v1/risks/{id}/escalations", d.handleListEscalations)
 
+	// Resend the escalation notification for a risk that's already escalated
+	// (the Compliance Entity rejects a second /escalate outright — see
+	// handleEscalateRisk's comment). Surfaced behind the frontend's "already
+	// escalated, resend?" confirmation.
+	mux.HandleFunc("POST /api/v1/risks/{id}/escalate/notify", d.handleRenotifyEscalation)
+
 	// Manual trigger for the whole daily overdue-risk escalation sweep — the
 	// same RunOnce the scheduler calls, so QA/ops can exercise the batch
 	// without waiting for its fixed daily time. Literal "escalations" first
@@ -243,6 +282,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// "reminders" first segment, like "escalations" above, so it never
 	// collides with the /{id} routes.
 	mux.HandleFunc("POST /api/v1/risks/reminders/run", rjh.run)
+	mux.HandleFunc("POST /api/v1/risks/likelihood/recheck/run", lrjh.run)
 
 	// Full risk history — every workflow event and field edit, behind the
 	// drawer's History tab.

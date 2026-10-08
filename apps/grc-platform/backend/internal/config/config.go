@@ -36,6 +36,7 @@ type Config struct {
 	SCIM                    SCIMConfig
 	CORSAllowedOrigin       string
 	AIValidation            AIValidationConfig
+	AIGateway               AIGatewayConfig
 	Email                   EmailConfig
 	// LeadEscalationEmailsEnabled turns on emailing a person's HR line manager
 	// (their "lead" — see EmailConfig's comment) when work they are responsible
@@ -220,10 +221,9 @@ type EmailConfig struct {
 // never calls the LLM.
 type AIValidationConfig struct {
 	Enabled bool
-	// APIKey is ANTHROPIC_API_KEY. Required when Enabled is true — see Load,
-	// which force-disables the feature (logs an error, leaves Enabled true
-	// but the caller must still check APIKey) rather than failing startup,
-	// mirroring the old AI_AGENT_API_KEY guard.
+	// APIKey is ANTHROPIC_API_KEY — the same credential AIGatewayConfig.APIKey
+	// holds, read once and shared by both configs (see AIGatewayConfig's doc
+	// comment for why this isn't two separate env vars).
 	APIKey string
 	// BaseURL overrides the Anthropic API root (ANTHROPIC_BASE_URL), e.g. an
 	// AI gateway; "" means the public Anthropic API. The gateway manages
@@ -235,6 +235,30 @@ type AIValidationConfig struct {
 	// tuning knobs with no real per-environment variance, so they're Go
 	// constants (aivalidation.JobTimeout, the unexported maxConcurrent)
 	// instead of two more env vars every deployment has to keep in step.
+}
+
+// AIGatewayConfig configures the synchronous call to Claude via the WSO2 AI
+// Gateway, for the Risk Hub's AI suggestion features. BaseURL/APIKey are
+// ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY — the same two env vars
+// AIValidationConfig reads, not a separate pair: both configs ultimately talk
+// to the same WSO2 AI Gateway endpoint, so there is one connection/credential
+// to manage, not two that have to be kept in step with each other. Each
+// suggestion feature still gets its own enable switch, deliberately not one
+// shared flag: they have different rollout timelines, different cost/risk
+// profiles (categorisation is one cheap text call; likelihood uses
+// web_search/web_fetch and a quarterly sweep across every IN_REMEDIATION
+// risk), and this repo's own convention is per-feature switches
+// (AIValidationConfig.Enabled is its own independent flag too, not folded
+// into anything broader). CategorizationEnabled gates
+// /risks/categories/suggest; LikelihoodEnabled gates /risks/likelihood/suggest
+// and the quarterly re-check sweep; ActionPlanEnabled gates
+// /risks/action-plans/suggest.
+type AIGatewayConfig struct {
+	BaseURL               string
+	APIKey                string
+	CategorizationEnabled bool
+	LikelihoodEnabled     bool
+	ActionPlanEnabled     bool
 }
 
 // IdPConfig describes one trusted identity provider (Asgardeo organization).
@@ -550,6 +574,13 @@ func Load() (Config, error) {
 			Enabled: os.Getenv("AI_VALIDATION_ENABLED") == "true",
 			APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 			BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+		},
+		AIGateway: AIGatewayConfig{
+			BaseURL:               os.Getenv("ANTHROPIC_BASE_URL"),
+			APIKey:                os.Getenv("ANTHROPIC_API_KEY"),
+			CategorizationEnabled: os.Getenv("AI_CATEGORIZATION_ENABLED") == "true",
+			LikelihoodEnabled:     os.Getenv("AI_LIKELIHOOD_ENABLED") == "true",
+			ActionPlanEnabled:     os.Getenv("AI_ACTION_PLAN_ENABLED") == "true",
 		},
 		Email: EmailConfig{
 			ServiceURL:       emailServiceURL,

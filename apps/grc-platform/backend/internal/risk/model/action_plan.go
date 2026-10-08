@@ -49,6 +49,11 @@ type CreateActionPlanRequest struct {
 	ActionOwnerID *int     `json:"action_owner_id"`
 	PlanType      string   `json:"plan_type"`
 	Steps         []string `json:"steps"`
+	// AIActionPlanSuggestion is set only when the user clicked "Suggest
+	// action plan" on this dialog before saving — nil if they never did. See
+	// AIActionPlanSuggestion's doc comment for why this is recorded at
+	// save time rather than when the suggestion was generated.
+	AIActionPlanSuggestion *AIActionPlanSuggestion `json:"ai_action_plan_suggestion,omitempty"`
 }
 
 // UpdateActionPlanStepRequest is the payload for PATCH .../steps/{stepId}.
