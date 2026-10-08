@@ -59,7 +59,25 @@ type LikelihoodSuggestionService interface {
 	// this row's existence nudges them toward (the risk detail page's
 	// PendingLikelihoodSuggestion reminder).
 	CreateUnresolvedSuggestion(ctx context.Context, riskID int, result *model.SuggestLikelihoodResponse) error
+	// RecordNoChangeCheck writes a row for riskID marking it checked this
+	// quarter with no change found — the quarterly re-check sweep's write when
+	// live evidence still supports the risk's current EffectiveScore. Unlike
+	// CreateUnresolvedSuggestion, it's immediately self-decided (ACCEPTED, by
+	// a system sentinel, never a real user): there's nothing for a human to
+	// act on, and leaving it SUGGESTED would wrongly surface the "may need
+	// reassessment" in-risk reminder for a risk that hasn't actually changed.
+	// It counts toward CheckedThisQuarter the same as any other outcome,
+	// which is the point — without this, an unchanged risk writes no row and
+	// gets re-checked (and re-billed) on every remaining day of the recheck
+	// window instead of once per quarter.
+	RecordNoChangeCheck(ctx context.Context, riskID int, result *model.SuggestLikelihoodResponse) error
 }
+
+// systemDecider marks a risk_ai_suggestion row as decided by the quarterly
+// re-check sweep itself, not a human — decided_by has no FK constraint (see
+// risk_schema.sql), so a descriptive sentinel is safe and self-documenting
+// for anyone auditing the column later.
+const systemDecider = "system:likelihood-recheck-job"
 
 type likelihoodSuggestionService struct {
 	gateway        *aigateway.Client
@@ -115,10 +133,16 @@ func (s *likelihoodSuggestionService) Suggest(ctx context.Context, req model.Sug
 		return nil, fmt.Errorf("suggest likelihood: model returned out-of-range score %d", result.Score)
 	}
 
+	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureLikelihood, strconv.Itoa(result.Score), result.Reason, result.Confidence)
+	if err != nil {
+		return nil, fmt.Errorf("suggest likelihood: sign suggestion: %w", err)
+	}
+
 	return &model.SuggestLikelihoodResponse{
 		Score:      result.Score,
 		Reason:     result.Reason,
 		Confidence: result.Confidence,
+		Token:      token,
 	}, nil
 }
 
@@ -156,12 +180,21 @@ func (s *likelihoodSuggestionService) RecordDecision(ctx context.Context, riskID
 		return nil
 	}
 
-	confidence := strings.ToUpper(suggestion.Confidence)
+	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureLikelihood)
+	if err != nil {
+		return fmt.Errorf("record likelihood suggestion: %w", err)
+	}
+	score, err := strconv.Atoi(payload.Value)
+	if err != nil {
+		return fmt.Errorf("record likelihood suggestion: suggested score %q: %w", payload.Value, err)
+	}
+
+	confidence := strings.ToUpper(payload.Confidence)
 	id, err := s.suggestionRepo.Create(ctx, model.CreateSuggestionRequest{
 		RiskID:          riskID,
 		Feature:         model.SuggestionFeatureLikelihood,
-		SuggestedValue:  strconv.Itoa(suggestion.Score),
-		SuggestedReason: suggestion.Reason,
+		SuggestedValue:  payload.Value,
+		SuggestedReason: payload.Reason,
 		Confidence:      confidence,
 	})
 	if err != nil {
@@ -169,7 +202,7 @@ func (s *likelihoodSuggestionService) RecordDecision(ctx context.Context, riskID
 	}
 
 	status := model.SuggestionStatusOverridden
-	if suggestion.Score == finalScore {
+	if score == finalScore {
 		status = model.SuggestionStatusAccepted
 	}
 
@@ -242,6 +275,25 @@ func (s *likelihoodSuggestionService) CreateUnresolvedSuggestion(ctx context.Con
 	})
 	if err != nil {
 		return fmt.Errorf("create unresolved likelihood suggestion: %w", err)
+	}
+	return nil
+}
+
+func (s *likelihoodSuggestionService) RecordNoChangeCheck(ctx context.Context, riskID int, result *model.SuggestLikelihoodResponse) error {
+	id, err := s.suggestionRepo.Create(ctx, model.CreateSuggestionRequest{
+		RiskID:          riskID,
+		Feature:         model.SuggestionFeatureLikelihood,
+		SuggestedValue:  strconv.Itoa(result.Score),
+		SuggestedReason: result.Reason,
+		Confidence:      strings.ToUpper(result.Confidence),
+	})
+	if err != nil {
+		return fmt.Errorf("record no-change likelihood check: create: %w", err)
+	}
+	if err := s.suggestionRepo.Decide(ctx, id, model.DecideSuggestionRequest{
+		Status: model.SuggestionStatusAccepted,
+	}, systemDecider); err != nil {
+		return fmt.Errorf("record no-change likelihood check: decide: %w", err)
 	}
 	return nil
 }

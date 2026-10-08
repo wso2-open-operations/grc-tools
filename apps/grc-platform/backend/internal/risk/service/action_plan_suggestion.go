@@ -88,10 +88,16 @@ func (s *actionPlanSuggestionService) Suggest(ctx context.Context, req model.Sug
 		return nil, fmt.Errorf("suggest action plan: %w", err)
 	}
 
+	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureActionPlan, result.Description, result.Reason, result.Confidence)
+	if err != nil {
+		return nil, fmt.Errorf("suggest action plan: sign suggestion: %w", err)
+	}
+
 	return &model.SuggestActionPlanResponse{
 		Description: result.Description,
 		Reason:      result.Reason,
 		Confidence:  result.Confidence,
+		Token:       token,
 	}, nil
 }
 
@@ -100,12 +106,17 @@ func (s *actionPlanSuggestionService) RecordDecision(ctx context.Context, riskID
 		return nil
 	}
 
-	confidence := strings.ToUpper(suggestion.Confidence)
+	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureActionPlan)
+	if err != nil {
+		return fmt.Errorf("record action plan suggestion: %w", err)
+	}
+
+	confidence := strings.ToUpper(payload.Confidence)
 	id, err := s.suggestionRepo.Create(ctx, model.CreateSuggestionRequest{
 		RiskID:          riskID,
 		Feature:         model.SuggestionFeatureActionPlan,
-		SuggestedValue:  suggestion.Description,
-		SuggestedReason: suggestion.Reason,
+		SuggestedValue:  payload.Value,
+		SuggestedReason: payload.Reason,
 		Confidence:      confidence,
 	})
 	if err != nil {

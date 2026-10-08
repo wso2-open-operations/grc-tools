@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
@@ -100,11 +101,17 @@ func (s *categorySuggestionService) Suggest(ctx context.Context, req model.Sugge
 		return nil, fmt.Errorf("suggest category: model returned unknown category id %d", result.CategoryID)
 	}
 
+	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureCategory, strconv.Itoa(cat.ID), result.Reason, result.Confidence)
+	if err != nil {
+		return nil, fmt.Errorf("suggest category: sign suggestion: %w", err)
+	}
+
 	return &model.SuggestCategoryResponse{
 		CategoryID:   cat.ID,
 		CategoryName: cat.Name,
 		Reason:       result.Reason,
 		Confidence:   result.Confidence,
+		Token:        token,
 	}, nil
 }
 
@@ -113,12 +120,21 @@ func (s *categorySuggestionService) RecordDecision(ctx context.Context, riskID i
 		return nil
 	}
 
-	confidence := strings.ToUpper(suggestion.Confidence)
+	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureCategory)
+	if err != nil {
+		return fmt.Errorf("record category suggestion: %w", err)
+	}
+	categoryID, err := strconv.Atoi(payload.Value)
+	if err != nil {
+		return fmt.Errorf("record category suggestion: suggested category id %q: %w", payload.Value, err)
+	}
+
+	confidence := strings.ToUpper(payload.Confidence)
 	id, err := s.suggestionRepo.Create(ctx, model.CreateSuggestionRequest{
 		RiskID:          riskID,
-		Feature:         "CATEGORY",
-		SuggestedValue:  fmt.Sprintf("%d", suggestion.CategoryID),
-		SuggestedReason: suggestion.Reason,
+		Feature:         model.SuggestionFeatureCategory,
+		SuggestedValue:  payload.Value,
+		SuggestedReason: payload.Reason,
 		Confidence:      confidence,
 	})
 	if err != nil {
@@ -127,7 +143,7 @@ func (s *categorySuggestionService) RecordDecision(ctx context.Context, riskID i
 
 	status := model.SuggestionStatusOverridden
 	var overrideReason *string
-	if slices.Contains(finalCategoryIDs, suggestion.CategoryID) {
+	if slices.Contains(finalCategoryIDs, categoryID) {
 		status = model.SuggestionStatusAccepted
 	}
 	// Override reason is optional for CATEGORY (unlike LIKELIHOOD, later) —
