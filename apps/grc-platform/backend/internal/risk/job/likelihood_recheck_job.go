@@ -52,6 +52,11 @@ type likelihoodChecker interface {
 	Suggest(ctx context.Context, req model.SuggestLikelihoodRequest) (*model.SuggestLikelihoodResponse, error)
 	CheckedThisQuarter(ctx context.Context, riskID int, quarterStart time.Time) (bool, error)
 	CreateUnresolvedSuggestion(ctx context.Context, riskID int, result *model.SuggestLikelihoodResponse) error
+	// RecordNoChangeCheck writes a row marking riskID as checked this quarter
+	// even though the result matched the current EffectiveScore — without
+	// this, an unchanged risk never satisfies CheckedThisQuarter and gets a
+	// fresh live-evidence check on every remaining day of the recheck window.
+	RecordNoChangeCheck(ctx context.Context, riskID int, result *model.SuggestLikelihoodResponse) error
 }
 
 // LikelihoodRecheckJob is the quarterly re-check sweep: for every
@@ -198,6 +203,11 @@ func (j *LikelihoodRecheckJob) runOnce(parent context.Context) (runErr error) {
 			checked++
 
 			if result.Score == detail.EffectiveScore.Likelihood {
+				if err := j.check.RecordNoChangeCheck(ctx, r.ID, result); err != nil {
+					slog.Warn("likelihood recheck job: record no-change check failed",
+						"riskId", r.ID, "err", err)
+					skippedErr++
+				}
 				continue
 			}
 
