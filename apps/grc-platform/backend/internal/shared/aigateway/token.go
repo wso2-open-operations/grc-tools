@@ -32,14 +32,17 @@ import (
 const suggestionTokenTTL = 24 * time.Hour
 
 // SuggestionTokenPayload is the signed content behind one suggestion token:
-// exactly what Suggest returned, plus which feature it's for and when it was
-// minted.
+// exactly what Suggest returned, plus which feature it's for, who asked for
+// it, which risk it was about (0 if the risk didn't have an id yet — Add Risk
+// calls Suggest before the risk is created), and when it was minted.
 type SuggestionTokenPayload struct {
-	Feature    string `json:"feature"`
-	Value      string `json:"value"`
-	Reason     string `json:"reason"`
-	Confidence string `json:"confidence"`
-	IssuedAt   int64  `json:"issued_at"`
+	Feature     string `json:"feature"`
+	Value       string `json:"value"`
+	Reason      string `json:"reason"`
+	Confidence  string `json:"confidence"`
+	RiskID      int    `json:"risk_id,omitempty"`
+	RequestedBy string `json:"requested_by,omitempty"`
+	IssuedAt    int64  `json:"issued_at"`
 }
 
 // SignSuggestion mints an opaque, tamper-evident token for one Suggest
@@ -58,13 +61,15 @@ type SuggestionTokenPayload struct {
 // signature only proves this process (or one sharing its API key) minted the
 // token — it isn't meant to keep the payload confidential, so it's base64,
 // not encrypted.
-func (c *Client) SignSuggestion(feature, value, reason, confidence string) (string, error) {
+func (c *Client) SignSuggestion(feature, value, reason, confidence string, riskID int, requestedBy string) (string, error) {
 	payload := SuggestionTokenPayload{
-		Feature:    feature,
-		Value:      value,
-		Reason:     reason,
-		Confidence: confidence,
-		IssuedAt:   time.Now().Unix(),
+		Feature:     feature,
+		Value:       value,
+		Reason:      reason,
+		Confidence:  confidence,
+		RiskID:      riskID,
+		RequestedBy: requestedBy,
+		IssuedAt:    time.Now().Unix(),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -75,10 +80,15 @@ func (c *Client) SignSuggestion(feature, value, reason, confidence string) (stri
 }
 
 // VerifySuggestion checks a token minted by SignSuggestion: well-formed,
-// correctly signed, for the expected feature, and not expired. The returned
-// payload is the only source RecordDecision should ever treat as "what the
-// AI actually suggested."
-func (c *Client) VerifySuggestion(token, wantFeature string) (*SuggestionTokenPayload, error) {
+// correctly signed, for the expected feature, not expired, and — when the
+// token carries them — for the expected risk and requester. wantRiskID is 0
+// when the caller doesn't have one to check (there is none at RecordDecision
+// time); a zero RiskID in the payload (Add Risk, suggested before the risk
+// existed) is likewise never checked against wantRiskID, since nothing minted
+// it against a real id to compare. wantRequestedBy is checked whenever the
+// payload has one. The returned payload is the only source RecordDecision
+// should ever treat as "what the AI actually suggested."
+func (c *Client) VerifySuggestion(token, wantFeature string, wantRiskID int, wantRequestedBy string) (*SuggestionTokenPayload, error) {
 	rawPart, sigPart, ok := strings.Cut(token, ".")
 	if !ok {
 		return nil, fmt.Errorf("verify suggestion: malformed token")
@@ -104,6 +114,12 @@ func (c *Client) VerifySuggestion(token, wantFeature string) (*SuggestionTokenPa
 	}
 	if time.Since(time.Unix(payload.IssuedAt, 0)) > suggestionTokenTTL {
 		return nil, fmt.Errorf("verify suggestion: token expired")
+	}
+	if payload.RiskID != 0 && payload.RiskID != wantRiskID {
+		return nil, fmt.Errorf("verify suggestion: token is for risk %d, not %d", payload.RiskID, wantRiskID)
+	}
+	if payload.RequestedBy != "" && payload.RequestedBy != wantRequestedBy {
+		return nil, fmt.Errorf("verify suggestion: token was requested by a different user")
 	}
 	return &payload, nil
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aigateway"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
 // LikelihoodSuggestionService generates and records AI Likelihood
@@ -133,7 +134,11 @@ func (s *likelihoodSuggestionService) Suggest(ctx context.Context, req model.Sug
 		return nil, fmt.Errorf("suggest likelihood: model returned out-of-range score %d", result.Score)
 	}
 
-	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureLikelihood, strconv.Itoa(result.Score), result.Reason, result.Confidence)
+	requestedBy := ""
+	if u := auth.FromContext(ctx); u != nil {
+		requestedBy = u.Subject
+	}
+	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureLikelihood, strconv.Itoa(result.Score), result.Reason, result.Confidence, req.RiskID, requestedBy)
 	if err != nil {
 		return nil, fmt.Errorf("suggest likelihood: sign suggestion: %w", err)
 	}
@@ -180,7 +185,7 @@ func (s *likelihoodSuggestionService) RecordDecision(ctx context.Context, riskID
 		return nil
 	}
 
-	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureLikelihood)
+	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureLikelihood, riskID, decidedBy)
 	if err != nil {
 		return fmt.Errorf("record likelihood suggestion: %w", err)
 	}

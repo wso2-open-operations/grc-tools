@@ -52,6 +52,12 @@ type SuggestCategoryRequest struct {
 	Title                  string `json:"title"`
 	Description            string `json:"description"`
 	ComplianceReferenceIDs []int  `json:"compliance_reference_ids"`
+	// RiskID is the risk this suggestion is about, when one already exists
+	// (Edit Risk) — omitted/0 on Add Risk, before the risk has an id. Bound
+	// into the suggestion token and checked at RecordDecision time so a token
+	// requested for one risk can't be replayed to record a decision on
+	// another.
+	RiskID int `json:"risk_id,omitempty"`
 }
 
 // SuggestCategoryResponse is what the form shows inline and pre-fills the
@@ -138,6 +144,10 @@ type SuggestLikelihoodRequest struct {
 	ComplianceReferenceIDs []int  `json:"compliance_reference_ids"`
 	CategoryID             int    `json:"category_id"`
 	SourceRegisterID       int    `json:"source_register_id"`
+	// RiskID is the risk this suggestion is about, when one already exists
+	// (reassessment) — omitted/0 on Add Risk's Gross suggestion, before the
+	// risk has an id. See SuggestCategoryRequest.RiskID.
+	RiskID int `json:"risk_id,omitempty"`
 }
 
 // SuggestLikelihoodResponse is what the form shows inline and highlights the
@@ -172,6 +182,10 @@ type SuggestActionPlanRequest struct {
 	CategoryID             int    `json:"category_id"`
 	ComplianceReferenceIDs []int  `json:"compliance_reference_ids"`
 	TreatmentStrategy      string `json:"treatment_strategy"`
+	// RiskID is the risk this suggestion is about, when one already exists
+	// (adding another action plan to an in-remediation risk) — omitted/0 on
+	// the Add Risk wizard's Action Plan step. See SuggestCategoryRequest.RiskID.
+	RiskID int `json:"risk_id,omitempty"`
 }
 
 // SuggestActionPlanResponse is what the form shows inline and offers to copy

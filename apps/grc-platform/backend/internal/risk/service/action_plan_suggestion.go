@@ -24,6 +24,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aigateway"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
 // ActionPlanSuggestionService generates and records AI action plan
@@ -88,7 +89,11 @@ func (s *actionPlanSuggestionService) Suggest(ctx context.Context, req model.Sug
 		return nil, fmt.Errorf("suggest action plan: %w", err)
 	}
 
-	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureActionPlan, result.Description, result.Reason, result.Confidence)
+	requestedBy := ""
+	if u := auth.FromContext(ctx); u != nil {
+		requestedBy = u.Subject
+	}
+	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureActionPlan, result.Description, result.Reason, result.Confidence, req.RiskID, requestedBy)
 	if err != nil {
 		return nil, fmt.Errorf("suggest action plan: sign suggestion: %w", err)
 	}
@@ -106,7 +111,7 @@ func (s *actionPlanSuggestionService) RecordDecision(ctx context.Context, riskID
 		return nil
 	}
 
-	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureActionPlan)
+	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureActionPlan, riskID, decidedBy)
 	if err != nil {
 		return fmt.Errorf("record action plan suggestion: %w", err)
 	}
