@@ -26,6 +26,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aigateway"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
 // CategorySuggestionService generates and records AI category suggestions.
@@ -101,7 +102,11 @@ func (s *categorySuggestionService) Suggest(ctx context.Context, req model.Sugge
 		return nil, fmt.Errorf("suggest category: model returned unknown category id %d", result.CategoryID)
 	}
 
-	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureCategory, strconv.Itoa(cat.ID), result.Reason, result.Confidence)
+	requestedBy := ""
+	if u := auth.FromContext(ctx); u != nil {
+		requestedBy = u.Subject
+	}
+	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureCategory, strconv.Itoa(cat.ID), result.Reason, result.Confidence, req.RiskID, requestedBy)
 	if err != nil {
 		return nil, fmt.Errorf("suggest category: sign suggestion: %w", err)
 	}
@@ -120,7 +125,7 @@ func (s *categorySuggestionService) RecordDecision(ctx context.Context, riskID i
 		return nil
 	}
 
-	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureCategory)
+	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureCategory, riskID, decidedBy)
 	if err != nil {
 		return fmt.Errorf("record category suggestion: %w", err)
 	}
