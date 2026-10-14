@@ -25,6 +25,7 @@ import (
 	riskservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/scim"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/adminactivity"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aigateway"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/applink"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/emailer"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/entityclient"
@@ -58,36 +59,67 @@ func buildRiskDeps(
 	emailCfg config.EmailConfig,
 	leadEscalationEmails bool,
 	activityLog *adminactivity.Client,
+	aiGatewayCfg config.AIGatewayConfig,
 ) riskhandler.Deps {
 	userRepo := userentity.NewRepository(ec)
 	actionPlanRepo := riskentity.NewActionPlanRepository(ec)
 	riskRepo := riskentity.NewRiskRepository(ec)
+	riskCategoryRepo := riskentity.NewRiskCategoryRepository(ec)
+	riskTeamRepo := riskentity.NewTeamRepository(ec)
+	complianceRepo := riskentity.NewComplianceReferenceRepository(ec)
+	suggestionRepo := riskentity.NewSuggestionRepository(ec)
+	gatewayClient := aigateway.New(aiGatewayCfg.BaseURL, aiGatewayCfg.APIKey)
+	categorySuggestionSvc := riskservice.NewCategorySuggestionService(
+		gatewayClient,
+		riskCategoryRepo,
+		complianceRepo,
+		suggestionRepo,
+	)
+	likelihoodSuggestionSvc := riskservice.NewLikelihoodSuggestionService(
+		gatewayClient,
+		riskCategoryRepo,
+		riskTeamRepo,
+		complianceRepo,
+		suggestionRepo,
+	)
+	actionPlanSuggestionSvc := riskservice.NewActionPlanSuggestionService(
+		gatewayClient,
+		riskCategoryRepo,
+		complianceRepo,
+		suggestionRepo,
+	)
 	return riskhandler.Deps{
-		Risk:                 riskservice.NewRiskService(riskRepo, actionPlanRepo),
-		Assessment:           riskservice.NewRiskAssessmentService(riskentity.NewAssessmentRepository(ec)),
-		Team:                 riskservice.NewTeamService(riskentity.NewTeamRepository(ec)),
-		Score:                riskservice.NewRiskScoreService(riskentity.NewRiskScoreRepository(ec)),
-		Category:             riskservice.NewRiskCategoryService(riskentity.NewRiskCategoryRepository(ec)),
-		Platforms:            riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/platforms")),
-		Customers:            riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/customers")),
-		Products:             riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/products")),
-		DeploymentTypes:      riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/deployment-types")),
-		ActionPlan:           riskservice.NewActionPlanService(actionPlanRepo, userRepo),
-		Evidence:             riskservice.NewEvidenceService(riskentity.NewRiskEvidenceRepository(ec), riskRepo, actionPlanRepo, fileSvc),
-		History:              riskservice.NewHistoryService(riskentity.NewHistoryRepository(ec)),
-		Escalation:           riskservice.NewEscalationService(riskentity.NewEscalationRepository(ec), riskRepo, actionPlanRepo, userRepo, hrClient, scimClient, dirSvc),
-		Compliance:           riskservice.NewComplianceReferenceService(riskentity.NewComplianceReferenceRepository(ec)),
-		Analytics:            riskservice.NewAssembledAnalyticsService(riskentity.NewAnalyticsRepository(ec)),
-		Dashboard:            riskservice.NewAssembledDashboardService(riskentity.NewDashboardRepository(ec)),
-		Employee:             riskservice.NewEmployeeSearchService(hrClient),
-		Users:                userRepo,
-		HREntity:             hrClient,
-		SCIM:                 scimClient,
-		Grants:               grantRepo,
-		Directory:            dirSvc,
-		Email:                emailer.New(emailCfg.ServiceURL, emailCfg.FromAddress, emailCfg.TokenURL, emailCfg.ClientID, emailCfg.ClientSecret, emailCfg.Enabled),
-		FrontendBaseURL:      emailCfg.OneWSO2WebappURL + applink.OneWSO2SecurityPath,
-		LeadEscalationEmails: leadEscalationEmails,
-		ActivityLog:          activityLog,
+		Risk:                        riskservice.NewRiskService(riskRepo, actionPlanRepo),
+		Assessment:                  riskservice.NewRiskAssessmentService(riskentity.NewAssessmentRepository(ec)),
+		Team:                        riskservice.NewTeamService(riskTeamRepo),
+		Score:                       riskservice.NewRiskScoreService(riskentity.NewRiskScoreRepository(ec)),
+		Category:                    riskservice.NewRiskCategoryService(riskCategoryRepo),
+		CategorySuggestion:          categorySuggestionSvc,
+		CategorySuggestionEnabled:   aiGatewayCfg.CategorizationEnabled,
+		LikelihoodSuggestion:        likelihoodSuggestionSvc,
+		LikelihoodSuggestionEnabled: aiGatewayCfg.LikelihoodEnabled,
+		ActionPlanSuggestion:        actionPlanSuggestionSvc,
+		ActionPlanSuggestionEnabled: aiGatewayCfg.ActionPlanEnabled,
+		Platforms:                   riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/platforms")),
+		Customers:                   riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/customers")),
+		Products:                    riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/products")),
+		DeploymentTypes:             riskservice.NewLookupService(riskentity.NewLookupRepository(ec, "/risk/deployment-types")),
+		ActionPlan:                  riskservice.NewActionPlanService(actionPlanRepo, userRepo),
+		Evidence:                    riskservice.NewEvidenceService(riskentity.NewRiskEvidenceRepository(ec), riskRepo, actionPlanRepo, fileSvc),
+		History:                     riskservice.NewHistoryService(riskentity.NewHistoryRepository(ec)),
+		Escalation:                  riskservice.NewEscalationService(riskentity.NewEscalationRepository(ec), riskRepo, actionPlanRepo, userRepo, hrClient, scimClient, dirSvc),
+		Compliance:                  riskservice.NewComplianceReferenceService(complianceRepo),
+		Analytics:                   riskservice.NewAssembledAnalyticsService(riskentity.NewAnalyticsRepository(ec)),
+		Dashboard:                   riskservice.NewAssembledDashboardService(riskentity.NewDashboardRepository(ec)),
+		Employee:                    riskservice.NewEmployeeSearchService(hrClient),
+		Users:                       userRepo,
+		HREntity:                    hrClient,
+		SCIM:                        scimClient,
+		Grants:                      grantRepo,
+		Directory:                   dirSvc,
+		Email:                       emailer.New(emailCfg.ServiceURL, emailCfg.FromAddress, emailCfg.TokenURL, emailCfg.ClientID, emailCfg.ClientSecret, emailCfg.Enabled),
+		FrontendBaseURL:             emailCfg.OneWSO2WebappURL + applink.OneWSO2SecurityPath,
+		LeadEscalationEmails:        leadEscalationEmails,
+		ActivityLog:                 activityLog,
 	}
 }

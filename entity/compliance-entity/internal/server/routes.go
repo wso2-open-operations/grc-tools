@@ -58,6 +58,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskActionPlanRepo := repository.NewRiskActionPlanRepository(db)
 	riskActionStepRepo := repository.NewRiskActionStepRepository(db)
 	riskComplianceRefRepo := repository.NewRiskComplianceRefRepository(db)
+	riskAISuggestionRepo := repository.NewRiskAISuggestionRepository(db)
 	riskEscalationRepo := repository.NewRiskEscalationRepository(db)
 	riskChangeLogRepo := repository.NewRiskChangeLogRepository(db)
 	riskEvidenceRepo := repository.NewRiskEvidenceRepository(db)
@@ -93,6 +94,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskComplianceRefSvc := service.NewRiskComplianceRefService(riskComplianceRefRepo)
 	riskEscalationSvc := service.NewRiskEscalationService(riskEscalationRepo, riskSvc)
 	riskChangeLogSvc := service.NewRiskChangeLogService(riskChangeLogRepo)
+	riskAISuggestionSvc := service.NewRiskAISuggestionService(riskAISuggestionRepo)
 	// riskActionPlanSvc depends on the services above for its completion
 	// cascade, which now only notifies — resolving the escalation and reverting
 	// the risk moved to the escalation comment flow in the GRC backend.
@@ -136,6 +138,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskComplianceRefH := handler.NewRiskComplianceRefHandler(riskComplianceRefSvc)
 	riskEscalationH := handler.NewRiskEscalationHandler(riskEscalationSvc)
 	riskChangeLogH := handler.NewRiskChangeLogHandler(riskChangeLogSvc)
+	riskAISuggestionH := handler.NewRiskAISuggestionHandler(riskAISuggestionSvc)
 	riskEvidenceH := handler.NewRiskEvidenceHandler(riskEvidenceSvc)
 	riskAssessmentH := handler.NewRiskAssessmentHandler(riskAssessmentSvc)
 	riskReminderH := handler.NewRiskReminderHandler(riskReminderSvc)
@@ -331,6 +334,12 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 		mux.HandleFunc("PATCH "+path+"/{id}", h.UpdateRiskLookup)
 		mux.HandleFunc("DELETE "+path+"/{id}", h.DeleteRiskLookup)
 	}
+
+	// Risk AI suggestions (auto-categorisation, likelihood prediction, action
+	// plan description — see risk_ai_suggestion's schema)
+	mux.HandleFunc("GET /risk/ai-suggestions", riskAISuggestionH.ListRiskAISuggestions)
+	mux.HandleFunc("POST /risk/ai-suggestions", riskAISuggestionH.CreateRiskAISuggestion)
+	mux.HandleFunc("PATCH /risk/ai-suggestions/{id}/decide", riskAISuggestionH.DecideRiskAISuggestion)
 
 	// Risk compliance references
 	mux.HandleFunc("POST /risk/compliance-references/search", riskReferenceH.SearchRiskReferences)

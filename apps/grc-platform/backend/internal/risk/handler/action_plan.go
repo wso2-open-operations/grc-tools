@@ -60,6 +60,11 @@ func (d *Deps) handleCreateActionPlan(w http.ResponseWriter, r *http.Request) {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
+	// Advisory only — the plan is already saved successfully at this point,
+	// so a failure here is logged, never returned to the caller as an error.
+	if err := d.ActionPlanSuggestion.RecordDecision(r.Context(), riskID, req.AIActionPlanSuggestion, by); err != nil {
+		slog.Error("record action plan suggestion decision", "risk_id", riskID, "err", err)
+	}
 	d.recordEvent(r.Context(), riskID, by, model.HistoryCreate, model.HistoryDetails{
 		Plan: planLabel(plan),
 	})

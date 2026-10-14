@@ -573,6 +573,46 @@ CREATE TABLE IF NOT EXISTS risk_reminder (
   CONSTRAINT fk_risk_reminder_risk FOREIGN KEY (risk_id) REFERENCES risk(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------------------------------
+-- risk_ai_suggestion
+--
+-- One row per AI suggestion shown to a user, for every feature that shares
+-- this shape (one suggested value, a confidence, accept-or-override):
+-- auto-categorisation, likelihood prediction, and action plan description
+-- suggestion. One row per suggestion shown, not per risk — re-requesting a
+-- suggestion after editing the form adds a new row rather than overwriting
+-- the last one, so full history is kept.
+--
+-- suggested_value is TEXT, not VARCHAR, so it can hold a full drafted action
+-- plan description as well as a short category id or 1-3 likelihood score.
+--
+-- decided_by stores the actor's UUID (the Asgardeo `sub` claim), the same
+-- convention every other created_by/updated_by in this file resolves through
+-- SCIM/internal/directory, not a raw email.
+--
+-- RESTRICT, not CASCADE, same reasoning as risk_change_log/risk_assessment
+-- above: a history table silently losing its rows when its subject is
+-- deleted defeats the point of keeping history, and risks are never
+-- hard-deleted by any code path in this system anyway.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_ai_suggestion (
+  id                BIGINT        NOT NULL AUTO_INCREMENT,
+  risk_id           INT           NOT NULL,
+  feature           ENUM('CATEGORY','LIKELIHOOD','ACTION_PLAN') NOT NULL,
+  suggested_value   TEXT          NOT NULL,
+  suggested_reason  TEXT          NULL,
+  confidence        ENUM('HIGH','MEDIUM','LOW') NULL,
+  status            ENUM('SUGGESTED','ACCEPTED','OVERRIDDEN') NOT NULL DEFAULT 'SUGGESTED',
+  override_reason   TEXT          NULL,
+  decided_by        VARCHAR(255)  NULL COMMENT 'Actor UUID (Asgardeo sub claim) who accepted/overrode the suggestion',
+  decided_at        DATETIME      NULL,
+  created_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_ras_risk (risk_id),
+  KEY idx_ras_feature (feature),
+  CONSTRAINT fk_ras_risk FOREIGN KEY (risk_id) REFERENCES risk(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- =============================================================================
 -- Register Templates (RISK_MODULE_DESIGN.md §14)

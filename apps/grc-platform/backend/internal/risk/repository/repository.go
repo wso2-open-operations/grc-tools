@@ -183,3 +183,22 @@ type RiskCategoryRepository interface {
 	// refuse-if-in-use reasoning as ComplianceReferenceRepository.Delete.
 	Delete(ctx context.Context, id int) error
 }
+
+// SuggestionRepository is the data-access contract for risk_ai_suggestion —
+// one row per AI suggestion shown (CATEGORY, LIKELIHOOD, ACTION_PLAN all
+// share this one table).
+type SuggestionRepository interface {
+	// Create persists a freshly-generated suggestion, Status starting at
+	// SUGGESTED — called the moment it's shown to the user, before they've
+	// decided anything.
+	Create(ctx context.Context, req model.CreateSuggestionRequest) (int, error)
+	// Decide records the user's accept/override decision against the
+	// suggestion that was shown.
+	Decide(ctx context.Context, id int, req model.DecideSuggestionRequest, decidedBy string) error
+	// ListByRisk returns every suggestion for riskID + feature, newest first.
+	// status filters to that outcome only when non-empty; "" returns every
+	// outcome. Used for the in-risk reminder (status="SUGGESTED") and the
+	// quarterly sweep's own "already checked this quarter" guard (status=""
+	// — an accepted or overridden row still counts as "checked").
+	ListByRisk(ctx context.Context, riskID int, feature string, status string) ([]model.Suggestion, error)
+}

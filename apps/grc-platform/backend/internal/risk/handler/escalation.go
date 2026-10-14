@@ -67,6 +67,60 @@ func (d *Deps) handleEscalateRisk(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSONValue(w, http.StatusOK, escalation)
 }
 
+// handleRenotifyEscalation serves POST /api/v1/risks/{id}/escalate/notify — a
+// reminder nudge for a risk that's already escalated. The Compliance Entity
+// rejects a second manual /escalate outright (409: "already has an open
+// escalation" — see handleEscalateRisk's comment), which previously left the
+// Escalate button looking like it did nothing: the 409 was correctly surfaced
+// as actionError, but the drawer sits on top of that banner as a modal. This
+// endpoint is what the frontend's confirm dialog ("already escalated — resend
+// the notification?") calls instead: it does not touch the escalation row or
+// the risk's workflow status, and records no history — it is purely a resend
+// of the same emails NotifyEscalation already sends (severity-gated
+// Management Approver, Compliance Admins, leads), so recipients are always
+// resolved fresh rather than reused from the original send.
+func (d *Deps) handleRenotifyEscalation(w http.ResponseWriter, r *http.Request) {
+	by, ok := requireCallerUUID(w, r)
+	if !ok {
+		return
+	}
+	riskID, ok := parseRiskID(w, r)
+	if !ok {
+		return
+	}
+	registerID, err := d.sourceRegisterOf(r.Context(), riskID)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	if !auth.RequirePrivilegeIn(r.Context(), w, privilege.EscalateRisk, registerID) {
+		return
+	}
+
+	escalations, err := d.Escalation.List(r.Context(), riskID)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	hasOpen := false
+	for _, e := range escalations {
+		if e.Status == "OPEN" {
+			hasOpen = true
+			break
+		}
+	}
+	if !hasOpen {
+		response.WriteError(w, http.StatusConflict, "risk has no open escalation to notify about")
+		return
+	}
+
+	if err := d.NotifyEscalationSync(r.Context(), riskID, by); err != nil {
+		response.MapServiceError(r.Context(), w, err, "failed to resend escalation notification")
+		return
+	}
+	response.WriteJSONValue(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
 // handleListEscalations serves GET /api/v1/risks/{id}/escalations. Visible to
 // anyone who can view the risk — escalation history is system-generated (see
 // model.Escalation) and shown the same as any other risk field — except an
@@ -192,14 +246,16 @@ func (d *Deps) NotifyEscalation(ctx context.Context, riskID int, by string) {
 	d.notifyEscalationLeads(riskID, by)
 }
 
-// NotifyEscalationSync is NotifyEscalation's synchronous counterpart, used
-// only by the daily escalation job (internal/risk/job). The job can afford to
-// wait for the actual send to finish — it has no response to protect the way
-// an HTTP handler does — and it needs to: a fire-and-forget notification whose
-// caller never learns whether it succeeded is exactly what let a run of the
-// job log "escalated 40" while silently sending zero emails, with no retry,
-// since Escalate's status flip already made every one of those risks
-// ineligible for the job's query on the next run.
+// NotifyEscalationSync is NotifyEscalation's synchronous counterpart, used by
+// the daily escalation job (internal/risk/job) and by handleRenotifyEscalation.
+// The job can afford to wait for the actual send to finish — it has no
+// response to protect the way an HTTP handler does — and it needs to: a
+// fire-and-forget notification whose caller never learns whether it succeeded
+// is exactly what let a run of the job log "escalated 40" while silently
+// sending zero emails, with no retry, since Escalate's status flip already
+// made every one of those risks ineligible for the job's query on the next
+// run. handleRenotifyEscalation needs the same guarantee for the opposite
+// reason: it has to tell the user whether the resend actually went out.
 func (d *Deps) NotifyEscalationSync(ctx context.Context, riskID int, by string) error {
 	recipients, registerID, err := d.escalationRecipients(ctx, riskID)
 	if err != nil {

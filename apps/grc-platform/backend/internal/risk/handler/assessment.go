@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
@@ -66,6 +67,14 @@ func (d *Deps) handleAssessRisk(w http.ResponseWriter, r *http.Request) {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
+
+	// Advisory only — the assessment is already saved successfully at this
+	// point, so a failure here is logged, never returned to the caller as an
+	// error. Residual, not Gross: this is the reassessment endpoint.
+	if err := d.LikelihoodSuggestion.RecordDecision(r.Context(), id, req.AILikelihoodSuggestion, req.Likelihood, by); err != nil {
+		slog.Error("record likelihood suggestion decision", "risk_id", id, "err", err)
+	}
+
 	// Progress carries the assessor's notes into the timeline itself — the
 	// reassessment's own row is the source of truth, but the dedicated
 	// Assessment History view that used to read it directly was replaced by
