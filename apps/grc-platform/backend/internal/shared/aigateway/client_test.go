@@ -16,7 +16,11 @@
 
 package aigateway
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func TestParseJSONObject_Clean(t *testing.T) {
 	out, err := parseJSONObject[suggestLikelihoodOutput](`{"score": 2, "reason": "EPSS 0.3", "confidence": "medium"}`)
@@ -93,5 +97,36 @@ func TestLastJSONObject_NestedBraces(t *testing.T) {
 	want := `{"outer": {"inner": "value"}, "score": 2}`
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestLikelihoodPromptNamesOnlyVerifiedSources(t *testing.T) {
+	p := buildLikelihoodPrompt(SuggestLikelihoodRequest{Title: "t", Description: "d"})
+	for _, s := range evidenceSources {
+		if !strings.Contains(p, s.FeedURL) {
+			t.Errorf("prompt missing feed URL %s", s.FeedURL)
+		}
+	}
+	for _, banned := range []string{"CISA KEV, NVD, EPSS, vendor advisories", "EPSS >= 0.5"} {
+		if strings.Contains(p, banned) {
+			t.Errorf("prompt still references unverified source text %q", banned)
+		}
+	}
+}
+
+func TestLikelihoodToolsRestrictedToEvidenceDomains(t *testing.T) {
+	want := evidenceDomains()
+	for _, tool := range likelihoodTools {
+		got, ok := tool["allowed_domains"].([]string)
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Errorf("%v: allowed_domains = %v, want %v", tool["name"], tool["allowed_domains"], want)
+		}
+	}
+	seen := map[string]bool{}
+	for _, d := range want {
+		if seen[d] {
+			t.Errorf("duplicate domain %s", d)
+		}
+		seen[d] = true
 	}
 }
