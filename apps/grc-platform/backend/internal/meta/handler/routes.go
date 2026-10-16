@@ -23,6 +23,8 @@ import (
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/routeguard"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 // Deps holds dependencies for the meta handlers.
@@ -41,6 +43,26 @@ type userGuideURLResponse struct {
 // RegisterRoutes mounts the meta routes onto mux.
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	mux.HandleFunc("GET /api/v1/meta/user-guide-url", func(w http.ResponseWriter, r *http.Request) {
-		response.WriteJSONValue(w, http.StatusOK, userGuideURLResponse{URL: deps.UserGuideURL})
+		url := deps.UserGuideURL
+		if !holdsAnyPrivilege(r) {
+			url = ""
+		}
+		response.WriteJSONValue(w, http.StatusOK, userGuideURLResponse{URL: url})
 	})
+}
+
+// holdsAnyPrivilege reports whether the caller has access to at least one
+// GRC Platform privilege. A caller with none has nothing in the platform, so
+// the guide is withheld (empty URL, which the rail already treats as "hide
+// the row"). Local dev allow-all mode counts as access.
+func holdsAnyPrivilege(r *http.Request) bool {
+	if auth.AllowAll(r.Context()) {
+		return true
+	}
+	for _, held := range privilege.FromContext(r.Context()) {
+		if held {
+			return true
+		}
+	}
+	return false
 }

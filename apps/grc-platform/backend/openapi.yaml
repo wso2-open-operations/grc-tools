@@ -68,7 +68,7 @@ paths:
       tags:
       - Meta
       summary: Get the GRC Platform user guide URL
-      description: Served from GRC_USER_GUIDE_URL. `url` is an empty string when not configured, in which case One WSO2's Security and Compliance rail hides its "User Guide" row. Available to every authenticated caller, including external auditors.
+      description: Served from GRC_USER_GUIDE_URL. `url` is an empty string when not configured, in which case One WSO2's Security and Compliance rail hides its "User Guide" row. Available to authenticated callers who hold at least one GRC Platform privilege, including external auditors; a caller with no access gets an empty `url`.
       operationId: getUserGuideUrl
       responses:
         '200':
