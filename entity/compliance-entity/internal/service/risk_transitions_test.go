@@ -40,12 +40,12 @@ func TestBackendWorkflowTransitionsAreAllowed(t *testing.T) {
 
 		{"ManagementApprove", "PENDING_MANAGEMENT_APPROVAL", "PENDING_COMPLIANCE_REVIEW"},
 		{"ManagementApprove closure", "PENDING_MANAGEMENT_CLOSURE_APPROVAL", "PENDING_COMPLIANCE_CLOSURE"},
-		{"Approve", "PENDING_COMPLIANCE_REVIEW", "IN_REMEDIATION"},
-		{"Complete", "IN_REMEDIATION", "PENDING_OWNER_COMPLETION_APPROVAL"},
+		{"Approve", "PENDING_COMPLIANCE_REVIEW", "APPROVED"},
+		{"Complete", "APPROVED", "PENDING_OWNER_COMPLETION_APPROVAL"},
 		// Editing implementation_date or the action steps on an in-remediation
 		// risk re-enters the approval chain. This edge was missing from the
 		// table and rejected a legitimate edit with a 400.
-		{"Edit restricted field", "IN_REMEDIATION", "PENDING_AMENDMENT"},
+		{"Edit restricted field", "APPROVED", "PENDING_AMENDMENT"},
 		{"Close", "PENDING_COMPLIANCE_CLOSURE", "CLOSED"},
 		{"Cancel", "PENDING_RISK_OWNER_APPROVAL", "CANCELLED"},
 
@@ -73,7 +73,7 @@ func TestBackendWorkflowTransitionsAreAllowed(t *testing.T) {
 // TestTerminalStatusesAreTerminal pins the one thing the map must forbid.
 func TestTerminalStatusesAreTerminal(t *testing.T) {
 	for _, from := range []string{"CLOSED", "CANCELLED"} {
-		for _, to := range []string{"PENDING_RISK_OWNER_APPROVAL", "IN_REMEDIATION", "PENDING_REVISION"} {
+		for _, to := range []string{"PENDING_RISK_OWNER_APPROVAL", "APPROVED", "PENDING_REVISION"} {
 			if isValidRiskTransition(from, to) {
 				t.Errorf("%s is terminal but %s → %s was allowed", from, from, to)
 			}
@@ -84,7 +84,7 @@ func TestTerminalStatusesAreTerminal(t *testing.T) {
 // TestNoOpAndUnknownFrom documents two deliberate escape hatches: a no-op
 // transition always passes, and an empty current status is not policed.
 func TestNoOpAndUnknownFrom(t *testing.T) {
-	if !isValidRiskTransition("IN_REMEDIATION", "IN_REMEDIATION") {
+	if !isValidRiskTransition("APPROVED", "APPROVED") {
 		t.Error("a no-op transition must be allowed")
 	}
 	if !isValidRiskTransition("", "PENDING_COMPLIANCE_REVIEW") {

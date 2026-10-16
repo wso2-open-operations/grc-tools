@@ -510,7 +510,7 @@ func effectivePrivilegesFor(ctx context.Context, sourceRegisterID, assignmentTea
 
 // handleUpdateRisk serves PUT /api/v1/risks/{id}.
 // Updating any restricted field (implementation_date, email_subject, action_steps)
-// on an IN_REMEDIATION risk moves it to PENDING_AMENDMENT.
+// on an APPROVED risk moves it to PENDING_AMENDMENT.
 func (d *Deps) handleUpdateRisk(w http.ResponseWriter, r *http.Request) {
 	by, ok := requireCallerUUID(w, r)
 	if !ok {
@@ -755,7 +755,7 @@ func (d *Deps) handleManagementApproveRisk(w http.ResponseWriter, r *http.Reques
 }
 
 // handleApproveRisk serves POST /api/v1/risks/{id}/approve.
-// Compliance approval: PENDING_COMPLIANCE_REVIEW → IN_REMEDIATION.
+// Compliance approval: PENDING_COMPLIANCE_REVIEW → APPROVED.
 func (d *Deps) handleApproveRisk(w http.ResponseWriter, r *http.Request) {
 	by, ok := requireCallerUUID(w, r)
 	if !ok {
@@ -782,7 +782,7 @@ func (d *Deps) handleApproveRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.recordEvent(r.Context(), id, by, model.HistoryApprove, model.HistoryDetails{
-		Role: "Compliance", From: model.StatusPendingComplianceReview, To: model.StatusInRemediation,
+		Role: "Compliance", From: model.StatusPendingComplianceReview, To: model.StatusApproved,
 	})
 	// Remediation can now start, so the two people who have to do it are told:
 	// the assigner who owns the risk's progress and the action plan's owner.
@@ -892,7 +892,7 @@ func (d *Deps) handleRejectRisk(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCompleteRisk serves POST /api/v1/risks/{id}/complete.
-// Transitions IN_REMEDIATION → PENDING_OWNER_COMPLETION_APPROVAL.
+// Transitions APPROVED → PENDING_OWNER_COMPLETION_APPROVAL.
 func (d *Deps) handleCompleteRisk(w http.ResponseWriter, r *http.Request) {
 	by, ok := requireCallerUUID(w, r)
 	if !ok {
@@ -910,11 +910,11 @@ func (d *Deps) handleCompleteRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.recordEvent(r.Context(), id, by, model.HistoryComplete, model.HistoryDetails{
-		From: model.StatusInRemediation, To: model.StatusPendingOwnerCompletion,
+		From: model.StatusApproved, To: model.StatusPendingOwnerCompletion,
 	})
 	// Submitting for completion approval is what finally closes an escalation:
 	// up to this point the risk stayed in the Overdue tab even while back
-	// IN_REMEDIATION. Best-effort — the risk has already moved on, and failing
+	// APPROVED. Best-effort — the risk has already moved on, and failing
 	// the request here would be worse than leaving it in the Overdue tab.
 	if err := d.Escalation.ResolveOpen(r.Context(), id, by); err != nil {
 		slog.Warn("failed to resolve open escalations on completion", "riskId", id, "err", err)

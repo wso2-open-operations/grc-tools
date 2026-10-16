@@ -474,11 +474,11 @@ func TestFixture_Parse(t *testing.T) {
 		}
 	}
 
-	// Row 1: a clean IN_REMEDIATION row exercising serial dates, an ordinal
+	// Row 1: a clean APPROVED row exercising serial dates, an ordinal
 	// date, two products and two environments, and the "Text" git-URL
 	// placeholder.
 	r1 := rows[0]
-	if r1.RiskYear != 2025 || r1.RiskQuarter != "Q3" || r1.WorkflowStatus != "IN_REMEDIATION" {
+	if r1.RiskYear != 2025 || r1.RiskQuarter != "Q3" || r1.WorkflowStatus != "APPROVED" {
 		t.Errorf("row 1 scalars: %+v", r1)
 	}
 	if r1.SourceRegisterID != 1 || r1.AssignmentTeamID != 4 {
@@ -613,7 +613,7 @@ func TestFixture_RealRunPipeline_ThenResumeIsNoOp(t *testing.T) {
 		switch len(hops) {
 		case 2:
 			inRem++
-			if hops[1] != "IN_REMEDIATION" {
+			if hops[1] != "APPROVED" {
 				t.Errorf("risk %d 2-hop walk ends %q", id, hops[1])
 			}
 		case 5:
@@ -626,10 +626,10 @@ func TestFixture_RealRunPipeline_ThenResumeIsNoOp(t *testing.T) {
 		}
 	}
 	if inRem != 3 || closed != 2 {
-		t.Errorf("walks: inRemediation=%d closed=%d, want 3 and 2", inRem, closed)
+		t.Errorf("walks: approved=%d closed=%d, want 3 and 2", inRem, closed)
 	}
 
-	// All three IN_REMEDIATION rows are overdue vs 2026-09-15 → 3 suppressing
+	// All three APPROVED rows are overdue vs 2026-09-15 → 3 suppressing
 	// escalations, matching the report.
 	if len(fe.escPosts) != 3 || len(rep.suppressingEscalations) != 3 {
 		t.Errorf("suppressing escalations: posts=%d report=%v", len(fe.escPosts), rep.suppressingEscalations)
@@ -667,7 +667,7 @@ func TestFixture_RealRunPipeline_ThenResumeIsNoOp(t *testing.T) {
 			t.Errorf("plan patch = %+v", pp)
 		}
 	}
-	if rep.migrated != 5 || rep.migratedByBucket["IN_REMEDIATION"] != 3 || rep.migratedByBucket["CLOSED"] != 2 {
+	if rep.migrated != 5 || rep.migratedByBucket["APPROVED"] != 3 || rep.migratedByBucket["CLOSED"] != 2 {
 		t.Errorf("report: migrated=%d byBucket=%v", rep.migrated, rep.migratedByBucket)
 	}
 
@@ -692,7 +692,7 @@ func TestFixture_RealRunPipeline_ThenResumeIsNoOp(t *testing.T) {
 // order of expected-status transitions is faithful.
 func (fe *fakeEntity) statusHopsByRisk() map[int][]string {
 	// The fake doesn't tag patches with a risk id, so reconstruct from the
-	// ExpectedStatus chain: each IN_REMEDIATION/CLOSED walk starts at
+	// ExpectedStatus chain: each APPROVED/CLOSED walk starts at
 	// PENDING_RISK_OWNER_APPROVAL. Group consecutive patches into walks.
 	out := map[int][]string{}
 	risk := 0

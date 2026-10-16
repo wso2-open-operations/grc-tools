@@ -185,8 +185,8 @@ here).
 | `GET` | `/action-plans/{planId}/steps/{stepId}` | Get action step |
 | `PATCH` | `/action-plans/{planId}/steps/{stepId}` | Update action step |
 | `DELETE` | `/action-plans/{planId}/steps/{stepId}` | Delete action step |
-| `POST` | `/action-plans/{planId}/complete` | Complete a plan (all steps must already be COMPLETED); for a MANAGEMENT plan also resolves its escalation and reverts the risk to IN_REMEDIATION |
-| `POST` | `/risks/{riskId}/escalate` | Manually trigger escalation of an overdue IN_REMEDIATION risk (alternative to waiting for the daily job) |
+| `POST` | `/action-plans/{planId}/complete` | Complete a plan (all steps must already be COMPLETED); for a MANAGEMENT plan also resolves its escalation and reverts the risk to APPROVED |
+| `POST` | `/risks/{riskId}/escalate` | Manually trigger escalation of an overdue APPROVED risk (alternative to waiting for the daily job) |
 | `POST` | `/risks/{riskId}/escalations` | Create escalation (created automatically by the daily overdue-risk job — see `internal/job` — not by a user) |
 | `GET` | `/risks/{riskId}/escalations` | List escalations |
 | `GET` | `/risks/{riskId}/escalations/{escalationId}` | Get escalation |
@@ -312,7 +312,7 @@ curl http://localhost:8080/users/by-email/alice@wso2.com
 # Search risks
 curl -X POST http://localhost:8080/risks/search \
   -H "Content-Type: application/json" \
-  -d '{"statuses":["IN_REMEDIATION"]}'
+  -d '{"statuses":["APPROVED"]}'
 
 # Get full risk detail
 curl http://localhost:8080/risks/1/detail

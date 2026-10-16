@@ -34,7 +34,7 @@ func TestCancellable(t *testing.T) {
 		{"rejected before any approval", model.StatusPendingRevision, nil, true},
 		{"rejected before any approval, empty stamp", model.StatusPendingRevision, &empty, true},
 		{"rejected after an owner approval", model.StatusPendingRevision, &approved, false},
-		{"in remediation", model.StatusInRemediation, &approved, false},
+		{"in remediation", model.StatusApproved, &approved, false},
 		{"pending compliance review", model.StatusPendingComplianceReview, &approved, false},
 		{"closed", model.StatusClosed, &approved, false},
 	}

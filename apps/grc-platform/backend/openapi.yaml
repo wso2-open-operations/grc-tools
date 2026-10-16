@@ -3206,7 +3206,7 @@ paths:
       tags:
       - Risks
       summary: Update a risk
-      description: Changing implementation_date, email_subject, or action_steps on an IN_REMEDIATION risk moves it to PENDING_AMENDMENT. All other fields are free-edit.
+      description: Changing implementation_date, email_subject, or action_steps on an APPROVED risk moves it to PENDING_AMENDMENT. All other fields are free-edit.
       operationId: updateRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -3318,7 +3318,7 @@ paths:
       tags:
       - Risk Workflow
       summary: Compliance approval
-      description: PENDING_COMPLIANCE_REVIEW → IN_REMEDIATION.
+      description: PENDING_COMPLIANCE_REVIEW → APPROVED.
       operationId: approveRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -3376,7 +3376,7 @@ paths:
       tags:
       - Risk Workflow
       summary: Mark remediation complete
-      description: IN_REMEDIATION → PENDING_OWNER_COMPLETION_APPROVAL.
+      description: APPROVED → PENDING_OWNER_COMPLETION_APPROVAL.
       operationId: completeRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -3712,7 +3712,7 @@ paths:
       tags:
       - Risk Escalations
       summary: Manually escalate an overdue risk
-      description: Manual trigger for Compliance/Admin to escalate an overdue IN_REMEDIATION risk on demand rather than waiting for the daily job. Creates an OPEN escalation and flips the risk to ESCALATED; a risk that has already moved on returns a 409.
+      description: Manual trigger for Compliance/Admin to escalate an overdue APPROVED risk on demand rather than waiting for the daily job. Creates an OPEN escalation and flips the risk to ESCALATED; a risk that has already moved on returns a 409.
       operationId: escalateRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -3825,7 +3825,7 @@ paths:
       tags:
       - Risk Escalations
       summary: Answer an escalation with a comment
-      description: Replaces the old MANAGEMENT action plan as the way an escalation is answered — a comment alone returns the risk to its assigner (ESCALATED → IN_REMEDIATION). Deliberately not privilege-gated beyond an authenticated session; the entitled commenter for a MEDIUM/LOW risk is a line manager frozen on the escalation row at escalation time, who holds no Risk Hub privilege. The real check is an identity match in the service against the risk's Management Approver (HIGH) or the frozen leads (MEDIUM/LOW), or a compliance-admin override.
+      description: Replaces the old MANAGEMENT action plan as the way an escalation is answered — a comment alone returns the risk to its assigner (ESCALATED → APPROVED). Deliberately not privilege-gated beyond an authenticated session; the entitled commenter for a MEDIUM/LOW risk is a line manager frozen on the escalation row at escalation time, who holds no Risk Hub privilege. The real check is an identity match in the service against the risk's Management Approver (HIGH) or the frozen leads (MEDIUM/LOW), or a compliance-admin override.
       operationId: commentOnEscalation
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -6373,13 +6373,13 @@ components:
         implementation_date:
           type: string
           format: date
-          description: Restricted — changing this on an IN_REMEDIATION risk triggers PENDING_AMENDMENT.
+          description: Restricted — changing this on an APPROVED risk triggers PENDING_AMENDMENT.
         email_subject:
           type: string
-          description: Restricted — changing this on an IN_REMEDIATION risk triggers PENDING_AMENDMENT.
+          description: Restricted — changing this on an APPROVED risk triggers PENDING_AMENDMENT.
         action_steps:
           type: array
-          description: Restricted — changing this on an IN_REMEDIATION risk triggers PENDING_AMENDMENT.
+          description: Restricted — changing this on an APPROVED risk triggers PENDING_AMENDMENT.
           items:
             $ref: '#/components/schemas/UpdateActionStepRequest'
         reassessment_date:

@@ -85,7 +85,7 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 	expectedGrantsByUser := map[int]map[string]struct{}{}
 	// grantCache is shared across every verifyRow call and verifyNoExtraGrants
 	// below, keyed by user id. Without it, an owner/assigner/mgmt-approver who
-	// appears on many IN_REMEDIATION rows gets ListGrants called once per row
+	// appears on many APPROVED rows gets ListGrants called once per row
 	// (verifyRow used to keep its own row-scoped map) plus once more in
 	// verifyNoExtraGrants — this fetches each user's grants at most once for
 	// the whole verification pass.
@@ -264,7 +264,7 @@ type fieldMismatch struct {
 // verifyRow fetches riskID's full detail (+ escalations, + the STANDARD
 // plan's completed date for a CLOSED row) and diffs every field the migration
 // is responsible for against row. It never fetches missing-grant state for
-// non-IN_REMEDIATION rows (CLOSED gets none) and leaves the unexpected-extra
+// non-APPROVED rows (CLOSED gets none) and leaves the unexpected-extra
 // grant check to verifyNoExtraGrants, which needs the cross-row view.
 func verifyRow(ctx context.Context, ec *EntityClient, rd RefData, migrationDate string, row Row, riskID int, grantCache map[int][]Grant) ([]fieldMismatch, error) {
 	detail, err := ec.GetRiskDetail(ctx, riskID)
@@ -325,7 +325,7 @@ func verifyRow(ctx context.Context, ec *EntityClient, rd RefData, migrationDate 
 	add("Remarks", row.Remarks, strOrNil(detail.Remarks))
 
 	// D9 closure/compliance-approval audit fields: every bucket walks through
-	// IN_REMEDIATION, so complianceApprovalDate is always set (to whichever
+	// APPROVED, so complianceApprovalDate is always set (to whichever
 	// run's migration date first reached that hop — see addSet above);
 	// complianceApprovalBy is never set via this tool's API path.
 	addSet("Compliance Approval Date", strOrNil(detail.ComplianceApprovalDate))
@@ -408,7 +408,7 @@ func verifyRow(ctx context.Context, ec *EntityClient, rd RefData, migrationDate 
 		out = append(out, fieldMismatch{"Overdue Escalation", "no suppressing escalation", "an OPEN marker escalation exists"})
 	}
 
-	if row.WorkflowStatus == "IN_REMEDIATION" {
+	if row.WorkflowStatus == "APPROVED" {
 		for _, want := range expectedGrants(row, rd) {
 			if _, fetched := grantCache[want.userID]; !fetched {
 				grants, err := ec.ListGrants(ctx, want.userID)

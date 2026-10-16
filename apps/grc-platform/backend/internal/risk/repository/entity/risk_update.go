@@ -65,7 +65,7 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 		req.Environments = nil
 	}
 
-	// Restricted fields force re-approval when changed on an IN_REMEDIATION
+	// Restricted fields force re-approval when changed on an APPROVED
 	// risk. Only a non-empty incoming value counts as a change — an omitted
 	// field is not an instruction to clear it.
 	var changeLog []map[string]any
@@ -227,10 +227,10 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 	// A restricted change to a risk under remediation sends it back for
 	// amendment, and marks it as an update rather than a new risk. Guarded on
 	// the status read above so a concurrent transition rolls the edit back.
-	if restrictedChanged && current.WorkflowStatus == model.StatusInRemediation {
+	if restrictedChanged && current.WorkflowStatus == model.StatusApproved {
 		body["riskType"] = model.RiskTypeUpdated
 		body["workflowStatus"] = model.StatusPendingAmendment
-		body["expectedStatus"] = model.StatusInRemediation
+		body["expectedStatus"] = model.StatusApproved
 	} else {
 		body["expectedStatus"] = current.WorkflowStatus
 	}

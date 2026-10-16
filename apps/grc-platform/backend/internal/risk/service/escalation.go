@@ -38,7 +38,7 @@ type EscalationService interface {
 	// the HR entity and freezes them on the escalation row.
 	Escalate(ctx context.Context, riskID int, createdBy string) (*model.Escalation, error)
 	// Comment records the management/lead comment and returns the risk to its
-	// assigner (ESCALATED → IN_REMEDIATION). callerEmail is checked against the
+	// assigner (ESCALATED → APPROVED). callerEmail is checked against the
 	// people entitled to comment on this risk; canOverride lets a compliance
 	// admin comment regardless.
 	Comment(ctx context.Context, riskID, escalationID int, comment, callerEmail string, canOverride bool) (*model.Escalation, error)
@@ -230,7 +230,7 @@ func (s *escalationService) Comment(ctx context.Context, riskID, escalationID in
 		return nil, err
 	}
 
-	// repo.Comment records the decision and returns the risk to IN_REMEDIATION
+	// repo.Comment records the decision and returns the risk to APPROVED
 	// in one entity-side transaction — no separate TransitionStatus call here,
 	// since that would be a second, independent HTTP round trip with no way
 	// to roll either back if the other failed. The escalation stays OPEN

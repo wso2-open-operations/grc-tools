@@ -298,8 +298,8 @@ func TestRunOnceQueriesOnlyTheReminderWindow(t *testing.T) {
 
 	today := dateOnly(time.Now().UTC())
 	f := risks.lastFilter
-	if len(f.Statuses) != 1 || f.Statuses[0] != model.StatusInRemediation {
-		t.Errorf("statuses = %v, want only IN_REMEDIATION", f.Statuses)
+	if len(f.Statuses) != 1 || f.Statuses[0] != model.StatusApproved {
+		t.Errorf("statuses = %v, want only APPROVED", f.Statuses)
 	}
 	if f.DueFrom != today.Format(dateLayout) {
 		t.Errorf("dueFrom = %q, want today %q", f.DueFrom, today.Format(dateLayout))

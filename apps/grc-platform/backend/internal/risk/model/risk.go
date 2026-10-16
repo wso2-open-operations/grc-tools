@@ -161,16 +161,16 @@ type ListRisksFilter struct {
 	DueOverdueOnly bool   // implementation_date < today, regardless of the range above
 	// OpenEscalationOnly restricts to risks carrying an unresolved escalation —
 	// what the Overdue Risks tab filters on. Deliberately not the ESCALATED
-	// status: a commented escalation returns the risk to IN_REMEDIATION while
+	// status: a commented escalation returns the risk to APPROVED while
 	// staying OPEN, so it must appear under Approved Risks and Overdue at once.
 	OpenEscalationOnly bool
 	// ExcludeOpenEscalation is OpenEscalationOnly's inverse: excludes risks
 	// that already carry an unresolved escalation. Set by the overdue-
 	// escalation job (job/escalation_job.go) so its search only ever returns
 	// risks that can actually succeed at Escalate — a risk already sitting
-	// under an OPEN escalation (returned to IN_REMEDIATION by a comment, per
+	// under an OPEN escalation (returned to APPROVED by a comment, per
 	// OpenEscalationOnly's note above) fails Escalate's own duplicate guard
-	// every time, and since it never leaves IN_REMEDIATION+overdue on its
+	// every time, and since it never leaves APPROVED+overdue on its
 	// own, it would otherwise keep re-appearing on page one of every run
 	// forever — crowding out genuinely new overdue risks behind it.
 	ExcludeOpenEscalation bool
@@ -394,7 +394,7 @@ type ActionPlanDetail struct {
 }
 
 // UpdateRiskRequest is the payload for PUT /api/v1/risks/{id}.
-// Three fields trigger PENDING_AMENDMENT when changed on an IN_REMEDIATION risk:
+// Three fields trigger PENDING_AMENDMENT when changed on an APPROVED risk:
 //   - ImplementationDate
 //   - EmailSubject
 //   - ActionSteps
@@ -425,7 +425,7 @@ type UpdateRiskRequest struct {
 	ActionPlanDescription  string  `json:"action_plan_description,omitempty"`
 	ActionOwnerID          *int    `json:"action_owner_id,omitempty"`
 
-	// RESTRICTED — trigger PENDING_AMENDMENT if changed on an IN_REMEDIATION risk
+	// RESTRICTED — trigger PENDING_AMENDMENT if changed on an APPROVED risk
 	ImplementationDate string                    `json:"implementation_date,omitempty"`
 	EmailSubject       string                    `json:"email_subject"`
 	ActionSteps        []UpdateActionStepRequest `json:"action_steps,omitempty"`

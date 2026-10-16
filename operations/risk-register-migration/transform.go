@@ -115,16 +115,19 @@ func mapTreatment(s string) (string, error) {
 
 var wsSepRe = regexp.MustCompile(`[\s\-]+`)
 
-// mapWorkflowStatus accepts exactly IN_REMEDIATION or CLOSED, case-insensitive,
-// tolerating spaces/hyphens for underscores ("In Remediation"). Anything else —
-// blank included — is an error (plan §5).
+// mapWorkflowStatus accepts exactly APPROVED or CLOSED, case-insensitive,
+// tolerating spaces/hyphens for underscores. The retired name IN_REMEDIATION
+// ("In Remediation") is still read as APPROVED so older sheets keep working.
+// Anything else — blank included — is an error (plan §5).
 func mapWorkflowStatus(s string) (string, error) {
 	key := wsSepRe.ReplaceAllString(strings.ToUpper(strings.TrimSpace(s)), "_")
 	switch key {
-	case "IN_REMEDIATION", "CLOSED":
+	case "APPROVED", "IN_REMEDIATION":
+		return "APPROVED", nil
+	case "CLOSED":
 		return key, nil
 	default:
-		return "", fmt.Errorf("%q is not IN_REMEDIATION or CLOSED", s)
+		return "", fmt.Errorf("%q is not APPROVED or CLOSED", s)
 	}
 }
 

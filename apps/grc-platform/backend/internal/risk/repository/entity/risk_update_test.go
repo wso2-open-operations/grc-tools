@@ -123,7 +123,7 @@ func TestGetByIDAssigneesEditableUntil(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeRiskEntity{status: model.StatusInRemediation, createdBy: tc.createdBy, createdOn: tc.createdOn}
+			f := &fakeRiskEntity{status: model.StatusApproved, createdBy: tc.createdBy, createdOn: tc.createdOn}
 			d, err := f.serve(t).GetByID(context.Background(), 7)
 			if err != nil {
 				t.Fatalf("GetByID: %v", err)
@@ -140,7 +140,7 @@ func TestGetByIDAssigneesEditableUntil(t *testing.T) {
 }
 
 func TestUpdateAssigneesInsideWindowSendsOnlyAssignees(t *testing.T) {
-	for _, status := range []string{model.StatusClosed, model.StatusInRemediation, model.StatusEscalated} {
+	for _, status := range []string{model.StatusClosed, model.StatusApproved, model.StatusEscalated} {
 		t.Run(status, func(t *testing.T) {
 			f := &fakeRiskEntity{status: status, createdBy: model.MigrationMarker, createdOn: time.Now().Add(-time.Hour)}
 			if err := f.serve(t).UpdateAssignees(context.Background(), 7, correction(), "editor-uuid"); err != nil {
@@ -184,7 +184,7 @@ func TestUpdateAssigneesOutsideWindowIsRejected(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeRiskEntity{status: model.StatusInRemediation, createdBy: tc.createdBy, createdOn: tc.createdOn}
+			f := &fakeRiskEntity{status: model.StatusApproved, createdBy: tc.createdBy, createdOn: tc.createdOn}
 			err := f.serve(t).UpdateAssignees(context.Background(), 7, correction(), "editor-uuid")
 
 			var apiErr *apierror.Error
@@ -238,7 +238,7 @@ func TestUpdateLogsAssigneeChanges(t *testing.T) {
 // With no STANDARD plan the entity would silently write no Action Owner, so
 // the correction is refused instead of recording a change that never happened.
 func TestUpdateAssigneesActionOwnerWithoutPlanIsRejected(t *testing.T) {
-	f := &fakeRiskEntity{status: model.StatusInRemediation, createdBy: model.MigrationMarker, createdOn: time.Now().Add(-time.Hour), noPlan: true}
+	f := &fakeRiskEntity{status: model.StatusApproved, createdBy: model.MigrationMarker, createdOn: time.Now().Add(-time.Hour), noPlan: true}
 	err := f.serve(t).UpdateAssignees(context.Background(), 7, model.UpdateAssigneesRequest{ActionOwnerID: intPtr(23)}, "editor-uuid")
 
 	var apiErr *apierror.Error
@@ -252,7 +252,7 @@ func TestUpdateAssigneesActionOwnerWithoutPlanIsRejected(t *testing.T) {
 
 // The other four fields still correct fine on a plan-less risk.
 func TestUpdateAssigneesWithoutPlanStillAppliesOtherFields(t *testing.T) {
-	f := &fakeRiskEntity{status: model.StatusInRemediation, createdBy: model.MigrationMarker, createdOn: time.Now().Add(-time.Hour), noPlan: true}
+	f := &fakeRiskEntity{status: model.StatusApproved, createdBy: model.MigrationMarker, createdOn: time.Now().Add(-time.Hour), noPlan: true}
 	if err := f.serve(t).UpdateAssignees(context.Background(), 7, model.UpdateAssigneesRequest{OwnerID: intPtr(21)}, "editor-uuid"); err != nil {
 		t.Fatalf("UpdateAssignees: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestUpdate_TemplateFieldsSentBeforeOwnerApproval(t *testing.T) {
 // Once an owner has approved, they are fixed: dropped, not rejected, so the
 // rest of the edit still lands — the same rule as gross score.
 func TestUpdate_TemplateFieldsDroppedAfterOwnerApproval(t *testing.T) {
-	f := &fakeRiskEntity{status: model.StatusInRemediation, approved: true}
+	f := &fakeRiskEntity{status: model.StatusApproved, approved: true}
 	repo := f.serve(t)
 	if err := repo.Update(context.Background(), 7, templateEdit(), "u1"); err != nil {
 		t.Fatalf("Update: %v", err)

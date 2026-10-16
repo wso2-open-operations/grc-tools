@@ -81,7 +81,7 @@ func TestParseSheet_StripsUTF8BOM(t *testing.T) {
 		"Management Approver": "user3@wso2.com",
 		"Action Steps":        "Do the thing",
 		"Treatment Strategy":  "Accept",
-		"Workflow Status":     "IN_REMEDIATION",
+		"Workflow Status":     "APPROVED",
 		"Migration ID":        "1",
 	})
 	withBOM := "\xEF\xBB\xBF" + csvText
@@ -152,7 +152,7 @@ func TestMapRow_CleanRow(t *testing.T) {
 		"Git Issue URL":                                  "Text",
 		"Email Subject":                                  "Risk identification on threat models",
 		"Remarks":                                        "Text",
-		"Workflow Status":                                "IN_REMEDIATION",
+		"Workflow Status":                                "APPROVED",
 		"Migration ID":                                   "1",
 	})
 
@@ -174,7 +174,7 @@ func TestMapRow_CleanRow(t *testing.T) {
 	if r.ResidualLikelihood != 2 || r.ResidualImpact != 2 {
 		t.Errorf("residual likelihood/impact: %d/%d", r.ResidualLikelihood, r.ResidualImpact)
 	}
-	if r.TreatmentStrategy != "ACCEPT" || r.WorkflowStatus != "IN_REMEDIATION" || r.IdentifiedByType != "EMPLOYEE" {
+	if r.TreatmentStrategy != "ACCEPT" || r.WorkflowStatus != "APPROVED" || r.IdentifiedByType != "EMPLOYEE" {
 		t.Errorf("enums: %q %q %q", r.TreatmentStrategy, r.WorkflowStatus, r.IdentifiedByType)
 	}
 	if r.ImplementationDate != "2025-06-30" || r.RiskIdentifiedDate != "2025-01-10" || r.ReassessmentDate != "2025-09-30" {
@@ -284,7 +284,7 @@ func TestParseSheet_DuplicateMigrationIDRejects(t *testing.T) {
 		"Implementation Date": "45838.0", "Assignment Team": "SRE One",
 		"Risk Owner": "b@wso2.com", "Management Approver": "c@wso2.com",
 		"Action Plan Description": "x", "Action Steps": "step 1",
-		"Treatment Strategy": "Accept", "Workflow Status": "IN_REMEDIATION",
+		"Treatment Strategy": "Accept", "Workflow Status": "APPROVED",
 	}
 	rowA := map[string]string{}
 	rowB := map[string]string{}

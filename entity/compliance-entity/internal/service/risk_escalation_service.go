@@ -32,7 +32,7 @@ type riskEscalationService struct {
 }
 
 // NewRiskEscalationService constructs a RiskEscalationService. riskSvc backs
-// EscalateRisk's IN_REMEDIATION+overdue check and the workflow_status flip.
+// EscalateRisk's APPROVED+overdue check and the workflow_status flip.
 func NewRiskEscalationService(repo repository.RiskEscalationRepository, riskSvc RiskService) RiskEscalationService {
 	return &riskEscalationService{repo: repo, riskSvc: riskSvc}
 }
@@ -151,9 +151,9 @@ func (s *riskEscalationService) EscalateRisk(ctx context.Context, riskID int, re
 	if err != nil {
 		return domain.RiskEscalation{}, err
 	}
-	if risk.WorkflowStatus != "IN_REMEDIATION" {
+	if risk.WorkflowStatus != "APPROVED" {
 		return domain.RiskEscalation{}, &apierror.ValidationError{
-			Msg: "risk must be IN_REMEDIATION to escalate, currently: " + risk.WorkflowStatus,
+			Msg: "risk must be APPROVED to escalate, currently: " + risk.WorkflowStatus,
 		}
 	}
 	if risk.ImplementationDate == nil || !isPastDate(*risk.ImplementationDate) {

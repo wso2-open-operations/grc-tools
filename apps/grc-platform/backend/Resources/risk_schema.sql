@@ -201,10 +201,10 @@ CREATE TABLE IF NOT EXISTS risk_action_plan (
 --   PENDING_RISK_OWNER_APPROVAL        → new risk submitted; awaiting initial Risk Owner approval
 --   PENDING_MANAGEMENT_APPROVAL        → Accept+HIGH risk; awaiting Management approval (after Owner)
 --   PENDING_COMPLIANCE_REVIEW          → awaiting Compliance team approval (after Owner/Management)
---   IN_REMEDIATION                     → Compliance approved; assigner executing action plan
+--   APPROVED                           → Compliance approved; assigner executing action plan
 --   PENDING_OWNER_COMPLETION_APPROVAL  → assigner submitted completion; awaiting Risk Owner sign-off
 --   PENDING_COMPLIANCE_CLOSURE         → Risk Owner approved completion; awaiting Compliance closure
---   PENDING_AMENDMENT                  → restricted field edited on IN_REMEDIATION risk; restarts approval chain
+--   PENDING_AMENDMENT                  → restricted field edited on APPROVED risk; restarts approval chain
 --   PENDING_REVISION                   → rejected at any approval stage; back with assigner for rework
 --   ESCALATED                          → escalated to Management (future)
 --   CLOSED                             → fully closed
@@ -248,7 +248,7 @@ CREATE TABLE IF NOT EXISTS risk (
                                'PENDING_RISK_OWNER_APPROVAL',
                                'PENDING_MANAGEMENT_APPROVAL',
                                'PENDING_COMPLIANCE_REVIEW',
-                               'IN_REMEDIATION',
+                               'APPROVED',
                                'PENDING_OWNER_COMPLETION_APPROVAL',
                                -- ACCEPT + HIGH risks need the same management
                                -- sign-off on the way out as on the way in, so
@@ -368,10 +368,10 @@ CREATE TABLE IF NOT EXISTS risk_evidence (
 -- -----------------------------------------------------------------------------
 -- risk_escalation
 -- Created automatically by the daily overdue-risk job (compliance-entity
--- internal/job) when an IN_REMEDIATION risk passes its implementation_date
+-- internal/job) when an APPROVED risk passes its implementation_date
 -- deadline — there is no human-supplied target or reason at creation time.
 -- Resolved (status -> RESOLVED) when the linked MANAGEMENT action plan
--- completes, which also reverts the risk from ESCALATED back to IN_REMEDIATION.
+-- completes, which also reverts the risk from ESCALATED back to APPROVED.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS risk_escalation (
   id                     INT          NOT NULL AUTO_INCREMENT,
@@ -515,7 +515,7 @@ CREATE TABLE IF NOT EXISTS user_risk_team (
 -- risk_assessment
 -- One row per residual risk reassessment. Records the updated score, progress
 -- notes, and next reassessment date each time a risk is reassessed while in
--- IN_REMEDIATION status. The gross_score_id on `risk` is immutable; residual
+-- APPROVED status. The gross_score_id on `risk` is immutable; residual
 -- score history lives here.
 -- assessed_by stores the email of the user who submitted the reassessment.
 -- -----------------------------------------------------------------------------

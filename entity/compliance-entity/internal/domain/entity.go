@@ -731,7 +731,7 @@ type SearchRisksRequest struct {
 	// OpenEscalationOnly restricts to risks carrying an unresolved escalation.
 	// This is what the Overdue Risks tab filters on, deliberately *not* the
 	// ESCALATED workflow status: management's comment returns the risk to
-	// IN_REMEDIATION while the escalation stays OPEN, so the risk must remain
+	// APPROVED while the escalation stays OPEN, so the risk must remain
 	// in the Overdue tab while also appearing under Approved Risks. The
 	// escalation is resolved when the assigner submits for completion approval,
 	// which is what finally drops it out.
@@ -739,7 +739,7 @@ type SearchRisksRequest struct {
 
 	// ExcludeOpenEscalation is OpenEscalationOnly's inverse: excludes risks
 	// that already carry an unresolved escalation. Used by the backend's
-	// overdue-escalation job so a risk that returned to IN_REMEDIATION via a
+	// overdue-escalation job so a risk that returned to APPROVED via a
 	// comment (still OPEN per the note above) doesn't keep being handed back
 	// to Escalate, which will only reject it again.
 	ExcludeOpenEscalation bool `json:"excludeOpenEscalation"`
@@ -1303,7 +1303,7 @@ type UpdateRiskRequest struct {
 	GitIssueURL            *string `json:"gitIssueUrl"`
 	Remarks                *string `json:"remarks"`
 	// EmailSubject is settable on update: the backend treats a change to it as
-	// one of the three edits that move an IN_REMEDIATION risk to
+	// one of the three edits that move an APPROVED risk to
 	// PENDING_AMENDMENT, so it must be updatable, not create-only.
 	EmailSubject *string `json:"emailSubject"`
 	// RiskType and OwnerFirstApprovedAt back the backend's SetRiskType and
@@ -1437,7 +1437,7 @@ type ListRiskActionPlansResponse struct {
 // CompleteRiskActionPlanRequest is the payload for POST /action-plans/{planId}/complete.
 // Requires every one of the plan's steps to already be COMPLETED. For a
 // MANAGEMENT plan, completion also resolves the linked risk_escalation and
-// reverts the risk from ESCALATED back to IN_REMEDIATION.
+// reverts the risk from ESCALATED back to APPROVED.
 type CompleteRiskActionPlanRequest struct {
 	UpdatedBy string `json:"updatedBy"`
 }
@@ -1734,7 +1734,7 @@ type ListRiskComplianceRefsResponse struct {
 
 // RiskEscalation records an escalation of a risk to Management. It is created
 // automatically by the daily overdue-risk job (see internal/job) — there is no
-// human-supplied target or reason; the trigger is always "IN_REMEDIATION past
+// human-supplied target or reason; the trigger is always "APPROVED past
 // implementation_date".
 type RiskEscalation struct {
 	ID                   int     `json:"id"`
@@ -1772,7 +1772,7 @@ type CreateRiskEscalationRequest struct {
 }
 
 // EscalateRiskRequest is the payload for POST /risks/{riskId}/escalate — the
-// manual trigger a Compliance user clicks on an overdue IN_REMEDIATION risk,
+// manual trigger a Compliance user clicks on an overdue APPROVED risk,
 // as an alternative to waiting for the daily job to reach it.
 type EscalateRiskRequest struct {
 	CreatedBy string `json:"createdBy"`
@@ -1794,7 +1794,7 @@ type UpdateRiskEscalationRequest struct {
 
 // CommentEscalationRequest is the payload for
 // PATCH /risks/{riskId}/escalations/{escalationId}/comment — records a
-// decision and returns the risk to IN_REMEDIATION as one transaction, unlike
+// decision and returns the risk to APPROVED as one transaction, unlike
 // the generic UpdateRiskEscalation above, which only ever touches the
 // escalation row and leaves any risk-status change to a separate caller.
 type CommentEscalationRequest struct {

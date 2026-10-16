@@ -27,7 +27,7 @@ import (
 // (a Manual Task's disk is ephemeral); this is reconstructed from the entity
 // every run (plan §8). Each value means "this stage is done — resume from the
 // next one". ProgressGranted used to coincide with ProgressComplete (grants
-// were the last step for an IN_REMEDIATION row), but no longer does: stageOf
+// were the last step for an APPROVED row), but no longer does: stageOf
 // now holds a row at ProgressGranted whenever its residual assessment
 // (needsResidualAssessment) is still outstanding, so it is a real, distinct
 // checkpoint — not just defined for symmetry.
@@ -37,7 +37,7 @@ const (
 	ProgressNone         RowProgress = iota // no matching marker risk
 	ProgressCreated                         // POST /risks done; workflow_status not yet at the target bucket
 	ProgressStatusWalked                    // workflow_status at the target bucket; escalation / plan not yet done
-	ProgressEscalated                       // (IN_REMEDIATION) suppressing escalation present or not needed; grants outstanding
+	ProgressEscalated                       // (APPROVED) suppressing escalation present or not needed; grants outstanding
 	ProgressGranted                         // grants (and, for CLOSED, the plan) done; residual assessment may still be outstanding (see note above)
 	ProgressComplete                        // nothing left to do for this row
 )
@@ -75,7 +75,7 @@ type riskState struct {
 var statusRank = map[string]int{
 	"PENDING_RISK_OWNER_APPROVAL":       0,
 	"PENDING_COMPLIANCE_REVIEW":         1,
-	"IN_REMEDIATION":                    2,
+	"APPROVED":                          2,
 	"PENDING_OWNER_COMPLETION_APPROVAL": 3,
 	"PENDING_COMPLIANCE_CLOSURE":        4,
 	"CLOSED":                            5,
@@ -246,7 +246,7 @@ func searchMarkerRisks(ctx context.Context, ec *EntityClient, rows []Row) ([]Ris
 	return out, nil
 }
 
-// expectedGrant is one grant D10 says an IN_REMEDIATION row must carry.
+// expectedGrant is one grant D10 says an APPROVED row must carry.
 type expectedGrant struct {
 	userID    int
 	roleID    int
@@ -257,7 +257,7 @@ type expectedGrant struct {
 // expectedGrants returns the D10 grants for a row (none for CLOSED). The
 // management grant is conditional on ACCEPT + likelihood×impact ≥ 7.
 func expectedGrants(row Row, rd RefData) []expectedGrant {
-	if row.WorkflowStatus != "IN_REMEDIATION" {
+	if row.WorkflowStatus != "APPROVED" {
 		return nil
 	}
 	gs := []expectedGrant{
@@ -292,7 +292,7 @@ func grantsSatisfied(row Row, rd RefData, grantsByUser map[int]map[string]struct
 
 // fetchRiskState pulls just what stageOf needs for one matched risk: its
 // escalations always; the STANDARD action plan's status for a CLOSED row; the
-// grant sets of the expected grantees for an IN_REMEDIATION row.
+// grant sets of the expected grantees for an APPROVED row.
 func fetchRiskState(ctx context.Context, ec *EntityClient, rd RefData, risk *Risk, row Row) (riskState, error) {
 	st := riskState{risk: risk, grantsByUser: map[int]map[string]struct{}{}}
 
@@ -318,7 +318,7 @@ func fetchRiskState(ctx context.Context, ec *EntityClient, rd RefData, risk *Ris
 		st.planDone = standardPlanCompleted(plans)
 	}
 
-	if row.WorkflowStatus == "IN_REMEDIATION" {
+	if row.WorkflowStatus == "APPROVED" {
 		seen := map[int]struct{}{}
 		for _, g := range expectedGrants(row, rd) {
 			if _, done := seen[g.userID]; done {
@@ -353,7 +353,7 @@ func standardPlanCompleted(plans []ActionPlanView) bool {
 // write path, step 3 below) and verify.go's verifyRow (the read-only check)
 // so the rule can't drift between what gets written and what gets verified.
 func wantsSuppressingEscalation(row Row, migrationDate string) bool {
-	return row.WorkflowStatus == "IN_REMEDIATION" && row.ImplementationDate < migrationDate
+	return row.WorkflowStatus == "APPROVED" && row.ImplementationDate < migrationDate
 }
 
 func hasOpenMarkerEscalation(escs []Escalation) bool {
@@ -403,7 +403,7 @@ func stageOf(row Row, rd RefData, migrationDate string, st riskState) RowProgres
 		return ProgressCreated // risk exists; the workflow_status walk is unfinished
 	}
 
-	if row.WorkflowStatus == "IN_REMEDIATION" {
+	if row.WorkflowStatus == "APPROVED" {
 		if row.ImplementationDate < migrationDate && !hasOpenMarkerEscalation(st.escalations) {
 			return ProgressStatusWalked // the D8 suppressing escalation is still needed
 		}
@@ -447,11 +447,11 @@ func strKeys(m map[string]struct{}) []string {
 // legal transition per the entity's allowedRiskTransitions.
 func walkPath(target string) []string {
 	switch target {
-	case "IN_REMEDIATION":
-		return []string{"PENDING_COMPLIANCE_REVIEW", "IN_REMEDIATION"}
+	case "APPROVED":
+		return []string{"PENDING_COMPLIANCE_REVIEW", "APPROVED"}
 	case "CLOSED":
 		return []string{
-			"PENDING_COMPLIANCE_REVIEW", "IN_REMEDIATION",
+			"PENDING_COMPLIANCE_REVIEW", "APPROVED",
 			"PENDING_OWNER_COMPLETION_APPROVAL", "PENDING_COMPLIANCE_CLOSURE", "CLOSED",
 		}
 	default:
@@ -472,10 +472,10 @@ func walkPath(target string) []string {
 //     likelihood/impact, so the migrated risk's current standing shows up
 //     exactly as a real reassessment would (drawer, register, dashboards).
 //  2. walk workflow_status along walkPath(target) via PATCH /risks/{id}
-//     IN_REMEDIATION hop also sets complianceApprovalDate = migrationDate (D9)
-//  3. IN_REMEDIATION + implementation_date < migrationDate + no OPEN marker
+//     APPROVED hop also sets complianceApprovalDate = migrationDate (D9)
+//  3. APPROVED + implementation_date < migrationDate + no OPEN marker
 //     escalation → POST /risks/{id}/escalations (suppresses the nightly job, D8)
-//  4. IN_REMEDIATION → the D10 grants (owner, assigner, conditional management)
+//  4. APPROVED → the D10 grants (owner, assigner, conditional management)
 //  5. CLOSED → PATCH the STANDARD action plan COMPLETED, completedDate = migrationDate
 //
 // A row-level failure (400/404/422) is recorded on rep and returns nil so the
@@ -540,7 +540,7 @@ func migrateRow(ctx context.Context, ec *EntityClient, cfg Config, rd RefData, r
 			ExpectedStatus: ptr(current),
 			UpdatedBy:      marker,
 		}
-		if hop == "IN_REMEDIATION" {
+		if hop == "APPROVED" {
 			req.ComplianceApprovalDate = ptr(cfg.MigrationDate) // D9; complianceApprovalBy stays null
 		}
 		if _, err := ec.PatchRisk(ctx, riskID, req); err != nil {
@@ -553,7 +553,7 @@ func migrateRow(ctx context.Context, ec *EntityClient, cfg Config, rd RefData, r
 		current = hop
 	}
 
-	// ── 3. overdue-suppression escalation (IN_REMEDIATION only, D8) ─────────
+	// ── 3. overdue-suppression escalation (APPROVED only, D8) ─────────
 	if wantsSuppressingEscalation(row, cfg.MigrationDate) {
 		escs, err := ec.ListEscalations(ctx, riskID)
 		if err != nil {
@@ -571,8 +571,8 @@ func migrateRow(ctx context.Context, ec *EntityClient, cfg Config, rd RefData, r
 		}
 	}
 
-	// ── 4. grants (IN_REMEDIATION only, D10) ───────────────────────────────
-	if target == "IN_REMEDIATION" {
+	// ── 4. grants (APPROVED only, D10) ───────────────────────────────
+	if target == "APPROVED" {
 		for _, g := range expectedGrants(row, rd) {
 			err := ec.CreateGrant(ctx, g.userID, CreateGrantRequest{
 				RoleID: g.roleID, ScopeType: g.scopeType, ScopeID: g.scopeID, CreatedBy: marker,

@@ -120,7 +120,7 @@ func (r *Resolver) Build() {
 // Rejection vs. warning by column (plan §6, D4 / D7):
 //
 //   - Risk Owner / Risk Assigned To / Management Approver — always REJECT
-//   - Action Owner — REJECT for IN_REMEDIATION rows, WARN + null for CLOSED
+//   - Action Owner — REJECT for APPROVED rows, WARN + null for CLOSED
 func (r *Resolver) Apply(ctx context.Context, rows []Row) ([]Finding, error) {
 	var fs []Finding
 	for i := range rows {
@@ -157,12 +157,12 @@ func (r *Resolver) Apply(ctx context.Context, rows []Row) ([]Finding, error) {
 			}
 		}
 
-		// Action Owner: mandatory for IN_REMEDIATION, nullable for CLOSED (D7).
-		inRemediation := row.WorkflowStatus == "IN_REMEDIATION"
+		// Action Owner: mandatory for APPROVED, nullable for CLOSED (D7).
+		approved := row.WorkflowStatus == "APPROVED"
 		switch {
 		case row.ActionOwnerEmail == "":
-			if inRemediation {
-				reject("Action Owner", "", "mandatory for an IN_REMEDIATION row")
+			if approved {
+				reject("Action Owner", "", "mandatory for an APPROVED row")
 			}
 		default:
 			id, ok, err := r.userID(ctx, row.ActionOwnerEmail)
@@ -175,7 +175,7 @@ func (r *Resolver) Apply(ctx context.Context, rows []Row) ([]Finding, error) {
 					actionOwnerID := id
 					row.ActionOwnerID = &actionOwnerID
 				}
-			case inRemediation:
+			case approved:
 				reject("Action Owner", row.ActionOwnerEmail, r.unresolvedReason(row.ActionOwnerEmail))
 			default:
 				warn("Action Owner", row.ActionOwnerEmail, r.unresolvedReason(row.ActionOwnerEmail)+" — left null on this CLOSED row")

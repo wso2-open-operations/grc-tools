@@ -99,7 +99,7 @@ func NewReport() *Report { return &Report{migratedByBucket: map[string]int{}} }
 func (r *Report) Add(fs ...Finding) { r.findings = append(r.findings, fs...) }
 
 // Migrated records one row written to completion, tallied by target bucket
-// (IN_REMEDIATION | CLOSED).
+// (APPROVED | CLOSED).
 func (r *Report) Migrated(bucket string) {
 	r.migrated++
 	r.migratedByBucket[bucket]++

@@ -65,15 +65,15 @@ func TestResolverApply_DryRun(t *testing.T) {
 	r.Build()
 
 	rows := []Row{
-		resolvableRow(1, "IN_REMEDIATION"),                         // action owner missing -> REJECT
+		resolvableRow(1, "APPROVED"),                               // action owner missing -> REJECT
 		func() Row { x := resolvableRow(2, "CLOSED"); return x }(), // action owner missing -> OK (nullable)
 		func() Row {
-			x := resolvableRow(3, "IN_REMEDIATION")
+			x := resolvableRow(3, "APPROVED")
 			x.ActionOwnerEmail = "user4@wso2.com"
 			return x
 		}(),
 		func() Row {
-			x := resolvableRow(4, "IN_REMEDIATION")
+			x := resolvableRow(4, "APPROVED")
 			x.ActionOwnerEmail = "user4@wso2.com"
 			x.OwnerEmail = "user6@wso2.com" // not in directory -> REJECT
 			return x
@@ -84,7 +84,7 @@ func TestResolverApply_DryRun(t *testing.T) {
 			return x
 		}(),
 		func() Row {
-			x := resolvableRow(6, "IN_REMEDIATION")
+			x := resolvableRow(6, "APPROVED")
 			x.ActionOwnerEmail = "user4@wso2.com"
 			x.AssignerEmail = "user5@wso2.com" // ambiguous -> REJECT
 			return x
@@ -164,7 +164,7 @@ func TestResolverApply_RealRunProvisionsAndFillsIDs(t *testing.T) {
 	r := NewResolver(ec, directorySnapshot, false)
 	r.Build()
 
-	row := resolvableRow(1, "IN_REMEDIATION")
+	row := resolvableRow(1, "APPROVED")
 	row.ActionOwnerEmail = "user4@wso2.com"
 	rows := []Row{row}
 

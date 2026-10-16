@@ -83,7 +83,7 @@ func (s *riskService) NextSequenceID(ctx context.Context, sourceRegisterID int, 
 }
 
 // Update saves risk field changes. If a restricted field changed while the risk is
-// IN_REMEDIATION, the repository atomically marks risk_type = UPDATED and moves
+// APPROVED, the repository atomically marks risk_type = UPDATED and moves
 // the risk to PENDING_AMENDMENT in the same transaction.
 func (s *riskService) Update(ctx context.Context, id int, req model.UpdateRiskRequest, updatedBy string) error {
 	return s.repo.Update(ctx, id, req, updatedBy)
@@ -180,7 +180,7 @@ func (s *riskService) ManagementApprove(ctx context.Context, id int, byUserEmail
 	return s.repo.TransitionStatus(ctx, id, detail.WorkflowStatus, next, byUserEmail)
 }
 
-// Approve is the compliance approval step: PENDING_COMPLIANCE_REVIEW → IN_REMEDIATION.
+// Approve is the compliance approval step: PENDING_COMPLIANCE_REVIEW → APPROVED.
 func (s *riskService) Approve(ctx context.Context, id int, byUserEmail string) error {
 	status, err := s.repo.GetWorkflowStatus(ctx, id)
 	if err != nil {
@@ -189,7 +189,7 @@ func (s *riskService) Approve(ctx context.Context, id int, byUserEmail string) e
 	if status != model.StatusPendingComplianceReview {
 		return &apierror.Error{StatusCode: http.StatusConflict, Body: fmt.Sprintf("cannot be approved from status: %s", status)}
 	}
-	return s.repo.TransitionStatus(ctx, id, model.StatusPendingComplianceReview, model.StatusInRemediation, byUserEmail)
+	return s.repo.TransitionStatus(ctx, id, model.StatusPendingComplianceReview, model.StatusApproved, byUserEmail)
 }
 
 // Reject routes rejections from any pending-approval stage back to PENDING_REVISION
@@ -224,17 +224,17 @@ func (s *riskService) Reject(ctx context.Context, id int, req model.RejectRiskRe
 	return s.repo.RejectTransition(ctx, id, req.RejectionComment, stage, fromStatus, byUserEmail)
 }
 
-// Complete moves IN_REMEDIATION → PENDING_OWNER_COMPLETION_APPROVAL. At least
+// Complete moves APPROVED → PENDING_OWNER_COMPLETION_APPROVAL. At least
 // one of the risk's action plans must be COMPLETED first — not necessarily
 // all of them, since an escalation cycle can leave the original STANDARD
 // plan permanently abandoned once a MANAGEMENT plan supersedes and completes
-// it (that completion is exactly what reverts ESCALATED -> IN_REMEDIATION).
+// it (that completion is exactly what reverts ESCALATED -> APPROVED).
 func (s *riskService) Complete(ctx context.Context, id int, byUserEmail string) error {
 	status, err := s.repo.GetWorkflowStatus(ctx, id)
 	if err != nil {
 		return err
 	}
-	if status != model.StatusInRemediation {
+	if status != model.StatusApproved {
 		return &apierror.Error{StatusCode: http.StatusConflict, Body: fmt.Sprintf("cannot be completed from status: %s", status)}
 	}
 
@@ -253,7 +253,7 @@ func (s *riskService) Complete(ctx context.Context, id int, byUserEmail string) 
 		return &apierror.Error{StatusCode: http.StatusConflict, Body: "cannot submit for approval: the action plan must be completed first"}
 	}
 
-	return s.repo.TransitionStatus(ctx, id, model.StatusInRemediation, model.StatusPendingOwnerCompletion, byUserEmail)
+	return s.repo.TransitionStatus(ctx, id, model.StatusApproved, model.StatusPendingOwnerCompletion, byUserEmail)
 }
 
 // Resubmit clears rejection info and moves PENDING_REVISION back to the

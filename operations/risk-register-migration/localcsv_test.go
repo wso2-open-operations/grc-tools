@@ -34,15 +34,15 @@ import (
 // aliases / buckets all landing where the runbook says.
 const localTestCSV = `Year,Quarter,Source Register,Customer,Deployment Type,Product,Environment,Risk Title,Risk Description,Risk Category,Risk Identified By,Select Employee/ Name of External Person/ Tool,Risk Identified Date,Risk Assigned To,Gross Likelihood,Gross Impact,Residual Likelihood,Residual Impact,Impact Description,Implementation Date,Reassessment Date,Assignment Team,Risk Owner,Management Approver,Action Owner,Action Plan Description,Action Steps,Treatment Strategy,Progress,Git Issue URL,Email Subject,Remarks,Workflow Status,Migration ID
 2025,Q3,Managed Services,BankOne,Private Cloud,APIM; MI,Production; DR,Supplier contract renewal delay,Delay in renewing supplier contracts may cause service interruption and unplanned cost increases.,Access Control & Credentials,Employee,User One,"January 10, 2025",user1@wso2.com,3,2,3,2,Service interruption and unplanned cost increases for the organisation.,"June 30, 2025",30th Sep 2025,SRE One,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2025,"Action Item -1
-Action 2",Accept,WIP,https://github.com/wso2/product-risk/issues/101,Risk identification on threat models,Raised during the Q3 threat-model review.,IN_REMEDIATION,1
+Action 2",Accept,WIP,https://github.com/wso2/product-risk/issues/101,Risk identification on threat models,Raised during the Q3 threat-model review.,APPROVED,1
 2025,Q3,Managed Services,BankOne,Managed Services - Customer's On Prem,IS,Non-Production,Employee security training gap,Absence of regular security awareness training increases susceptibility to phishing and social engineering.,"Logging, Monitoring & Detection",Employee,User Two,"February 5, 2025",user2@wso2.com,2,3,2,3,"Higher susceptibility to phishing, social engineering and insider threats.","September 30, 2025",31st Dec 2025,SRE Two,user1@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2026,"Action Item -1
 Action 2",Transfer,WIP,,Hackathon findings - ABC,,CLOSED,2
 2025,Q4,Managed Services,Bank Of China,Private Cloud,APIM,Production,Business continuity plan not tested,Without regular BCP drills the organisation cannot validate critical operations during a disruption.,Access Control & Credentials,Employee,User Two,"March 15, 2025",user2@wso2.com,3,2,3,2,Cannot validate the ability to maintain critical operations during a major incident.,2025-12-31,30th Jun 2026,SRE Three,user1@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2027,"Action Item -1
-Action 2",Remediate,WIP,,Risk identification on threat models,,IN_REMEDIATION,3
+Action 2",Remediate,WIP,,Risk identification on threat models,,APPROVED,3
 2026,Q1,Managed Services,BankOne,Private Cloud,MI,DR,Regulatory data localisation requirement,Emerging regulations may mandate that customer data be stored within specific geographic regions.,Data Exposure & Privacy (PII),Employee,User One,"April 1, 2025",user1@wso2.com,3,1,3,1,Significant infrastructure changes and additional compliance effort.,"March 31, 2026",30th Jun 2026,SRE Two,user2@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2028,"Action Item -1
 Action 2",Avoid,WIP,,Hackathon findings - ABC,,CLOSED,4
 2026,Q3,Managed Services,Bank Of China,Private Cloud,IS; MI,Production; Non-Production,Payment gateway single point of failure,Exclusive reliance on a single payment gateway provider risks halting revenue collection on any outage.,Process & Documentation Gaps,Employee,User One,"May 20, 2025",user1@wso2.com,3,3,3,3,Any provider downtime directly halts revenue collection and customer transactions.,2025-10-31,31st Dec 2025,SRE One,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2029,"Action Item -1
-Action 2",Accept,WIP,,External report,,IN_REMEDIATION,5
+Action 2",Accept,WIP,,External report,,APPROVED,5
 `
 
 func TestLocalTestCSV_ParsesCleanAndFullyResolves(t *testing.T) {
@@ -61,7 +61,7 @@ func TestLocalTestCSV_ParsesCleanAndFullyResolves(t *testing.T) {
 		}
 	}
 
-	wantBucket := map[int]string{1: "IN_REMEDIATION", 2: "CLOSED", 3: "IN_REMEDIATION", 4: "CLOSED", 5: "IN_REMEDIATION"}
+	wantBucket := map[int]string{1: "APPROVED", 2: "CLOSED", 3: "APPROVED", 4: "CLOSED", 5: "APPROVED"}
 	for _, r := range rows {
 		if r.WorkflowStatus != wantBucket[r.MigrationID] {
 			t.Errorf("row %d bucket = %q, want %q", r.MigrationID, r.WorkflowStatus, wantBucket[r.MigrationID])

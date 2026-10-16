@@ -36,9 +36,9 @@ this repo). Section references (§n) in the code comments point there.
      as a real reassessment (skipped entirely when Residual == Gross)
    - walk `workflow_status` to the row's bucket via `PATCH` (no-op when
      `from == to`)
-   - `IN_REMEDIATION` + overdue → `POST /risks/{id}/escalations` to suppress the
+   - `APPROVED` + overdue → `POST /risks/{id}/escalations` to suppress the
      nightly escalation job
-   - `IN_REMEDIATION` → ensure the §6 role grants (the ACCEPT+HIGH management
+   - `APPROVED` → ensure the §6 role grants (the ACCEPT+HIGH management
      grant is gated on **Gross** likelihood × impact ≥ 7, matching the live
      backend's gross-based approval rule)
    - `CLOSED` → also `PATCH` the action plan to `COMPLETED`
@@ -101,7 +101,7 @@ allowed-values list). In short:
 3. The lookup seed script has run (customers with codes, deployment types,
    products). Customer codes are frozen once a risk uses them; check them first.
 4. The assignment team (Managed Services) exists. The tool creates its Risk
-   Owner grants itself for every `IN_REMEDIATION` row.
+   Owner grants itself for every `APPROVED` row.
 
 ### What the dry run prints
 
@@ -123,7 +123,7 @@ Besides `errors.csv`, `report.txt` gains, when there is something to say:
 
 ## Buckets
 
-Every row's added `Workflow Status` column is exactly `IN_REMEDIATION` or
+Every row's added `Workflow Status` column is exactly `APPROVED` or
 `CLOSED`. Anything else rejects the row. There is no brand-new / `DRAFT` /
 `CANCELLED` bucket.
 
@@ -259,7 +259,7 @@ attempts (it deliberately leaves `user` rows alone — see its header comment;
 delete those separately if you're switching identity source and want a fully
 clean slate).
 
-A `testdata/risks.csv`-shaped register (5 data rows: 3 `IN_REMEDIATION`, 2
+A `testdata/risks.csv`-shaped register (5 data rows: 3 `APPROVED`, 2
 `CLOSED`, one `ACCEPT`/high row that also gets the management grant, across two
 customers and three assignment teams) is a good size for a first local pass before
 trying the real register export.

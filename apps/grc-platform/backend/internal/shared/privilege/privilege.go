@@ -86,7 +86,7 @@ const (
 	ComplianceRejectRisk = "RISK_COMPLIANCE_REJECT"
 
 	// CompleteRisk gates submitting action-plan completion for Risk Owner
-	// sign-off (IN_REMEDIATION → PENDING_OWNER_COMPLETION_APPROVAL).
+	// sign-off (APPROVED → PENDING_OWNER_COMPLETION_APPROVAL).
 	CompleteRisk = "RISK_COMPLETE"
 
 	// CloseRisk gates Compliance's final closure of a risk after completion
@@ -97,7 +97,7 @@ const (
 	// daily overdue-risk job.
 	EscalateRisk = "RISK_ESCALATE"
 
-	// AssessRisk gates recording a residual reassessment on an IN_REMEDIATION
+	// AssessRisk gates recording a residual reassessment on an APPROVED
 	// risk (new score, progress notes, next reassessment date).
 	AssessRisk = "RISK_ASSESS"
 

@@ -57,7 +57,7 @@ const pageLimit = 100
 // run from blocking every subsequent one, not to bound normal work.
 const runTimeout = 30 * time.Minute
 
-// EscalationJob finds IN_REMEDIATION risks whose implementation_date has passed
+// EscalationJob finds APPROVED risks whose implementation_date has passed
 // and escalates them, notifying the same people a manual escalation would.
 type EscalationJob struct {
 	risks      riskLister
@@ -110,7 +110,7 @@ func (j *EscalationJob) RunOnce(ctx context.Context) error {
 	return nil
 }
 
-// runOnce escalates every overdue IN_REMEDIATION risk it can find. A failure on
+// runOnce escalates every overdue APPROVED risk it can find. A failure on
 // one risk is logged and does not stop the rest — a transient error on one row
 // shouldn't block the batch, and the next run picks up anything still overdue.
 func (j *EscalationJob) runOnce(parent context.Context) {
@@ -129,9 +129,9 @@ func (j *EscalationJob) runOnce(parent context.Context) {
 	escalated, notifyFailed, failed := 0, 0, 0
 	for {
 		page, err := j.risks.List(ctx, model.ListRisksFilter{
-			Statuses:       []string{model.StatusInRemediation},
+			Statuses:       []string{model.StatusApproved},
 			DueOverdueOnly: true,
-			// A risk that returned to IN_REMEDIATION via an escalation comment
+			// A risk that returned to APPROVED via an escalation comment
 			// still carries an OPEN risk_escalation row (see
 			// ListRisksFilter.OpenEscalationOnly) and Escalate's own duplicate
 			// guard rejects it every time. Left in the query, that permanent
@@ -159,7 +159,7 @@ func (j *EscalationJob) runOnce(parent context.Context) {
 
 		progressed := false
 		for _, r := range page.Items {
-			// Escalate re-checks IN_REMEDIATION and overdue itself, so a risk
+			// Escalate re-checks APPROVED and overdue itself, so a risk
 			// that moved on between this search and the call (someone closed
 			// it, or a manual click got there first) is safely skipped.
 			if _, err := j.escalation.Escalate(ctx, r.ID, escalatedBy); err != nil {
@@ -170,7 +170,7 @@ func (j *EscalationJob) runOnce(parent context.Context) {
 			escalated++
 			progressed = true
 			// Notification failure doesn't affect progressed/escalated — the
-			// risk did leave IN_REMEDIATION, so the query correctly won't see
+			// risk did leave APPROVED, so the query correctly won't see
 			// it again. It's counted and logged separately instead, since
 			// that's the only way anyone finds out someone wasn't told: the
 			// per-risk reason is already logged (with the risk id) inside

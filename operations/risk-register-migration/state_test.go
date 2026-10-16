@@ -99,7 +99,7 @@ func markerRisk(id int, title string, sr, year int, quarter, status string) Risk
 	}
 }
 
-// baseRow is an IN_REMEDIATION row wired to sheetTestRefData ids: owner 100 /
+// baseRow is an APPROVED row wired to sheetTestRefData ids: owner 100 /
 // assigner 101 / mgmt 102, source register 8 (Legal), assignment team 1.
 func baseRow(migID int, title, status string) Row {
 	return Row{
@@ -137,7 +137,7 @@ func run6(t *testing.T, s *stateStub, rd RefData, rows []Row) (map[int]ResumeSta
 // treats that as "no restriction," which would otherwise page through the
 // whole risks table for a result set that can never match any of these rows.
 func TestSearchMarkerRisks_AllRowsInvalidSkipsSearch(t *testing.T) {
-	s := &stateStub{t: t, risks: []Risk{markerRisk(1, "Unrelated risk", 8, 2025, "Q3", "IN_REMEDIATION")}}
+	s := &stateStub{t: t, risks: []Risk{markerRisk(1, "Unrelated risk", 8, 2025, "Q3", "APPROVED")}}
 	rows := []Row{
 		{MigrationID: 1, CSVLine: 2, RiskTitle: "no source register", SourceRegisterID: 0, RiskYear: 2025, RiskQuarter: "Q3"},
 		{MigrationID: 2, CSVLine: 3, RiskTitle: "no year", SourceRegisterID: 8, RiskYear: 0, RiskQuarter: "Q3"},
@@ -162,15 +162,15 @@ func TestReconstructState_NoneAndCreated_WithPaging(t *testing.T) {
 		t:        t,
 		pageSize: 2, // 3 risks over pages of 2 -> two search calls
 		risks: []Risk{
-			markerRisk(1, "filler-a", 8, 2025, "Q3", "IN_REMEDIATION"),
+			markerRisk(1, "filler-a", 8, 2025, "Q3", "APPROVED"),
 			markerRisk(2, "filler-b", 8, 2025, "Q3", "CLOSED"),
 			markerRisk(3, "Created risk", 8, 2025, "Q3", "PENDING_COMPLIANCE_REVIEW"),
 		},
 		escalations: map[int][]Escalation{},
 	}
 	rows := []Row{
-		baseRow(1, "Ghost risk", "IN_REMEDIATION"),   // no marker match
-		baseRow(2, "Created risk", "IN_REMEDIATION"), // matched, status not yet walked
+		baseRow(1, "Ghost risk", "APPROVED"),   // no marker match
+		baseRow(2, "Created risk", "APPROVED"), // matched, status not yet walked
 	}
 
 	prog, rep := run6(t, s, rd, rows)
@@ -188,7 +188,7 @@ func TestReconstructState_NoneAndCreated_WithPaging(t *testing.T) {
 	}
 }
 
-func TestReconstructState_InRemediationStages(t *testing.T) {
+func TestReconstructState_ApprovedStages(t *testing.T) {
 	rd := sheetTestRefData(t)
 
 	tests := []struct {
@@ -199,11 +199,11 @@ func TestReconstructState_InRemediationStages(t *testing.T) {
 		grants      map[int][]Grant
 		want        RowProgress
 	}{
-		{"overdue, no escalation -> StatusWalked", "IN_REMEDIATION", "2020-01-01", nil, nil, ProgressStatusWalked},
-		{"overdue, open marker escalation, grants missing -> Escalated", "IN_REMEDIATION", "2020-01-01",
+		{"overdue, no escalation -> StatusWalked", "APPROVED", "2020-01-01", nil, nil, ProgressStatusWalked},
+		{"overdue, open marker escalation, grants missing -> Escalated", "APPROVED", "2020-01-01",
 			[]Escalation{{ID: 1, Status: "OPEN", CreatedBy: marker}}, nil, ProgressEscalated},
-		{"not overdue, grants missing -> Escalated", "IN_REMEDIATION", "2099-01-01", nil, nil, ProgressEscalated},
-		{"not overdue, grants present -> Complete", "IN_REMEDIATION", "2099-01-01", nil, ownerAssignerGrants(), ProgressComplete},
+		{"not overdue, grants missing -> Escalated", "APPROVED", "2099-01-01", nil, nil, ProgressEscalated},
+		{"not overdue, grants present -> Complete", "APPROVED", "2099-01-01", nil, ownerAssignerGrants(), ProgressComplete},
 		{"status not yet walked -> Created", "PENDING_COMPLIANCE_REVIEW", "2099-01-01", nil, ownerAssignerGrants(), ProgressCreated},
 	}
 	for _, tc := range tests {
@@ -214,7 +214,7 @@ func TestReconstructState_InRemediationStages(t *testing.T) {
 				escalations: map[int][]Escalation{50: tc.escalations},
 				grants:      tc.grants,
 			}
-			row := baseRow(1, "Stage risk", "IN_REMEDIATION")
+			row := baseRow(1, "Stage risk", "APPROVED")
 			row.ImplementationDate = tc.implDate
 
 			prog, rep := run6(t, s, rd, []Row{row})
@@ -232,14 +232,14 @@ func TestReconstructState_ConditionalManagementGrant(t *testing.T) {
 	rd := sheetTestRefData(t)
 	s := &stateStub{
 		t:     t,
-		risks: []Risk{markerRisk(60, "ACCEPT high", 8, 2025, "Q3", "IN_REMEDIATION")},
+		risks: []Risk{markerRisk(60, "ACCEPT high", 8, 2025, "Q3", "APPROVED")},
 		grants: map[int][]Grant{
 			100: {{RoleID: 10, ScopeType: "RISK_TEAM", ScopeID: 1}},
 			101: {{RoleID: 11, ScopeType: "RISK_TEAM", ScopeID: 8}},
 			// 102 (management) has no GLOBAL grant yet
 		},
 	}
-	row := baseRow(1, "ACCEPT high", "IN_REMEDIATION")
+	row := baseRow(1, "ACCEPT high", "APPROVED")
 	row.ImplementationDate = "2099-01-01" // not overdue
 	row.TreatmentStrategy = "ACCEPT"
 	row.GrossLikelihood, row.GrossImpact = 3, 3 // 9 >= 7 -> management grant required
@@ -262,13 +262,13 @@ func TestReconstructState_ResidualAssessmentOutstanding(t *testing.T) {
 	rd := sheetTestRefData(t)
 	s := &stateStub{
 		t:     t,
-		risks: []Risk{markerRisk(70, "Residual differs", 8, 2025, "Q3", "IN_REMEDIATION")},
+		risks: []Risk{markerRisk(70, "Residual differs", 8, 2025, "Q3", "APPROVED")},
 		grants: map[int][]Grant{
 			100: {{RoleID: 10, ScopeType: "RISK_TEAM", ScopeID: 1}},
 			101: {{RoleID: 11, ScopeType: "RISK_TEAM", ScopeID: 8}},
 		},
 	}
-	row := baseRow(1, "Residual differs", "IN_REMEDIATION")
+	row := baseRow(1, "Residual differs", "APPROVED")
 	row.ImplementationDate = "2099-01-01"             // not overdue — isolate the assessment gate
 	row.ResidualLikelihood, row.ResidualImpact = 3, 3 // differs from Gross (2,2)
 
@@ -302,7 +302,7 @@ func TestReconstructState_ClosedBucket(t *testing.T) {
 	}{
 		{"status at CLOSED, plan pending -> StatusWalked", []ActionPlanView{{ID: 1, PlanType: "STANDARD", Status: "PENDING"}}, ProgressStatusWalked, "CLOSED"},
 		{"status at CLOSED, plan completed -> Complete", []ActionPlanView{{ID: 1, PlanType: "STANDARD", Status: "COMPLETED"}}, ProgressComplete, "CLOSED"},
-		{"status not at CLOSED -> Created", []ActionPlanView{{ID: 1, PlanType: "STANDARD", Status: "COMPLETED"}}, ProgressCreated, "IN_REMEDIATION"},
+		{"status not at CLOSED -> Created", []ActionPlanView{{ID: 1, PlanType: "STANDARD", Status: "COMPLETED"}}, ProgressCreated, "APPROVED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &stateStub{
@@ -328,8 +328,8 @@ func TestReconstructState_NaturalKeyCollisions(t *testing.T) {
 	t.Run("two pending rows on one key", func(t *testing.T) {
 		s := &stateStub{t: t}
 		rows := []Row{
-			baseRow(1, "Same title", "IN_REMEDIATION"),
-			baseRow(2, "Same title", "IN_REMEDIATION"),
+			baseRow(1, "Same title", "APPROVED"),
+			baseRow(2, "Same title", "APPROVED"),
 		}
 		prog, rep := run6(t, s, rd, rows)
 		rej := rep.RejectedMigrationIDs()
@@ -348,11 +348,11 @@ func TestReconstructState_NaturalKeyCollisions(t *testing.T) {
 		s := &stateStub{
 			t: t,
 			risks: []Risk{
-				markerRisk(80, "Dup risk", 8, 2025, "Q3", "IN_REMEDIATION"),
-				markerRisk(81, "Dup risk", 8, 2025, "Q3", "IN_REMEDIATION"),
+				markerRisk(80, "Dup risk", 8, 2025, "Q3", "APPROVED"),
+				markerRisk(81, "Dup risk", 8, 2025, "Q3", "APPROVED"),
 			},
 		}
-		prog, rep := run6(t, s, rd, []Row{baseRow(1, "Dup risk", "IN_REMEDIATION")})
+		prog, rep := run6(t, s, rd, []Row{baseRow(1, "Dup risk", "APPROVED")})
 		if _, ok := rep.RejectedMigrationIDs()[1]; !ok {
 			t.Errorf("row matching two marker risks should be rejected; findings=%+v", rep.findings)
 		}
@@ -363,16 +363,16 @@ func TestReconstructState_NaturalKeyCollisions(t *testing.T) {
 }
 
 func TestStatusAtLeast(t *testing.T) {
-	if !statusAtLeast("IN_REMEDIATION", "IN_REMEDIATION") {
+	if !statusAtLeast("APPROVED", "APPROVED") {
 		t.Error("equal should be >=")
 	}
-	if !statusAtLeast("CLOSED", "IN_REMEDIATION") {
-		t.Error("CLOSED is past IN_REMEDIATION")
+	if !statusAtLeast("CLOSED", "APPROVED") {
+		t.Error("CLOSED is past APPROVED")
 	}
-	if statusAtLeast("PENDING_COMPLIANCE_REVIEW", "IN_REMEDIATION") {
-		t.Error("PENDING_COMPLIANCE_REVIEW is before IN_REMEDIATION")
+	if statusAtLeast("PENDING_COMPLIANCE_REVIEW", "APPROVED") {
+		t.Error("PENDING_COMPLIANCE_REVIEW is before APPROVED")
 	}
-	if statusAtLeast("ESCALATED", "IN_REMEDIATION") {
+	if statusAtLeast("ESCALATED", "APPROVED") {
 		t.Error("a state off the migration path must not count as >=")
 	}
 }
@@ -391,7 +391,7 @@ func withCustomer(r Risk, name string) Risk {
 func TestReconstructState_CustomerIsPartOfTheKey(t *testing.T) {
 	rd := sheetTestRefData(t)
 	rowFor := func(mig int, customer string) Row {
-		r := baseRow(mig, "TLS 1.0 enabled", "IN_REMEDIATION")
+		r := baseRow(mig, "TLS 1.0 enabled", "APPROVED")
 		r.Customer = customer
 		return r
 	}
@@ -457,7 +457,7 @@ func TestReconstructState_CustomerIsPartOfTheKey(t *testing.T) {
 // the same thing, or a clean dry run is followed by a real run that rejects rows.
 func TestRejectDuplicateKeys(t *testing.T) {
 	rowFor := func(mig int, customer, title string, year int) Row {
-		r := baseRow(mig, title, "IN_REMEDIATION")
+		r := baseRow(mig, title, "APPROVED")
 		r.Customer, r.RiskYear = customer, year
 		return r
 	}

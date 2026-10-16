@@ -25,7 +25,7 @@ const (
 	StatusPendingOwnerApproval      = "PENDING_RISK_OWNER_APPROVAL"
 	StatusPendingManagementApproval = "PENDING_MANAGEMENT_APPROVAL"
 	StatusPendingComplianceReview   = "PENDING_COMPLIANCE_REVIEW"
-	StatusInRemediation             = "IN_REMEDIATION"
+	StatusApproved                  = "APPROVED"
 	StatusPendingOwnerCompletion    = "PENDING_OWNER_COMPLETION_APPROVAL"
 	// StatusPendingManagementClosure is the closure-path counterpart of
 	// StatusPendingManagementApproval: an ACCEPT + HIGH risk needs the same
@@ -47,7 +47,7 @@ var AllWorkflowStatuses = []string{
 	StatusPendingOwnerApproval,
 	StatusPendingManagementApproval,
 	StatusPendingComplianceReview,
-	StatusInRemediation,
+	StatusApproved,
 	StatusPendingOwnerCompletion,
 	StatusPendingManagementClosure,
 	StatusPendingComplianceClosure,

@@ -41,7 +41,7 @@ var validRiskStatuses = map[string]bool{
 	"PENDING_RISK_OWNER_APPROVAL":         true,
 	"PENDING_MANAGEMENT_APPROVAL":         true,
 	"PENDING_COMPLIANCE_REVIEW":           true,
-	"IN_REMEDIATION":                      true,
+	"APPROVED":                            true,
 	"PENDING_OWNER_COMPLETION_APPROVAL":   true,
 	"PENDING_MANAGEMENT_CLOSURE_APPROVAL": true,
 	"PENDING_COMPLIANCE_CLOSURE":          true,
@@ -63,9 +63,9 @@ var validRiskQuarters = map[string]bool{"Q1": true, "Q2": true, "Q3": true, "Q4"
 //     treatment is ACCEPT and the gross level is HIGH; and
 //     PENDING_OWNER_COMPLETION_APPROVAL → PENDING_COMPLIANCE_CLOSURE
 //   - ManagementApprove: PENDING_MANAGEMENT_APPROVAL → PENDING_COMPLIANCE_REVIEW
-//   - Approve:          PENDING_COMPLIANCE_REVIEW → IN_REMEDIATION
+//   - Approve:          PENDING_COMPLIANCE_REVIEW → APPROVED
 //   - Reject:           any of the five pending-approval states → PENDING_REVISION
-//   - Complete:         IN_REMEDIATION → PENDING_OWNER_COMPLETION_APPROVAL
+//   - Complete:         APPROVED → PENDING_OWNER_COMPLETION_APPROVAL
 //   - Resubmit:         PENDING_REVISION → PENDING_RISK_OWNER_APPROVAL, or →
 //     PENDING_OWNER_COMPLETION_APPROVAL when the rejection stage was COMPLETION_OWNER
 //   - Close:            PENDING_COMPLIANCE_CLOSURE → CLOSED
@@ -98,33 +98,33 @@ var allowedRiskTransitions = map[string][]string{
 		"PENDING_REVISION", "ESCALATED", "CANCELLED",
 	},
 	"PENDING_COMPLIANCE_REVIEW": {
-		"IN_REMEDIATION", "PENDING_REVISION", "ESCALATED", "CANCELLED",
+		"APPROVED", "PENDING_REVISION", "ESCALATED", "CANCELLED",
 	},
 	// PENDING_AMENDMENT: editing a restricted field (implementation_date or the
 	// action steps) on an in-remediation risk sends it back through the approval
 	// chain. Its absence here rejected a legitimate edit with a 400 — exactly
 	// the "less permissive than the caller" failure this map's comment warns
 	// about.
-	"IN_REMEDIATION": {"PENDING_OWNER_COMPLETION_APPROVAL", "PENDING_AMENDMENT", "ESCALATED"},
+	"APPROVED": {"PENDING_OWNER_COMPLETION_APPROVAL", "PENDING_AMENDMENT", "ESCALATED"},
 	"PENDING_OWNER_COMPLETION_APPROVAL": {
 		"PENDING_COMPLIANCE_CLOSURE", "PENDING_MANAGEMENT_CLOSURE_APPROVAL",
-		"PENDING_REVISION", "IN_REMEDIATION",
+		"PENDING_REVISION", "APPROVED",
 	},
 	// ACCEPT + HIGH only: the risk's management_approver_id signs off on the
 	// completed remediation before compliance closes it.
 	"PENDING_MANAGEMENT_CLOSURE_APPROVAL": {
-		"PENDING_COMPLIANCE_CLOSURE", "PENDING_REVISION", "IN_REMEDIATION",
+		"PENDING_COMPLIANCE_CLOSURE", "PENDING_REVISION", "APPROVED",
 	},
-	"PENDING_COMPLIANCE_CLOSURE": {"CLOSED", "IN_REMEDIATION"},
+	"PENDING_COMPLIANCE_CLOSURE": {"CLOSED", "APPROVED"},
 	"PENDING_REVISION": {
 		"PENDING_RISK_OWNER_APPROVAL", "PENDING_OWNER_COMPLETION_APPROVAL",
 		"PENDING_MANAGEMENT_CLOSURE_APPROVAL",
 		"PENDING_COMPLIANCE_REVIEW", "CANCELLED",
 	},
-	// IN_REMEDIATION: the daily escalation job (internal/job) reverts a risk
+	// APPROVED: the daily escalation job (internal/job) reverts a risk
 	// here once its linked MANAGEMENT action plan completes — see
 	// internal/service/risk_action_plan_service.go's completion cascade.
-	"ESCALATED": {"PENDING_MANAGEMENT_APPROVAL", "IN_REMEDIATION", "CANCELLED"},
+	"ESCALATED": {"PENDING_MANAGEMENT_APPROVAL", "APPROVED", "CANCELLED"},
 	"CLOSED":    {},
 	"CANCELLED": {},
 }

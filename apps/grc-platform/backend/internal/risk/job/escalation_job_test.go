@@ -30,7 +30,7 @@ import (
 )
 
 // fakeRisks models the real behaviour the paging loop depends on: an escalated
-// risk drops out of the "IN_REMEDIATION and overdue" result set, so each query
+// risk drops out of the "APPROVED and overdue" result set, so each query
 // returns only what is left.
 type fakeRisks struct {
 	remaining []int

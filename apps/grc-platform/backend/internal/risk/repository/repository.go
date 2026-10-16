@@ -107,7 +107,7 @@ type RiskEvidenceRepository interface {
 type EscalationRepository interface {
 	List(ctx context.Context, riskID int) ([]*model.Escalation, error)
 	// Escalate is the manual trigger — Compliance/Admin escalating an overdue
-	// IN_REMEDIATION risk on demand instead of waiting for the daily job.
+	// APPROVED risk on demand instead of waiting for the daily job.
 	// Escalate takes the assigner's and action owner's line-manager Asgardeo
 	// ids, already resolved by the caller — the entity has no HR client or
 	// identity directory of its own.

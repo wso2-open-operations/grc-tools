@@ -30,14 +30,14 @@ import (
 // RiskEscalationRepository defines persistence for risk_escalation.
 type RiskEscalationRepository interface {
 	CreateRiskEscalation(ctx context.Context, riskID int, req domain.CreateRiskEscalationRequest) (*domain.RiskEscalation, error)
-	// Escalate flips the risk IN_REMEDIATION -> ESCALATED and inserts its OPEN
+	// Escalate flips the risk APPROVED -> ESCALATED and inserts its OPEN
 	// escalation row atomically (one transaction), so a failed insert can't
 	// leave the risk stranded in ESCALATED with no escalation row.
 	Escalate(ctx context.Context, riskID int, req domain.CreateRiskEscalationRequest) (*domain.RiskEscalation, error)
 	GetRiskEscalationByID(ctx context.Context, riskID, escalationID int) (*domain.RiskEscalation, error)
 	UpdateRiskEscalation(ctx context.Context, riskID, escalationID int, req domain.UpdateRiskEscalationRequest) (*domain.RiskEscalation, error)
 	// CommentEscalation records a decision and returns the risk to
-	// IN_REMEDIATION atomically (one transaction), for the same reason
+	// APPROVED atomically (one transaction), for the same reason
 	// Escalate is atomic: a comment must never appear to save while the risk
 	// stays ESCALATED, or vice versa, and a failure partway must not strand
 	// either write.
@@ -79,13 +79,13 @@ func (r *riskEscalationRepo) CreateRiskEscalation(ctx context.Context, riskID in
 }
 
 // Escalate performs the whole escalation as one transaction: reject if the risk
-// already has an OPEN escalation (IN_REMEDIATION alone doesn't rule this out —
-// a commented escalation returns the risk to IN_REMEDIATION without resolving
-// it), then a CAS flip of the risk from IN_REMEDIATION to ESCALATED, then the
+// already has an OPEN escalation (APPROVED alone doesn't rule this out —
+// a commented escalation returns the risk to APPROVED without resolving
+// it), then a CAS flip of the risk from APPROVED to ESCALATED, then the
 // OPEN escalation insert. If the insert fails, the flip rolls back — so the
 // risk is never left ESCALATED with no escalation row (a stuck state: the
-// daily job skips non-IN_REMEDIATION risks, manual escalate requires
-// IN_REMEDIATION, and a MANAGEMENT plan needs an open escalation, leaving no
+// daily job skips non-APPROVED risks, manual escalate requires
+// APPROVED, and a MANAGEMENT plan needs an open escalation, leaving no
 // recovery path). The CAS also makes a concurrent escalate (daily job vs.
 // manual click) fail here rather than insert a duplicate.
 func (r *riskEscalationRepo) Escalate(ctx context.Context, riskID int, req domain.CreateRiskEscalationRequest) (*domain.RiskEscalation, error) {
@@ -95,8 +95,8 @@ func (r *riskEscalationRepo) Escalate(ctx context.Context, riskID int, req domai
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// A commented escalation returns the risk to IN_REMEDIATION while staying
-	// OPEN (see ListRisksFilter.OpenEscalationOnly), so IN_REMEDIATION alone
+	// A commented escalation returns the risk to APPROVED while staying
+	// OPEN (see ListRisksFilter.OpenEscalationOnly), so APPROVED alone
 	// doesn't mean this risk is escalate-able — it may already have an open
 	// escalation nobody has resolved yet. Without this check, the daily job
 	// (and a stray manual click) would insert a second OPEN escalation and
@@ -112,13 +112,13 @@ func (r *riskEscalationRepo) Escalate(ctx context.Context, riskID int, req domai
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE risk SET workflow_status = 'ESCALATED', updated_by = ?, updated_at = NOW()
-		 WHERE id = ? AND workflow_status = 'IN_REMEDIATION'`,
+		 WHERE id = ? AND workflow_status = 'APPROVED'`,
 		req.CreatedBy, riskID)
 	if err != nil {
 		return nil, fmt.Errorf("risk_escalation.Escalate flip: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		// Zero rows: the risk doesn't exist, or it's no longer IN_REMEDIATION
+		// Zero rows: the risk doesn't exist, or it's no longer APPROVED
 		// (lost a concurrent escalate race, or moved on). Distinguish the two,
 		// mirroring risk.UpdateRisk's CAS handling.
 		var current string
@@ -202,7 +202,7 @@ func (r *riskEscalationRepo) UpdateRiskEscalation(ctx context.Context, riskID, e
 
 // CommentEscalation performs the whole comment-and-resolve as one
 // transaction, mirroring Escalate's shape: verify the escalation exists and
-// is still OPEN, CAS the risk from ESCALATED to IN_REMEDIATION, then write
+// is still OPEN, CAS the risk from ESCALATED to APPROVED, then write
 // the decision — all inside the transaction, so a failure at any step rolls
 // the rest back rather than leaving the comment saved with the risk still
 // ESCALATED (or the reverse).
@@ -230,7 +230,7 @@ func (r *riskEscalationRepo) CommentEscalation(ctx context.Context, riskID, esca
 	// longer ESCALATED — no need to disambiguate "not found" the way Escalate
 	// does for its own CAS.
 	res, err := tx.ExecContext(ctx,
-		`UPDATE risk SET workflow_status = 'IN_REMEDIATION', updated_by = ?, updated_at = NOW()
+		`UPDATE risk SET workflow_status = 'APPROVED', updated_by = ?, updated_at = NOW()
 		 WHERE id = ? AND workflow_status = 'ESCALATED'`,
 		updatedBy, riskID)
 	if err != nil {

@@ -30,8 +30,8 @@ func TestReportEmit_Narrative(t *testing.T) {
 		Finding{MigrationID: 7, CSVRow: 8, Severity: SevWarn, Failure: "Git Issue URL"},
 		Finding{MigrationID: 9, CSVRow: 10, Severity: SevWarn, Failure: "Git Issue URL"},
 	)
-	r.Migrated("IN_REMEDIATION")
-	r.Migrated("IN_REMEDIATION")
+	r.Migrated("APPROVED")
+	r.Migrated("APPROVED")
 	r.Migrated("CLOSED")
 	r.Skipped()
 	r.GrantWritten()
@@ -56,7 +56,7 @@ func TestReportEmit_Narrative(t *testing.T) {
 		"user2@wso2.com",
 		"suppressing escalations seeded for Migration IDs: [1 2] (2)",
 		"grants written: 3",
-		"migrated by bucket: CLOSED=1 IN_REMEDIATION=2",
+		"migrated by bucket: APPROVED=2 CLOSED=1",
 	}
 	for _, m := range must {
 		if !strings.Contains(out, m) {
@@ -70,7 +70,7 @@ func TestReportEmit_Narrative(t *testing.T) {
 
 func TestReportEmit_CleanRunHasNoNarrativeClutter(t *testing.T) {
 	r := NewReport()
-	r.Migrated("IN_REMEDIATION")
+	r.Migrated("APPROVED")
 
 	var sb strings.Builder
 	r.Emit(&sb)
@@ -79,7 +79,7 @@ func TestReportEmit_CleanRunHasNoNarrativeClutter(t *testing.T) {
 	if strings.Contains(out, "unresolved people") || strings.Contains(out, "findings by code") {
 		t.Errorf("a clean run should not print empty finding sections:\n%s", out)
 	}
-	if !strings.Contains(out, "migrated by bucket: IN_REMEDIATION=1") {
+	if !strings.Contains(out, "migrated by bucket: APPROVED=1") {
 		t.Errorf("bucket line missing:\n%s", out)
 	}
 }
@@ -90,7 +90,7 @@ func TestReportEmit_CleanRunHasNoNarrativeClutter(t *testing.T) {
 // line must surface a MISMATCH finding just as visibly as a REJECT/WARN one.
 func TestReportEmit_MismatchOnlyRunIsNotReportedClean(t *testing.T) {
 	r := NewReport()
-	r.Migrated("IN_REMEDIATION")
+	r.Migrated("APPROVED")
 	r.Add(Finding{MigrationID: 1, CSVRow: 2, Severity: SevMismatch, Failure: "Risk Title", Detail: "expected Foo, got Bar"})
 
 	var sb strings.Builder

@@ -77,7 +77,7 @@ type Row struct {
 	EmailSubject          string
 	Remarks               string
 
-	WorkflowStatus string // IN_REMEDIATION | CLOSED
+	WorkflowStatus string // APPROVED | CLOSED
 
 	// ── filled by resolve.go ────────────────────────────────────────────────
 	SourceRegisterID     int

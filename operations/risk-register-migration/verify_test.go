@@ -27,7 +27,7 @@ func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Disca
 
 func intptr(i int) *int { return &i }
 
-// verifyBaseRow is a hand-built IN_REMEDIATION row, resolved against
+// verifyBaseRow is a hand-built APPROVED row, resolved against
 // fixtureRefData's ids, used to drive migrateRow directly (bypassing CSV
 // parsing) so each sub-test can tamper with exactly one piece of the fake
 // entity's resulting state.
@@ -48,7 +48,7 @@ func verifyBaseRow() Row {
 		AssignerID:         601, OwnerID: 602, ManagementApproverID: 603, ActionOwnerID: intptr(604),
 		ActionPlanDescription: "the plan", ActionSteps: []string{"step one", "step two"},
 		TreatmentStrategy: "REMEDIATE",
-		WorkflowStatus:    "IN_REMEDIATION",
+		WorkflowStatus:    "APPROVED",
 	}
 }
 
@@ -596,7 +596,7 @@ func TestVerifyMigration_CleanFixtureRun_NoMismatches(t *testing.T) {
 func TestVerifyRow_ResumeWithDifferentMigrationDateIsNotAMismatch(t *testing.T) {
 	rd := fixtureRefData(t)
 
-	t.Run("IN_REMEDIATION", func(t *testing.T) {
+	t.Run("APPROVED", func(t *testing.T) {
 		row := verifyBaseRow()
 		_, ec, riskID := setupVerifyFixture(t, rd, row) // written with migrationDate 2026-09-15
 

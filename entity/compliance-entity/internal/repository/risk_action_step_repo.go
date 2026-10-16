@@ -119,8 +119,8 @@ func (r *riskActionStepRepo) UpdateRiskActionStep(ctx context.Context, planID, s
 	if err != nil {
 		return nil, fmt.Errorf("risk_action_step.Update: lock risk: %w", err)
 	}
-	if workflowStatus != "IN_REMEDIATION" && workflowStatus != "ESCALATED" {
-		return nil, &apierror.ValidationError{Msg: "action steps can only be modified while the risk is IN_REMEDIATION or ESCALATED"}
+	if workflowStatus != "APPROVED" && workflowStatus != "ESCALATED" {
+		return nil, &apierror.ValidationError{Msg: "action steps can only be modified while the risk is APPROVED or ESCALATED"}
 	}
 
 	if _, err := tx.ExecContext(ctx,

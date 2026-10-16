@@ -132,7 +132,7 @@ func (s *riskActionPlanService) ListRiskActionPlans(ctx context.Context, riskID 
 // CompleteRiskActionPlan marks planID COMPLETED once every one of its steps
 // is COMPLETED, notifies the Risk Assigner to reassess and resubmit, and —
 // only for a MANAGEMENT plan — resolves the linked escalation and reverts the
-// risk to IN_REMEDIATION.
+// risk to APPROVED.
 //
 // Safely retryable: if a MANAGEMENT plan is already COMPLETED but a previous
 // call failed partway through the escalation resolution, calling this again
@@ -157,8 +157,8 @@ func (s *riskActionPlanService) CompleteRiskActionPlan(ctx context.Context, plan
 	if err != nil {
 		return domain.RiskActionPlan{}, err
 	}
-	if risk.WorkflowStatus != "IN_REMEDIATION" && risk.WorkflowStatus != "ESCALATED" {
-		return domain.RiskActionPlan{}, &apierror.ValidationError{Msg: "action plans can only be completed while the risk is IN_REMEDIATION or ESCALATED"}
+	if risk.WorkflowStatus != "APPROVED" && risk.WorkflowStatus != "ESCALATED" {
+		return domain.RiskActionPlan{}, &apierror.ValidationError{Msg: "action plans can only be completed while the risk is APPROVED or ESCALATED"}
 	}
 
 	if plan.Status != "COMPLETED" {

@@ -60,14 +60,14 @@ func riskCodeHasPrefix(code, prefix string) bool {
 
 // CustomerSummary is one customer's line in the report.
 type CustomerSummary struct {
-	Customer      string
-	Code          string
-	Risks         int // migratable rows for this customer
-	InRemediation int
-	Closed        int
-	New           int    // rows that still have to be created (no risk exists yet)
-	FirstCode     string // "" when New == 0
-	LastCode      string
+	Customer  string
+	Code      string
+	Risks     int // migratable rows for this customer
+	Approved  int
+	Closed    int
+	New       int    // rows that still have to be created (no risk exists yet)
+	FirstCode string // "" when New == 0
+	LastCode  string
 }
 
 // buildCustomerSummaries groups the migratable rows by customer. nextSeq is
@@ -95,7 +95,7 @@ func buildCustomerSummaries(rows []Row, rd RefData, progress map[int]ResumeState
 		if row.WorkflowStatus == "CLOSED" {
 			s.Closed++
 		} else {
-			s.InRemediation++
+			s.Approved++
 		}
 		if progress[row.MigrationID].RiskID != 0 {
 			continue
@@ -197,8 +197,8 @@ func (r *Report) emitCustomerSummaries(w io.Writer) {
 	}
 	fmt.Fprintln(w, "per-customer summary (check the codes before the real run - they cannot be changed afterwards):")
 	for _, s := range r.customerSummaries {
-		fmt.Fprintf(w, "  %s (%s): %s (%d in remediation, %d closed), %d new",
-			s.Customer, s.Code, plural(s.Risks, "risk", "risks"), s.InRemediation, s.Closed, s.New)
+		fmt.Fprintf(w, "  %s (%s): %s (%d approved, %d closed), %d new",
+			s.Customer, s.Code, plural(s.Risks, "risk", "risks"), s.Approved, s.Closed, s.New)
 		if s.New > 0 {
 			fmt.Fprintf(w, ", codes %s .. %s", s.FirstCode, s.LastCode)
 		}

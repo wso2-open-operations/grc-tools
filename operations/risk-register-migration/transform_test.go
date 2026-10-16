@@ -86,8 +86,8 @@ func TestMapTreatment(t *testing.T) {
 
 func TestMapWorkflowStatus(t *testing.T) {
 	for in, want := range map[string]string{
-		"IN_REMEDIATION": "IN_REMEDIATION", "in remediation": "IN_REMEDIATION",
-		"In-Remediation": "IN_REMEDIATION", "Closed": "CLOSED", " CLOSED ": "CLOSED",
+		"APPROVED": "APPROVED", "in remediation": "APPROVED", "IN_REMEDIATION": "APPROVED",
+		"In-Remediation": "APPROVED", "Closed": "CLOSED", " CLOSED ": "CLOSED",
 	} {
 		if got, err := mapWorkflowStatus(in); err != nil || got != want {
 			t.Errorf("mapWorkflowStatus(%q) = (%q, %v), want %q", in, got, err, want)

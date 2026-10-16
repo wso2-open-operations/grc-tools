@@ -2803,7 +2803,7 @@ paths:
       - Risk Action Plans
       summary: Complete an action plan
       description: Requires every step to already be COMPLETED. For a MANAGEMENT plan, completion also resolves the linked
-        escalation and reverts the risk to IN_REMEDIATION.
+        escalation and reverts the risk to APPROVED.
       operationId: completeRiskActionPlan
       parameters:
       - name: planId
@@ -3089,7 +3089,7 @@ paths:
       tags:
       - Risk Escalations
       summary: Manually trigger escalation of an overdue risk
-      description: The manual trigger a Compliance user clicks on an overdue IN_REMEDIATION risk, as an alternative to waiting
+      description: The manual trigger a Compliance user clicks on an overdue APPROVED risk, as an alternative to waiting
         for the daily job.
       operationId: escalateRisk
       parameters:
@@ -6119,7 +6119,7 @@ components:
           - PENDING_RISK_OWNER_APPROVAL
           - PENDING_MANAGEMENT_APPROVAL
           - PENDING_COMPLIANCE_REVIEW
-          - IN_REMEDIATION
+          - APPROVED
           - PENDING_OWNER_COMPLETION_APPROVAL
           - PENDING_COMPLIANCE_CLOSURE
           - PENDING_AMENDMENT
@@ -6442,7 +6442,7 @@ components:
           - PENDING_RISK_OWNER_APPROVAL
           - PENDING_MANAGEMENT_APPROVAL
           - PENDING_COMPLIANCE_REVIEW
-          - IN_REMEDIATION
+          - APPROVED
           - PENDING_OWNER_COMPLETION_APPROVAL
           - PENDING_COMPLIANCE_CLOSURE
           - PENDING_AMENDMENT

@@ -139,7 +139,7 @@ func (h *RiskEscalationHandler) UpdateRiskEscalation(w http.ResponseWriter, r *h
 
 // CommentEscalation handles
 // PATCH /risks/{riskId}/escalations/{escalationId}/comment — records a
-// decision and returns the risk to IN_REMEDIATION atomically, unlike
+// decision and returns the risk to APPROVED atomically, unlike
 // UpdateRiskEscalation above, which only ever touches the escalation row.
 func (h *RiskEscalationHandler) CommentEscalation(w http.ResponseWriter, r *http.Request) {
 	riskID, err := strconv.Atoi(r.PathValue("riskId"))

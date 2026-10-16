@@ -184,7 +184,7 @@ type RiskActionPlanService interface {
 	ListRiskActionPlans(ctx context.Context, riskID int) (domain.ListRiskActionPlansResponse, error)
 	// CompleteRiskActionPlan marks a plan COMPLETED once every step is done.
 	// For a MANAGEMENT plan this also resolves the linked escalation and
-	// reverts the risk ESCALATED -> IN_REMEDIATION.
+	// reverts the risk ESCALATED -> APPROVED.
 	CompleteRiskActionPlan(ctx context.Context, planID int, req domain.CompleteRiskActionPlanRequest) (domain.RiskActionPlan, error)
 }
 
@@ -272,13 +272,13 @@ type RiskEscalationService interface {
 	GetRiskEscalationByID(ctx context.Context, riskID, escalationID int) (domain.RiskEscalation, error)
 	UpdateRiskEscalation(ctx context.Context, riskID, escalationID int, req domain.UpdateRiskEscalationRequest) (domain.RiskEscalation, error)
 	// CommentEscalation records a decision and returns the risk to
-	// IN_REMEDIATION as one transaction. See CommentEscalationRequest.
+	// APPROVED as one transaction. See CommentEscalationRequest.
 	CommentEscalation(ctx context.Context, riskID, escalationID int, req domain.CommentEscalationRequest) (domain.RiskEscalation, error)
 	ListRiskEscalations(ctx context.Context, riskID int) (domain.ListRiskEscalationsResponse, error)
 	// EscalateRisk is the single "escalate one risk" operation shared by the
 	// daily job (internal/job) and a manual trigger (Compliance clicking
-	// Escalate on an overdue IN_REMEDIATION risk they've spotted before the
-	// job gets to it): validates IN_REMEDIATION + overdue, creates the
+	// Escalate on an overdue APPROVED risk they've spotted before the
+	// job gets to it): validates APPROVED + overdue, creates the
 	// OPEN escalation, and flips workflow_status -> ESCALATED. actorEmail is
 	// "system" for the job, the caller's email for a manual trigger.
 	EscalateRisk(ctx context.Context, riskID int, req domain.EscalateRiskRequest) (domain.RiskEscalation, error)

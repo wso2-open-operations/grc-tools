@@ -62,7 +62,7 @@ var workflowStatusLabels = map[string]string{
 	model.StatusPendingOwnerApproval:      "Pending Owner Approval",
 	model.StatusPendingManagementApproval: "Pending Management Approval",
 	model.StatusPendingComplianceReview:   "Pending Compliance Approval",
-	model.StatusInRemediation:             "In Remediation",
+	model.StatusApproved:                  "Approved",
 	model.StatusPendingOwnerCompletion:    "Awaiting Owner Sign-off",
 	model.StatusPendingManagementClosure:  "Awaiting Management Sign-off",
 	model.StatusPendingComplianceClosure:  "Awaiting Closure",

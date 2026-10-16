@@ -89,7 +89,7 @@ func (j *ReminderJob) RunOnce(ctx context.Context) error {
 	return j.runOnce(ctx)
 }
 
-// runOnce is one sweep: page through IN_REMEDIATION risks due within the
+// runOnce is one sweep: page through APPROVED risks due within the
 // reminder horizon, and for each one whose tier falls today, claim it, send
 // it, and release the claim if the send failed. RunOnce owns the
 // single-flight guard; this owns the work.
@@ -119,7 +119,7 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	offset := 0
 	for {
 		page, err := j.risks.List(ctx, model.ListRisksFilter{
-			Statuses: []string{model.StatusInRemediation},
+			Statuses: []string{model.StatusApproved},
 			DueFrom:  today.Format(dateLayout),
 			DueTo:    horizon.Format(dateLayout),
 			Limit:    pageLimit,

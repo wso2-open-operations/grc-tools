@@ -59,10 +59,10 @@ func summaryRow(mig, custID int, cust string, year int, quarter, status string) 
 func TestBuildCustomerSummaries(t *testing.T) {
 	rd := msRefData(t) // MS register code "MS"; BankOne = BO, Bank Of China = BOC
 	rows := []Row{
-		summaryRow(1, idCustBankOne, "BankOne", 2025, "Q1", "IN_REMEDIATION"),
+		summaryRow(1, idCustBankOne, "BankOne", 2025, "Q1", "APPROVED"),
 		summaryRow(2, idCustBOC, "Bank Of China", 2025, "Q1", "CLOSED"),
 		summaryRow(3, idCustBankOne, "BankOne", 2025, "Q3", "CLOSED"),
-		summaryRow(4, idCustBankOne, "BankOne", 2026, "Q2", "IN_REMEDIATION"),
+		summaryRow(4, idCustBankOne, "BankOne", 2026, "Q2", "APPROVED"),
 	}
 	progress := map[int]ResumeState{
 		1: {Progress: ProgressNone}, 2: {Progress: ProgressNone},
@@ -78,13 +78,13 @@ func TestBuildCustomerSummaries(t *testing.T) {
 
 	// Sorted by customer name: "Bank Of China" < "BankOne".
 	boc, bo := got[0], got[1]
-	if boc.Customer != "Bank Of China" || boc.Code != "BOC" || boc.Risks != 1 || boc.Closed != 1 || boc.InRemediation != 0 || boc.New != 1 {
+	if boc.Customer != "Bank Of China" || boc.Code != "BOC" || boc.Risks != 1 || boc.Closed != 1 || boc.Approved != 0 || boc.New != 1 {
 		t.Errorf("Bank Of China summary = %+v", boc)
 	}
 	if boc.FirstCode != "2025-MS-BOC-Q1-0001" || boc.LastCode != "2025-MS-BOC-Q1-0001" {
 		t.Errorf("Bank Of China codes = %q .. %q", boc.FirstCode, boc.LastCode)
 	}
-	if bo.Customer != "BankOne" || bo.Code != "BO" || bo.Risks != 3 || bo.InRemediation != 2 || bo.Closed != 1 || bo.New != 3 {
+	if bo.Customer != "BankOne" || bo.Code != "BO" || bo.Risks != 3 || bo.Approved != 2 || bo.Closed != 1 || bo.New != 3 {
 		t.Errorf("BankOne summary = %+v", bo)
 	}
 	// Migration ID order drives the numbers: 15 (2025-Q1), 16 (2025-Q3), 17 (2026-Q2).
@@ -96,9 +96,9 @@ func TestBuildCustomerSummaries(t *testing.T) {
 func TestBuildCustomerSummaries_ExistingRisksTakeNoNewNumber(t *testing.T) {
 	rd := msRefData(t)
 	rows := []Row{
-		summaryRow(1, idCustBankOne, "BankOne", 2025, "Q1", "IN_REMEDIATION"),
-		summaryRow(2, idCustBankOne, "BankOne", 2025, "Q2", "IN_REMEDIATION"),
-		summaryRow(3, idCustBankOne, "BankOne", 2025, "Q3", "IN_REMEDIATION"),
+		summaryRow(1, idCustBankOne, "BankOne", 2025, "Q1", "APPROVED"),
+		summaryRow(2, idCustBankOne, "BankOne", 2025, "Q2", "APPROVED"),
+		summaryRow(3, idCustBankOne, "BankOne", 2025, "Q3", "APPROVED"),
 	}
 	// Rows 1 and 2 were written by an earlier run; only row 3 is still to create.
 	progress := map[int]ResumeState{
@@ -128,7 +128,7 @@ func TestBuildCustomerSummaries_NothingNewHasNoCodes(t *testing.T) {
 func TestReportEmit_CustomerSummaryBlock(t *testing.T) {
 	r := NewReport()
 	r.SetCustomerSummaries([]CustomerSummary{{
-		Customer: "BankOne", Code: "BO", Risks: 3, InRemediation: 2, Closed: 1, New: 3,
+		Customer: "BankOne", Code: "BO", Risks: 3, Approved: 2, Closed: 1, New: 3,
 		FirstCode: "2025-MS-BO-Q1-0015", LastCode: "2026-MS-BO-Q2-0017",
 	}})
 	var sb strings.Builder
@@ -137,7 +137,7 @@ func TestReportEmit_CustomerSummaryBlock(t *testing.T) {
 	for _, want := range []string{
 		"per-customer summary",
 		"BankOne (BO)",
-		"3 risks (2 in remediation, 1 closed)",
+		"3 risks (2 approved, 1 closed)",
 		"3 new",
 		"2025-MS-BO-Q1-0015 .. 2026-MS-BO-Q2-0017",
 	} {
@@ -297,7 +297,7 @@ func TestComputeCustomerSummaries_ReadsCounterPerCustomerWithNewRows(t *testing.
 	ec := fe.client(t)
 
 	rows := []Row{
-		{MigrationID: 1, SourceRegisterID: 1, CustomerID: 20, Customer: "BankOne", RiskYear: 2025, RiskQuarter: "Q1", WorkflowStatus: "IN_REMEDIATION"},
+		{MigrationID: 1, SourceRegisterID: 1, CustomerID: 20, Customer: "BankOne", RiskYear: 2025, RiskQuarter: "Q1", WorkflowStatus: "APPROVED"},
 		{MigrationID: 2, SourceRegisterID: 1, CustomerID: 21, Customer: "Bank Of China", RiskYear: 2025, RiskQuarter: "Q2", WorkflowStatus: "CLOSED"},
 	}
 	// Bank Of China's only row already exists: its counter must not be read.
@@ -325,10 +325,10 @@ func TestComputeCustomerSummaries_ReadsCounterPerCustomerWithNewRows(t *testing.
 // have a risk, or the summary would hand their numbers out again.
 func TestExistingRisks_MatchesByCustomerAwareKey(t *testing.T) {
 	s := &stateStub{t: t, risks: []Risk{
-		withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "IN_REMEDIATION"), "BankOne"),
+		withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "APPROVED"), "BankOne"),
 	}}
 	rowFor := func(mig int, customer string) Row {
-		r := baseRow(mig, "TLS 1.0 enabled", "IN_REMEDIATION")
+		r := baseRow(mig, "TLS 1.0 enabled", "APPROVED")
 		r.Customer = customer
 		return r
 	}
@@ -348,10 +348,10 @@ func TestExistingRisks_MatchesByCustomerAwareKey(t *testing.T) {
 // real run; the dry run's lookup must say so too, and must not hand the row a number.
 func TestExistingRisks_AmbiguousMatchIsRejected(t *testing.T) {
 	s := &stateStub{t: t, risks: []Risk{
-		withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "IN_REMEDIATION"), "BankOne"),
-		withCustomer(markerRisk(81, "TLS 1.0 enabled", 8, 2025, "Q3", "IN_REMEDIATION"), "BankOne"),
+		withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "APPROVED"), "BankOne"),
+		withCustomer(markerRisk(81, "TLS 1.0 enabled", 8, 2025, "Q3", "APPROVED"), "BankOne"),
 	}}
-	row := baseRow(1, "TLS 1.0 enabled", "IN_REMEDIATION")
+	row := baseRow(1, "TLS 1.0 enabled", "APPROVED")
 	row.Customer = "BankOne"
 
 	rep := NewReport()

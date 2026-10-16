@@ -115,7 +115,7 @@ func msRow(overrides map[string]string) map[string]string {
 		"Action Owner":        "user4@wso2.com",
 		"Action Steps":        "Do the thing",
 		"Treatment Strategy":  "Remediate",
-		"Workflow Status":     "IN_REMEDIATION",
+		"Workflow Status":     "APPROVED",
 		"Migration ID":        "1",
 	}
 	for k, v := range overrides {

@@ -54,8 +54,8 @@ func (s *riskActionStepService) assertStepsModifiable(ctx context.Context, planI
 	if err != nil {
 		return err
 	}
-	if risk.WorkflowStatus != "IN_REMEDIATION" && risk.WorkflowStatus != "ESCALATED" {
-		return &apierror.ValidationError{Msg: "action steps can only be modified while the risk is IN_REMEDIATION or ESCALATED"}
+	if risk.WorkflowStatus != "APPROVED" && risk.WorkflowStatus != "ESCALATED" {
+		return &apierror.ValidationError{Msg: "action steps can only be modified while the risk is APPROVED or ESCALATED"}
 	}
 	return nil
 }
@@ -108,7 +108,7 @@ func (s *riskActionStepService) UpdateRiskActionStep(ctx context.Context, planID
 		return domain.RiskActionStep{}, &apierror.ValidationError{Msg: "invalid status: " + *req.Status}
 	}
 
-	// The IN_REMEDIATION/ESCALATED guard is enforced atomically inside
+	// The APPROVED/ESCALATED guard is enforced atomically inside
 	// repo.UpdateRiskActionStep (it locks the risk row in the same transaction
 	// as the write), so it isn't repeated here — a separate service-level check
 	// would be a TOCTOU that a concurrent transition could race past.

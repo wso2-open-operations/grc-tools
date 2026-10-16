@@ -95,7 +95,7 @@ func (r *escalationRepository) Escalate(ctx context.Context, riskID int, created
 	return e.toModel(), nil
 }
 
-// Comment writes the decision text and returns the risk to IN_REMEDIATION via
+// Comment writes the decision text and returns the risk to APPROVED via
 // the entity's dedicated comment endpoint — one transaction on the entity
 // side, so the two can't drift out of step if the second write fails. The
 // escalation's own status is deliberately left alone by that endpoint: it

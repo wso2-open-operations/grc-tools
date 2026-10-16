@@ -133,7 +133,7 @@ func (m *migrateStub) client(t *testing.T) *EntityClient {
 
 func migrateCfg() Config { return Config{MigrationDate: "2026-09-15"} }
 
-// migRow is a fully-resolved IN_REMEDIATION row (ids wired to sheetTestRefData).
+// migRow is a fully-resolved APPROVED row (ids wired to sheetTestRefData).
 func migRow(status string) Row {
 	return Row{
 		MigrationID: 1, CSVLine: 2, RiskTitle: "R1",
@@ -147,13 +147,13 @@ func migRow(status string) Row {
 	}
 }
 
-func TestMigrateRow_FreshInRemediation(t *testing.T) {
+func TestMigrateRow_FreshApproved(t *testing.T) {
 	m := &migrateStub{t: t}
 	rd := sheetTestRefData(t)
 	rep := NewReport()
 
 	err := migrateRow(context.Background(), m.client(t), migrateCfg(), rd,
-		migRow("IN_REMEDIATION"), ResumeState{Progress: ProgressNone}, rep)
+		migRow("APPROVED"), ResumeState{Progress: ProgressNone}, rep)
 	if err != nil {
 		t.Fatalf("migrateRow: %v", err)
 	}
@@ -161,13 +161,13 @@ func TestMigrateRow_FreshInRemediation(t *testing.T) {
 	if m.createBody == nil || m.createBody.CreatedBy != marker || m.createBody.RiskTitle != "R1" {
 		t.Fatalf("create body = %+v", m.createBody)
 	}
-	if want := []string{"PENDING_COMPLIANCE_REVIEW", "IN_REMEDIATION"}; !equalStrs(m.statusHops, want) {
+	if want := []string{"PENDING_COMPLIANCE_REVIEW", "APPROVED"}; !equalStrs(m.statusHops, want) {
 		t.Errorf("status hops = %v, want %v", m.statusHops, want)
 	}
-	// The IN_REMEDIATION hop carries complianceApprovalDate and no approver.
+	// The APPROVED hop carries complianceApprovalDate and no approver.
 	last := m.patchBodies[len(m.patchBodies)-1]
 	if last.ComplianceApprovalDate == nil || *last.ComplianceApprovalDate != "2026-09-15" {
-		t.Errorf("IN_REMEDIATION hop should set complianceApprovalDate: %+v", last)
+		t.Errorf("APPROVED hop should set complianceApprovalDate: %+v", last)
 	}
 	if last.ComplianceApprovalBy != nil {
 		t.Errorf("complianceApprovalBy must stay null: %+v", last)
@@ -188,7 +188,7 @@ func TestMigrateRow_FreshInRemediation(t *testing.T) {
 func TestMigrateRow_OverdueGetsSuppressingEscalation(t *testing.T) {
 	m := &migrateStub{t: t}
 	rep := NewReport()
-	row := migRow("IN_REMEDIATION")
+	row := migRow("APPROVED")
 	row.ImplementationDate = "2020-01-01" // < migrationDate
 
 	if err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
@@ -206,7 +206,7 @@ func TestMigrateRow_OverdueGetsSuppressingEscalation(t *testing.T) {
 func TestMigrateRow_OverdueButEscalationAlreadyPresent(t *testing.T) {
 	m := &migrateStub{t: t, openEscas: []Escalation{{ID: 5, Status: "OPEN", CreatedBy: marker}}}
 	rep := NewReport()
-	row := migRow("IN_REMEDIATION")
+	row := migRow("APPROVED")
 	row.ImplementationDate = "2020-01-01"
 
 	if err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
@@ -221,7 +221,7 @@ func TestMigrateRow_OverdueButEscalationAlreadyPresent(t *testing.T) {
 func TestMigrateRow_ConditionalManagementGrant(t *testing.T) {
 	m := &migrateStub{t: t}
 	rep := NewReport()
-	row := migRow("IN_REMEDIATION")
+	row := migRow("APPROVED")
 	row.TreatmentStrategy = "ACCEPT"
 	row.GrossLikelihood, row.GrossImpact = 3, 3 // 9 >= 7
 	row.ResidualLikelihood, row.ResidualImpact = 3, 3
@@ -239,7 +239,7 @@ func TestMigrateRow_ConditionalManagementGrant(t *testing.T) {
 func TestMigrateRow_ResidualDiffersFromGross_WritesAssessment(t *testing.T) {
 	m := &migrateStub{t: t}
 	rep := NewReport()
-	row := migRow("IN_REMEDIATION")
+	row := migRow("APPROVED")
 	row.GrossLikelihood, row.GrossImpact = 1, 1
 	row.ResidualLikelihood, row.ResidualImpact = 3, 2
 
@@ -275,7 +275,7 @@ func TestMigrateRow_ResidualEqualsGross_NoAssessment(t *testing.T) {
 	// /assessments handler for GET, and asserting createBody's presence
 	// without an assessment POST is enough to prove the skip.
 	if err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
-		migRow("IN_REMEDIATION"), ResumeState{Progress: ProgressNone}, rep); err != nil {
+		migRow("APPROVED"), ResumeState{Progress: ProgressNone}, rep); err != nil {
 		t.Fatalf("migrateRow: %v", err)
 	}
 	if m.assessmentBody != nil {
@@ -286,12 +286,12 @@ func TestMigrateRow_ResidualEqualsGross_NoAssessment(t *testing.T) {
 func TestMigrateRow_ResumeAssessmentAlreadyWritten_NoDuplicate(t *testing.T) {
 	m := &migrateStub{t: t}
 	rep := NewReport()
-	row := migRow("IN_REMEDIATION")
+	row := migRow("APPROVED")
 	row.ResidualLikelihood, row.ResidualImpact = 3, 2 // differs from gross (2,2)
 
 	err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
 		row,
-		ResumeState{Progress: ProgressStatusWalked, RiskID: 900, CurrentStatus: "IN_REMEDIATION", HasAssessment: true},
+		ResumeState{Progress: ProgressStatusWalked, RiskID: 900, CurrentStatus: "APPROVED", HasAssessment: true},
 		rep)
 	if err != nil {
 		t.Fatalf("migrateRow: %v", err)
@@ -310,7 +310,7 @@ func TestMigrateRow_FreshClosed(t *testing.T) {
 		t.Fatalf("migrateRow: %v", err)
 	}
 	want := []string{
-		"PENDING_COMPLIANCE_REVIEW", "IN_REMEDIATION",
+		"PENDING_COMPLIANCE_REVIEW", "APPROVED",
 		"PENDING_OWNER_COMPLETION_APPROVAL", "PENDING_COMPLIANCE_CLOSURE", "CLOSED",
 	}
 	if !equalStrs(m.statusHops, want) {
@@ -332,8 +332,8 @@ func TestMigrateRow_ResumeStatusWalked_SkipsCreateAndWalk(t *testing.T) {
 	rep := NewReport()
 
 	err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
-		migRow("IN_REMEDIATION"),
-		ResumeState{Progress: ProgressStatusWalked, RiskID: 900, CurrentStatus: "IN_REMEDIATION"}, rep)
+		migRow("APPROVED"),
+		ResumeState{Progress: ProgressStatusWalked, RiskID: 900, CurrentStatus: "APPROVED"}, rep)
 	if err != nil {
 		t.Fatalf("migrateRow: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestMigrateRow_ResumeStatusWalked_SkipsCreateAndWalk(t *testing.T) {
 		t.Error("resume must not POST /risks")
 	}
 	if len(m.statusHops) != 0 {
-		t.Errorf("resume at IN_REMEDIATION must not re-walk status, got %v", m.statusHops)
+		t.Errorf("resume at APPROVED must not re-walk status, got %v", m.statusHops)
 	}
 	if len(m.grantBodies) != 2 {
 		t.Errorf("resume should still ensure grants, got %+v", m.grantBodies)
@@ -356,8 +356,8 @@ func TestMigrateRow_ResumeComplete_IsSkip(t *testing.T) {
 	rep := NewReport()
 
 	err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
-		migRow("IN_REMEDIATION"),
-		ResumeState{Progress: ProgressComplete, RiskID: 900, CurrentStatus: "IN_REMEDIATION"}, rep)
+		migRow("APPROVED"),
+		ResumeState{Progress: ProgressComplete, RiskID: 900, CurrentStatus: "APPROVED"}, rep)
 	if err != nil {
 		t.Fatalf("migrateRow: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestMigrateRow_RowLevelCreateErrorRejectsAndContinues(t *testing.T) {
 	rep := NewReport()
 
 	err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
-		migRow("IN_REMEDIATION"), ResumeState{Progress: ProgressNone}, rep)
+		migRow("APPROVED"), ResumeState{Progress: ProgressNone}, rep)
 	if err != nil {
 		t.Fatalf("a 400 must not be fatal, got %v", err)
 	}
@@ -391,7 +391,7 @@ func TestMigrateRow_ServerErrorIsFatal(t *testing.T) {
 	rep := NewReport()
 
 	err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
-		migRow("IN_REMEDIATION"), ResumeState{Progress: ProgressNone}, rep)
+		migRow("APPROVED"), ResumeState{Progress: ProgressNone}, rep)
 	if err == nil {
 		t.Fatal("a 503 must be fatal (return err)")
 	}
@@ -402,7 +402,7 @@ func TestMigrateRow_TreatmentEnumBackstop(t *testing.T) {
 	rep := NewReport()
 
 	err := migrateRow(context.Background(), m.client(t), migrateCfg(), sheetTestRefData(t),
-		migRow("IN_REMEDIATION"), ResumeState{Progress: ProgressNone}, rep)
+		migRow("APPROVED"), ResumeState{Progress: ProgressNone}, rep)
 	if err == nil || !strings.Contains(err.Error(), "enum") {
 		t.Fatalf("treatment enum error should abort with a clear message, got %v", err)
 	}

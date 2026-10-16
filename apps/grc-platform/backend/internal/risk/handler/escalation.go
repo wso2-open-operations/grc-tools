@@ -32,10 +32,10 @@ import (
 )
 
 // handleEscalateRisk serves POST /api/v1/risks/{id}/escalate — the manual
-// trigger for Compliance/Admin to escalate an overdue IN_REMEDIATION risk on
+// trigger for Compliance/Admin to escalate an overdue APPROVED risk on
 // demand, rather than waiting for the daily job (up to 24h delay) to reach
 // it. Same outcome as the automatic path: OPEN escalation created, risk
-// flips to ESCALATED. The entity re-validates IN_REMEDIATION + overdue, so a
+// flips to ESCALATED. The entity re-validates APPROVED + overdue, so a
 // risk that's already moved on (e.g. someone just closed it, or the job beat
 // this click to it) returns a clear 4xx rather than being escalated wrongly.
 func (d *Deps) handleEscalateRisk(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +61,7 @@ func (d *Deps) handleEscalateRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.recordEvent(r.Context(), riskID, by, model.HistoryEscalate, model.HistoryDetails{
-		From: model.StatusInRemediation, To: model.StatusEscalated,
+		From: model.StatusApproved, To: model.StatusEscalated,
 	})
 	d.NotifyEscalation(r.Context(), riskID, by)
 	response.WriteJSONValue(w, http.StatusOK, escalation)
@@ -149,7 +149,7 @@ func (d *Deps) handleEscalationComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.recordEvent(r.Context(), riskID, by, model.HistoryComment, model.HistoryDetails{
-		From: model.StatusEscalated, To: model.StatusInRemediation, Comment: req.Comment,
+		From: model.StatusEscalated, To: model.StatusApproved, Comment: req.Comment,
 	})
 	// The risk is back with its assigner, who has to act on the comment.
 	detail, err := d.Risk.GetByID(r.Context(), riskID)
