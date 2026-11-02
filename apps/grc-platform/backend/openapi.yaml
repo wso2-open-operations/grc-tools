@@ -4035,7 +4035,7 @@ paths:
       tags:
       - Risk Escalations
       summary: Manually escalate an overdue risk
-      description: Manual trigger for Compliance/Admin to escalate an overdue APPROVED risk on demand rather than waiting for the daily job. Creates an OPEN escalation and flips the risk to ESCALATED; a risk that has already moved on returns a 409.
+      description: Manual trigger for Compliance/Admin to escalate an overdue APPROVED risk on demand rather than waiting for the daily job. Creates an OPEN escalation and flips the risk to ESCALATED. If the risk's previous escalation was already commented on (it stays OPEN while the risk is back to APPROVED), that escalation is resolved first so the risk can be escalated and commented on again. A risk that has an OPEN escalation still awaiting a comment, or that has already moved on, returns a 409.
       operationId: escalateRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
