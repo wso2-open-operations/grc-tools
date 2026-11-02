@@ -43,6 +43,9 @@ func (s *listSpyEscalation) List(_ context.Context, riskID int) ([]*model.Escala
 func (s *listSpyEscalation) Escalate(context.Context, int, string) (*model.Escalation, error) {
 	return nil, nil
 }
+func (s *listSpyEscalation) Reescalate(context.Context, int, string) (*model.Escalation, error) {
+	return nil, nil
+}
 func (s *listSpyEscalation) Comment(context.Context, int, int, string, string, bool) (*model.Escalation, error) {
 	return nil, nil
 }
