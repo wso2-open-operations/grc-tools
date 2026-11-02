@@ -33,6 +33,10 @@ type RiskEscalationRepository interface {
 	// Escalate flips the risk APPROVED -> ESCALATED and inserts its OPEN
 	// escalation row atomically (one transaction), so a failed insert can't
 	// leave the risk stranded in ESCALATED with no escalation row.
+	// With req.Reescalate (the manual click only), OPEN escalations that already
+	// have a decision are resolved first, in the same transaction, so a risk
+	// that is still overdue after a review comment can be escalated again. An
+	// OPEN escalation with no decision still returns a conflict.
 	Escalate(ctx context.Context, riskID int, req domain.CreateRiskEscalationRequest) (*domain.RiskEscalation, error)
 	GetRiskEscalationByID(ctx context.Context, riskID, escalationID int) (*domain.RiskEscalation, error)
 	UpdateRiskEscalation(ctx context.Context, riskID, escalationID int, req domain.UpdateRiskEscalationRequest) (*domain.RiskEscalation, error)
@@ -101,6 +105,19 @@ func (r *riskEscalationRepo) Escalate(ctx context.Context, riskID int, req domai
 	// escalation nobody has resolved yet. Without this check, the daily job
 	// (and a stray manual click) would insert a second OPEN escalation and
 	// re-notify everyone on every subsequent overdue sweep.
+	//
+	// A manual re-escalation (req.Reescalate) first resolves the escalations
+	// that were already answered, in this same transaction, so compliance can
+	// escalate and comment again on a risk that is still overdue. An OPEN
+	// escalation with no decision is left alone and still hits the check below.
+	if req.Reescalate {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE risk_escalation SET status = 'RESOLVED', updated_by = ?
+			 WHERE risk_id = ? AND status = 'OPEN' AND decision IS NOT NULL AND decision <> ''`,
+			req.CreatedBy, riskID); err != nil {
+			return nil, fmt.Errorf("risk_escalation.Escalate resolve answered: %w", err)
+		}
+	}
 	var openCount int
 	if err := tx.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM risk_escalation WHERE risk_id = ? AND status = 'OPEN'", riskID).Scan(&openCount); err != nil {
