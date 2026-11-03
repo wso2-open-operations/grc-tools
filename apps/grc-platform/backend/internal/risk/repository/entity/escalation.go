@@ -90,8 +90,8 @@ func (r *escalationRepository) Escalate(ctx context.Context, riskID int, created
 	}
 	// Sent only when set: the entity decodes with DisallowUnknownFields, so an
 	// entity that predates this field would 400 every escalate (the daily job's
-	// included) if the key were always present. Omitted, only the manual
-	// re-escalate depends on the entity being upgraded first.
+	// included) if the key were always present. Every manual escalate sets it,
+	// so the entity must be deployed before this backend.
 	if reescalate {
 		body["reescalate"] = true
 	}
