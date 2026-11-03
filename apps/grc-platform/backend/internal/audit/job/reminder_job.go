@@ -87,7 +87,7 @@ type ReminderJob struct {
 	// are notify and notifyLead with that CC added. All nil unless WithAdminCC
 	// wired them, in which case nothing is ever copied.
 	ccEmails     func(ctx context.Context, adminIDs []int) []string
-	notifyCC     func(ctx context.Context, recipientUserID int, items []model.ReminderItem, cc []string) error
+	notifyCC     func(ctx context.Context, recipientUserID int, items []model.ReminderItem, cc []string) (delivered bool, err error)
 	notifyLeadCC func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error
 	// daily turns on the every-day reminder for dailyStatuses and the
 	// dailyRouteOverrides. Off, the sweep only reminds on the 10/5/0/overdue marks.
@@ -140,12 +140,16 @@ func (j *ReminderJob) WithLeadAlerts(
 // assignee and to that assignee's lead. Opt-in: unless all three functions are
 // given it stays off, so a half-wired job never copies some emails and not
 // others, and a disabled deployment resolves no CC list at all. The admins are
-// the ones WithAdminAlerts resolves, so it must be wired as well. While it is on and resolves
+// the ones WithAdminAlerts resolves, so it must be wired as well.
+//
+// notifyCC reports whether the email went out, because it can be skipped
+// without an error (an inactive recipient, or one with no address). The CC then
+// reached nobody, so the overdue admin digest covers those items after all. While it is on and resolves
 // at least one address, the CC stands in for the overdue admin digest on items
 // that have an assignee; items nobody holds keep the digest.
 func (j *ReminderJob) WithAdminCC(
 	ccEmails func(ctx context.Context, adminIDs []int) []string,
-	notifyCC func(ctx context.Context, recipientUserID int, items []model.ReminderItem, cc []string) error,
+	notifyCC func(ctx context.Context, recipientUserID int, items []model.ReminderItem, cc []string) (delivered bool, err error),
 	notifyLeadCC func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error,
 ) *ReminderJob {
 	if ccEmails == nil || notifyCC == nil || notifyLeadCC == nil {
@@ -613,7 +617,18 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	for recipientID, items := range byRecipient {
 		var err error
 		if rcc := ccFor(cc, items); len(rcc) > 0 {
-			err = j.notifyCC(ctx, recipientID, items, rcc)
+			var delivered bool
+			delivered, err = j.notifyCC(ctx, recipientID, items, rcc)
+			if !delivered || err != nil {
+				// The admins were counting on this email's CC for their overdue
+				// items. It was skipped (inactive, no address) or failed, so
+				// they get the digest after all.
+				for _, it := range items {
+					if it.Type == "REMINDER_OVERDUE" && it.WaitingOnUserID > 0 {
+						queueAdmins(it, it.ControlID, it.PopulationID)
+					}
+				}
+			}
 		} else {
 			err = j.notify(ctx, recipientID, items)
 		}

@@ -42,6 +42,9 @@ type ccOptions struct {
 	daily     bool
 	claimer   *fakeClaimer
 	notifyErr error
+	// skipped lists recipients whose CC-bearing email is skipped without an
+	// error, as an inactive user or one with no address is.
+	skipped map[int]bool
 }
 
 func runCC(t *testing.T, opts ccOptions, controls ...*model.AuditControl) ccSweep {
@@ -80,10 +83,13 @@ func runCC(t *testing.T, opts ccOptions, controls ...*model.AuditControl) ccSwee
 		})
 	if opts.cc != nil {
 		j = j.WithAdminCC(opts.cc,
-			func(_ context.Context, id int, items []model.ReminderItem, cc []string) error {
+			func(_ context.Context, id int, items []model.ReminderItem, cc []string) (bool, error) {
+				if opts.skipped[id] {
+					return false, nil
+				}
 				res.reminders[id] = append(res.reminders[id], items...)
 				res.reminderCC[id] = cc
-				return opts.notifyErr
+				return opts.notifyErr == nil, opts.notifyErr
 			},
 			func(_ context.Context, ownerID int, _ string, items []model.ReminderItem, cc []string) error {
 				res.leads[ownerID] = append(res.leads[ownerID], items...)
@@ -328,5 +334,59 @@ func TestWithAdminCCNeedsAllThreeFunctions(t *testing.T) {
 	j := NewReminderJob(nil, nil, nil, nil).WithAdminCC(withCC(adminCC...), nil, nil)
 	if j.ccEmails != nil || j.notifyCC != nil || j.notifyLeadCC != nil {
 		t.Error("WithAdminCC wired part of the CC with a nil function")
+	}
+}
+
+// The CC only helps if the assignee's email goes out. When it is skipped (an
+// inactive user, no address) the admins have heard nothing, so they get the
+// digest.
+func TestOverdueSkippedAssigneeFallsBackToAdminDigest(t *testing.T) {
+	res := runCC(t, ccOptions{cc: withCC(adminCC...), skipped: map[int]bool{routeOwner: true}},
+		routedControl("EVIDENCE_PENDING", -2, -2))
+	if len(res.reminders[routeOwner]) != 0 {
+		t.Errorf("owner reminders = %v, want none (skipped)", res.reminders[routeOwner])
+	}
+	if len(res.escalations[routeAdminA]) != 1 || len(res.escalations[routeAdminB]) != 1 {
+		t.Errorf("escalations = %v, want one overdue item per admin", res.escalations)
+	}
+	if got := res.escalations[routeAdminA][0]; got.WaitingOnUserID != routeOwner || got.Type != "REMINDER_OVERDUE" {
+		t.Errorf("escalated item = %+v, want the owner's overdue item", got)
+	}
+}
+
+func TestOverdueSkippedAuditorFallsBackToAdminDigest(t *testing.T) {
+	res := runCC(t, ccOptions{cc: withCC(adminCC...), skipped: map[int]bool{routeAuditor: true}},
+		routedControl("EVIDENCE_UNDER_VALIDATION", -2, -2))
+	if len(res.escalations[routeAdminA]) != 1 || len(res.escalations[routeAdminB]) != 1 {
+		t.Errorf("escalations = %v, want one overdue item per admin", res.escalations)
+	}
+}
+
+// A failed send leaves the admins just as uninformed as a skipped one.
+func TestOverdueFailedAssigneeSendFallsBackToAdminDigest(t *testing.T) {
+	res := runCC(t, ccOptions{cc: withCC(adminCC...), notifyErr: errors.New("boom")},
+		routedControl("EVIDENCE_PENDING", -2, -2))
+	if len(res.escalations[routeAdminA]) != 1 || len(res.escalations[routeAdminB]) != 1 {
+		t.Errorf("escalations = %v, want one overdue item per admin", res.escalations)
+	}
+}
+
+// The fallback is for overdue items only; a skipped reminder that is not
+// overdue was never the admins' to hear about.
+func TestSkippedAssigneeBeforeDueDateSendsNoDigest(t *testing.T) {
+	res := runCC(t, ccOptions{cc: withCC(adminCC...), skipped: map[int]bool{routeOwner: true}},
+		routedControl("EVIDENCE_PENDING", 5, 5))
+	if len(res.escalations) != 0 {
+		t.Errorf("escalations = %v, want none before the due date", res.escalations)
+	}
+}
+
+// An admin who is the skipped assignee is not sent a digest about their own item.
+func TestSkippedAdminAssigneeDigestGoesToTheOtherAdmin(t *testing.T) {
+	c := routedControl("EVIDENCE_PENDING", -2, -2)
+	c.OwnerID = intPtr(routeAdminA)
+	res := runCC(t, ccOptions{cc: withCC(adminCC...), skipped: map[int]bool{routeAdminA: true}}, c)
+	if len(res.escalations[routeAdminA]) != 0 || len(res.escalations[routeAdminB]) != 1 {
+		t.Errorf("escalations = %v, want only the other admin told", res.escalations)
 	}
 }

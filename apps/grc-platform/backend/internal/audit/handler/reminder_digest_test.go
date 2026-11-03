@@ -163,3 +163,41 @@ func TestReminderDigestTierBeatsDailyItems(t *testing.T) {
 	}
 	mustContain(t, onlyEmail(t, s), "waiting on you and are due in 5 days")
 }
+
+// The job copies the admins on an assignee's email and drops the admin digest
+// for it, so it has to learn when that email did not go out.
+func TestSendReminderDigestCCSyncReportsDelivery(t *testing.T) {
+	item := []model.ReminderItem{{AuditID: 7, Type: "REMINDER_OVERDUE", Tier: "Overdue", ControlNumber: "C-1", DueDate: "2026-09-30", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"}}
+	tests := []struct {
+		name          string
+		userID        int
+		wantDelivered bool
+		wantEmails    int
+	}{
+		{"active user with an address", 1, true, 1},
+		{"inactive user", 3, false, 0},
+		{"user not found", 99, false, 0},
+		{"user missing from the directory", 4, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newLinkTestServer(t)
+			d := s.deps()
+			d.Users = linkTestUsers{byID: map[int]*model.UserRef{
+				1: {ID: 1, UUID: linkTestInternalUUID, UserType: "INTERNAL", Status: "ACTIVE"},
+				3: {ID: 3, UUID: linkTestInternalUUID, UserType: "INTERNAL", Status: "INACTIVE"},
+				4: {ID: 4, UUID: "00000000-0000-0000-0000-000000000000", UserType: "INTERNAL", Status: "ACTIVE"},
+			}}
+			delivered, err := d.SendReminderDigestCCSync(context.Background(), tt.userID, item, []string{"admin@wso2.com"})
+			if err != nil {
+				t.Fatalf("SendReminderDigestCCSync: %v", err)
+			}
+			if delivered != tt.wantDelivered {
+				t.Errorf("delivered = %v, want %v", delivered, tt.wantDelivered)
+			}
+			if got := len(s.sent()); got != tt.wantEmails {
+				t.Errorf("sent %d emails, want %d", got, tt.wantEmails)
+			}
+		})
+	}
+}
