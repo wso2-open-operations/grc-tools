@@ -133,3 +133,33 @@ func TestReminderDigestSkipsInactiveRecipient(t *testing.T) {
 		t.Errorf("sent %d emails to an inactive recipient, want 0", len(got))
 	}
 }
+
+// An item reminded only because its status reminds every day is not "due in 10
+// days", whatever type it is logged under.
+func TestReminderDigestWordsDailyItemsAsAwaitingAction(t *testing.T) {
+	s := newLinkTestServer(t)
+	err := s.deps().SendReminderDigestSync(context.Background(), 1, []model.ReminderItem{
+		{AuditID: 7, Type: "REMINDER_DUE_TODAY", Daily: true, Tier: "Awaiting action", ControlNumber: "C-1", DueDate: "2026-12-01", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+	})
+	if err != nil {
+		t.Fatalf("SendReminderDigestSync: %v", err)
+	}
+	body := onlyEmail(t, s)
+	mustContain(t, body, "The following item(s) are waiting on you.", "Awaiting action", "C-1")
+	if strings.Contains(body, "due today") {
+		t.Error("a daily item was worded as due today")
+	}
+}
+
+// A real tier in the same digest still sets the wording over daily items.
+func TestReminderDigestTierBeatsDailyItems(t *testing.T) {
+	s := newLinkTestServer(t)
+	err := s.deps().SendReminderDigestSync(context.Background(), 1, []model.ReminderItem{
+		{AuditID: 7, Type: "REMINDER_DUE_TODAY", Daily: true, Tier: "Awaiting action", ControlNumber: "C-1", DueDate: "2026-12-01", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+		{AuditID: 7, Type: "REMINDER_DUE_5", Tier: "Due in 5 days", ControlNumber: "C-2", DueDate: "2026-11-08", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+	})
+	if err != nil {
+		t.Fatalf("SendReminderDigestSync: %v", err)
+	}
+	mustContain(t, onlyEmail(t, s), "waiting on you and are due in 5 days")
+}

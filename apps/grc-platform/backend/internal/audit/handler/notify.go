@@ -245,6 +245,12 @@ func (d *Deps) auditName(ctx context.Context, auditID int) string {
 // before this function was even called. Logging again here would insert a
 // second row per item and collide with uq_notif_reminder_dedup.
 func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, items []model.ReminderItem) error {
+	return d.SendReminderDigestCCSync(ctx, ownerUserID, items, nil)
+}
+
+// SendReminderDigestCCSync is SendReminderDigestSync with cc copied on the
+// email — the compliance admins, wired in by ReminderJob.WithAdminCC.
+func (d *Deps) SendReminderDigestCCSync(ctx context.Context, ownerUserID int, items []model.ReminderItem, cc []string) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -262,22 +268,28 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 	}
 
 	// Pick the event constant that best fits the batch's subject line: the
-	// most urgent tier present (overdue > due-today > due-in-5 > due-in-10),
-	// since an owner with items across multiple tiers still gets exactly one
-	// email.
-	ev := emailer.AuditEventReminderDue10
+	// most urgent tier present (overdue > due-today > due-in-5 > due-in-10 >
+	// daily), since an owner with items across multiple tiers still gets
+	// exactly one email. A daily item reads Daily, not Type, which only names
+	// the row it is logged under.
+	ev, best := emailer.AuditEventReminderDaily, 0
 	for _, it := range items {
+		if it.Daily {
+			continue
+		}
+		rank, event := 0, ev
 		switch it.Type {
 		case "REMINDER_OVERDUE":
-			ev = emailer.AuditEventReminderOverdue
+			rank, event = 4, emailer.AuditEventReminderOverdue
 		case "REMINDER_DUE_TODAY":
-			if ev != emailer.AuditEventReminderOverdue {
-				ev = emailer.AuditEventReminderDueToday
-			}
+			rank, event = 3, emailer.AuditEventReminderDueToday
 		case "REMINDER_DUE_5":
-			if ev != emailer.AuditEventReminderOverdue && ev != emailer.AuditEventReminderDueToday {
-				ev = emailer.AuditEventReminderDue5
-			}
+			rank, event = 2, emailer.AuditEventReminderDue5
+		case "REMINDER_DUE_10":
+			rank, event = 1, emailer.AuditEventReminderDue10
+		}
+		if rank > best {
+			best, ev = rank, event
 		}
 	}
 
@@ -293,8 +305,33 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 		ShowStatus: true,
 		// The digest spans audits, so the subject can't name one.
 		ShowAudit: true,
+		CC:        cc,
 	}
 	return d.sendAuditEventSync(ctx, ev, ownerUserID, info, nil, true)
+}
+
+// ReminderAdminCCEmails returns the addresses of the given admins (the ids
+// ReminderAdminIDs resolved for the sweep), for the CC on the reminder emails —
+// wired to job.ReminderJob.WithAdminCC. Best-effort: an admin who is not
+// active or has no address is left out, so the reminders go out with whatever
+// CC could be resolved.
+func (d *Deps) ReminderAdminCCEmails(ctx context.Context, adminIDs []int) []string {
+	if d.Users == nil || d.Directory == nil {
+		return nil
+	}
+	emails := make([]string, 0, len(adminIDs))
+	for _, id := range adminIDs {
+		u, err := d.Users.GetByID(ctx, id)
+		if err != nil || u == nil || (u.Status != "" && u.Status != "ACTIVE") {
+			continue
+		}
+		person, found := d.Directory.LookupTyped(ctx, u.UUID, u.UserType)
+		if !found || strings.TrimSpace(person.Email) == "" {
+			continue
+		}
+		emails = append(emails, person.Email)
+	}
+	return emails
 }
 
 // ReminderAdminIDs returns the platform user IDs of every Audit Compliance
@@ -462,6 +499,12 @@ func (d *Deps) ResolveOwnerLeads(ctx context.Context, ownerIDs []int) map[int]st
 // send. Sends to a raw address rather than through sendAuditEventSync, which
 // resolves a platform user id — a lead has none.
 func (d *Deps) SendOverdueLeadDigestSync(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem) error {
+	return d.SendOverdueLeadDigestCCSync(ctx, ownerUserID, leadEmail, items, nil)
+}
+
+// SendOverdueLeadDigestCCSync is SendOverdueLeadDigestSync with cc copied on
+// the email — the compliance admins, wired in by ReminderJob.WithAdminCC.
+func (d *Deps) SendOverdueLeadDigestCCSync(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error {
 	leadEmail = strings.TrimSpace(leadEmail)
 	if len(items) == 0 || leadEmail == "" || d.Email == nil {
 		return nil
@@ -484,6 +527,7 @@ func (d *Deps) SendOverdueLeadDigestSync(ctx context.Context, ownerUserID int, l
 		OwnerName: name,
 		Items:     emailItems,
 		ShowAudit: true,
+		CC:        cc,
 	}
 
 	select {
