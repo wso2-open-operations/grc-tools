@@ -37,6 +37,11 @@ type EscalationService interface {
 	// Escalate resolves the assigner's and action owner's line managers from
 	// the HR entity and freezes them on the escalation row.
 	Escalate(ctx context.Context, riskID int, createdBy string) (*model.Escalation, error)
+	// Reescalate is Escalate for the manual click: it also supersedes an
+	// escalation that was already commented on but is still OPEN, so a risk
+	// that is still overdue can be escalated and commented on again. The daily
+	// job uses Escalate, which never does this.
+	Reescalate(ctx context.Context, riskID int, createdBy string) (*model.Escalation, error)
 	// Comment records the management/lead comment and returns the risk to its
 	// assigner (ESCALATED → APPROVED). callerEmail is checked against the
 	// people entitled to comment on this risk; canOverride lets a compliance
@@ -92,6 +97,14 @@ func (s *escalationService) List(ctx context.Context, riskID int) ([]*model.Esca
 }
 
 func (s *escalationService) Escalate(ctx context.Context, riskID int, createdBy string) (*model.Escalation, error) {
+	return s.escalate(ctx, riskID, createdBy, false)
+}
+
+func (s *escalationService) Reescalate(ctx context.Context, riskID int, createdBy string) (*model.Escalation, error) {
+	return s.escalate(ctx, riskID, createdBy, true)
+}
+
+func (s *escalationService) escalate(ctx context.Context, riskID int, createdBy string, reescalate bool) (*model.Escalation, error) {
 	if riskID <= 0 {
 		return nil, badRequest("riskId must be a positive integer")
 	}
@@ -99,7 +112,7 @@ func (s *escalationService) Escalate(ctx context.Context, riskID int, createdBy 
 		return nil, badRequest("createdBy is required")
 	}
 	assignerLead, actionOwnerLead := s.resolveLeads(ctx, riskID)
-	return s.repo.Escalate(ctx, riskID, createdBy, assignerLead.uuid, actionOwnerLead.uuid)
+	return s.repo.Escalate(ctx, riskID, createdBy, assignerLead.uuid, actionOwnerLead.uuid, reescalate)
 }
 
 // escalationLead is one person resolved by resolveLeads/managerOf: their

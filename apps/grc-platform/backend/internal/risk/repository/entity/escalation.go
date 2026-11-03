@@ -82,11 +82,18 @@ func (r *escalationRepository) List(ctx context.Context, riskID int) ([]*model.E
 	return escalations, nil
 }
 
-func (r *escalationRepository) Escalate(ctx context.Context, riskID int, createdBy string, assignerLeadUUID, actionOwnerLeadUUID *string) (*model.Escalation, error) {
+func (r *escalationRepository) Escalate(ctx context.Context, riskID int, createdBy string, assignerLeadUUID, actionOwnerLeadUUID *string, reescalate bool) (*model.Escalation, error) {
 	body := map[string]any{
 		"createdBy":           createdBy,
 		"assignerLeadUuid":    assignerLeadUUID,
 		"actionOwnerLeadUuid": actionOwnerLeadUUID,
+	}
+	// Sent only when set: the entity decodes with DisallowUnknownFields, so an
+	// entity that predates this field would 400 every escalate (the daily job's
+	// included) if the key were always present. Every manual escalate sets it,
+	// so the entity must be deployed before this backend.
+	if reescalate {
+		body["reescalate"] = true
 	}
 	var e entEscalation
 	if err := r.c.Post(ctx, fmt.Sprintf("/risks/%d/escalate", riskID), body, &e); err != nil {

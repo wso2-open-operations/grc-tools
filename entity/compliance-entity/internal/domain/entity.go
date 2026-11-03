@@ -1797,6 +1797,10 @@ type CreateRiskEscalationRequest struct {
 	AssignerLeadUUID    *string `json:"assignerLeadUuid"`
 	ActionOwnerLeadUUID *string `json:"actionOwnerLeadUuid"`
 	CreatedBy           string  `json:"createdBy"`
+	// Reescalate is set only by the manual Escalate click. Not part of the
+	// POST /risks/{riskId}/escalations payload (hence json:"-"); the escalate
+	// service copies it over from EscalateRiskRequest.
+	Reescalate bool `json:"-"`
 }
 
 // EscalateRiskRequest is the payload for POST /risks/{riskId}/escalate — the
@@ -1809,6 +1813,12 @@ type EscalateRiskRequest struct {
 	// dependency: MySQL.
 	AssignerLeadUUID    *string `json:"assignerLeadUuid"`
 	ActionOwnerLeadUUID *string `json:"actionOwnerLeadUuid"`
+	// Reescalate lets a manual click escalate a risk whose previous escalation
+	// was already answered (commented) but is still OPEN, by resolving that
+	// escalation first. The daily job never sets it, so it cannot re-escalate
+	// and re-notify an answered risk on every sweep. An escalation nobody has
+	// commented on yet is never resolved this way.
+	Reescalate bool `json:"reescalate"`
 }
 
 // UpdateRiskEscalationRequest is the payload for PATCH /risks/{riskId}/escalations/{escalationId}.

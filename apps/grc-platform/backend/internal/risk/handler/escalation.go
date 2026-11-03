@@ -35,7 +35,10 @@ import (
 // trigger for Compliance/Admin to escalate an overdue APPROVED risk on
 // demand, rather than waiting for the daily job (up to 24h delay) to reach
 // it. Same outcome as the automatic path: OPEN escalation created, risk
-// flips to ESCALATED. The entity re-validates APPROVED + overdue, so a
+// flips to ESCALATED. Unlike the job, a manual click may also escalate a risk
+// whose last escalation was already commented on (still OPEN, risk back to
+// APPROVED): that one is resolved and a fresh one opened, so compliance can
+// comment again. The entity re-validates APPROVED + overdue, so a
 // risk that's already moved on (e.g. someone just closed it, or the job beat
 // this click to it) returns a clear 4xx rather than being escalated wrongly.
 func (d *Deps) handleEscalateRisk(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +58,7 @@ func (d *Deps) handleEscalateRisk(w http.ResponseWriter, r *http.Request) {
 	if !auth.RequirePrivilegeIn(r.Context(), w, privilege.EscalateRisk, registerID) {
 		return
 	}
-	escalation, err := d.Escalation.Escalate(r.Context(), riskID, by)
+	escalation, err := d.Escalation.Reescalate(r.Context(), riskID, by)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return

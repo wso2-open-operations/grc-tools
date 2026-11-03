@@ -111,7 +111,11 @@ type EscalationRepository interface {
 	// Escalate takes the assigner's and action owner's line-manager Asgardeo
 	// ids, already resolved by the caller — the entity has no HR client or
 	// identity directory of its own.
-	Escalate(ctx context.Context, riskID int, createdBy string, assignerLeadUUID, actionOwnerLeadUUID *string) (*model.Escalation, error)
+	//
+	// reescalate is true only for the manual click: the entity then resolves an
+	// already-commented OPEN escalation before creating the new one. The daily
+	// job passes false and keeps the one-open-escalation guard.
+	Escalate(ctx context.Context, riskID int, createdBy string, assignerLeadUUID, actionOwnerLeadUUID *string, reescalate bool) (*model.Escalation, error)
 	// Comment records the management/lead comment on an escalation. Leaving the
 	// escalation OPEN is deliberate: it is what keeps the risk in the Overdue
 	// tab until the assigner submits for completion approval.
