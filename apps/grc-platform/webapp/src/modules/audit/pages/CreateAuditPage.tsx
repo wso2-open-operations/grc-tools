@@ -915,6 +915,11 @@ interface Step1Props {
 }
 
 const CREATE_FW_SENTINEL: AuditFramework = { id: -1, name: "＋ Create new framework…" };
+// A framework typed into the "Create new framework" dialog is only held locally
+// (negative id, never sent to the backend) until the whole audit is submitted,
+// so abandoning the wizard doesn't leave orphan frameworks behind.
+const PENDING_FW_ID = -2;
+
 const CREATE_PRODUCT_SENTINEL: AuditProduct = { id: -1, name: "＋ Create new product…" };
 
 function Step1Form({
@@ -940,7 +945,6 @@ function Step1Form({
   onPeriodEndChange,
   onScopeDescriptionChange,
 }: Step1Props): JSX.Element {
-  const createFramework = useCreateFramework();
   const createProduct = useCreateProduct();
 
   const [fwDialogOpen, setFwDialogOpen] = useState(false);
@@ -951,17 +955,18 @@ function Step1Form({
   const [newProductName, setNewProductName] = useState("");
   const [productError, setProductError] = useState<string | null>(null);
 
-  async function handleCreateFramework() {
-    if (!newFwName.trim()) return;
-    setFwError(null);
-    try {
-      const created = await createFramework.mutateAsync({ name: newFwName.trim() });
-      onFrameworkChange(created);
-      setFwDialogOpen(false);
-      setNewFwName("");
-    } catch (err) {
-      setFwError(err instanceof Error ? err.message : "Failed to create framework.");
+  function handleCreateFramework() {
+    const fwName = newFwName.trim();
+    if (!fwName) return;
+    const existing = frameworks.find((f) => f.name.toLowerCase() === fwName.toLowerCase());
+    if (existing) {
+      setFwError(`A framework named "${existing.name}" already exists. Select it from the list instead.`);
+      return;
     }
+    setFwError(null);
+    onFrameworkChange({ id: PENDING_FW_ID, name: fwName });
+    setFwDialogOpen(false);
+    setNewFwName("");
   }
 
   async function handleCreateProduct() {
@@ -997,7 +1002,7 @@ function Step1Form({
       <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
       <Box>
         <Autocomplete
-          options={[...frameworks, CREATE_FW_SENTINEL]}
+          options={[...frameworks, ...(framework?.id === PENDING_FW_ID ? [framework] : []), CREATE_FW_SENTINEL]}
           loading={loadingFrameworks}
           getOptionLabel={(f) => f.name}
           isOptionEqualToValue={(opt, val) => opt.id === val.id}
@@ -1143,7 +1148,7 @@ function Step1Form({
             autoFocus
             value={newFwName}
             onChange={(e) => setNewFwName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleCreateFramework(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreateFramework(); }}
             placeholder="e.g. SOC 2"
           />
           {fwError && <Alert severity="error">{fwError}</Alert>}
@@ -1154,12 +1159,11 @@ function Step1Form({
           </Button>
           <Button
             variant="contained"
-            onClick={() => void handleCreateFramework()}
-            disabled={!newFwName.trim() || createFramework.isPending}
-            startIcon={createFramework.isPending ? <CircularProgress size={14} /> : undefined}
+            onClick={handleCreateFramework}
+            disabled={!newFwName.trim()}
             sx={{ textTransform: "none" }}
           >
-            {createFramework.isPending ? "Creating…" : "Create"}
+            Create
           </Button>
         </DialogActions>
       </Dialog>
@@ -1951,6 +1955,7 @@ export default function CreateAuditPage(): JSX.Element {
   // the auditor has filled in the whole wizard.
   const { data: auditsForNameCheck } = useGetAudits();
 
+  const createFramework = useCreateFramework();
   const createAudit = useCreateAudit();
   const bulkAdd = useBulkAddControls();
 
@@ -1992,6 +1997,8 @@ export default function CreateAuditPage(): JSX.Element {
   // Holds the audit id after a successful createAudit call so that retrying
   // after a bulkAdd failure skips re-creation and avoids duplicate audits.
   const createdAuditIdRef = useRef<number | null>(null);
+  // Same idea for a framework created in Step 1: it is only persisted at submit.
+  const createdFrameworkIdRef = useRef<number | null>(null);
 
   const frameworks = useMemo(() => frameworksData ?? [], [frameworksData]);
   const products = productsData ?? [];
@@ -2051,9 +2058,17 @@ export default function CreateAuditPage(): JSX.Element {
     try {
       // Use the ref so a retry after a failed bulkAdd skips re-creation.
       if (createdAuditIdRef.current === null) {
+        let frameworkId = framework.id;
+        if (frameworkId === PENDING_FW_ID) {
+          if (createdFrameworkIdRef.current === null) {
+            const created = await createFramework.mutateAsync({ name: framework.name });
+            createdFrameworkIdRef.current = created.id;
+          }
+          frameworkId = createdFrameworkIdRef.current;
+        }
         const audit = await createAudit.mutateAsync({
           name: name.trim(),
-          frameworkId: framework.id,
+          frameworkId,
           productId: product.id,
           periodStart,
           periodEnd,
@@ -2077,7 +2092,7 @@ export default function CreateAuditPage(): JSX.Element {
     }
   }
 
-  const isSubmitting = createAudit.isPending || bulkAdd.isPending;
+  const isSubmitting = createFramework.isPending || createAudit.isPending || bulkAdd.isPending;
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 1500, mx: "auto" }}>
