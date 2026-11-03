@@ -133,3 +133,71 @@ func TestReminderDigestSkipsInactiveRecipient(t *testing.T) {
 		t.Errorf("sent %d emails to an inactive recipient, want 0", len(got))
 	}
 }
+
+// An item reminded only because its status reminds every day is not "due in 10
+// days", whatever type it is logged under.
+func TestReminderDigestWordsDailyItemsAsAwaitingAction(t *testing.T) {
+	s := newLinkTestServer(t)
+	err := s.deps().SendReminderDigestSync(context.Background(), 1, []model.ReminderItem{
+		{AuditID: 7, Type: "REMINDER_DUE_TODAY", Daily: true, Tier: "Awaiting action", ControlNumber: "C-1", DueDate: "2026-12-01", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+	})
+	if err != nil {
+		t.Fatalf("SendReminderDigestSync: %v", err)
+	}
+	body := onlyEmail(t, s)
+	mustContain(t, body, "The following item(s) are waiting on you.", "Awaiting action", "C-1")
+	if strings.Contains(body, "due today") {
+		t.Error("a daily item was worded as due today")
+	}
+}
+
+// A real tier in the same digest still sets the wording over daily items.
+func TestReminderDigestTierBeatsDailyItems(t *testing.T) {
+	s := newLinkTestServer(t)
+	err := s.deps().SendReminderDigestSync(context.Background(), 1, []model.ReminderItem{
+		{AuditID: 7, Type: "REMINDER_DUE_TODAY", Daily: true, Tier: "Awaiting action", ControlNumber: "C-1", DueDate: "2026-12-01", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+		{AuditID: 7, Type: "REMINDER_DUE_5", Tier: "Due in 5 days", ControlNumber: "C-2", DueDate: "2026-11-08", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+	})
+	if err != nil {
+		t.Fatalf("SendReminderDigestSync: %v", err)
+	}
+	mustContain(t, onlyEmail(t, s), "waiting on you and are due in 5 days")
+}
+
+// The job copies the admins on an assignee's email and drops the admin digest
+// for it, so it has to learn when that email did not go out.
+func TestSendReminderDigestCCSyncReportsDelivery(t *testing.T) {
+	item := []model.ReminderItem{{AuditID: 7, Type: "REMINDER_OVERDUE", Tier: "Overdue", ControlNumber: "C-1", DueDate: "2026-09-30", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"}}
+	tests := []struct {
+		name          string
+		userID        int
+		wantDelivered bool
+		wantEmails    int
+	}{
+		{"active user with an address", 1, true, 1},
+		{"inactive user", 3, false, 0},
+		{"user not found", 99, false, 0},
+		{"user missing from the directory", 4, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newLinkTestServer(t)
+			d := s.deps()
+			d.Users = linkTestUsers{byID: map[int]*model.UserRef{
+				1: {ID: 1, UUID: linkTestInternalUUID, UserType: "INTERNAL", Status: "ACTIVE"},
+				3: {ID: 3, UUID: linkTestInternalUUID, UserType: "INTERNAL", Status: "INACTIVE"},
+				4: {ID: 4, UUID: "00000000-0000-0000-0000-000000000000", UserType: "INTERNAL", Status: "ACTIVE"},
+			}}
+			delivered, err := d.SendReminderDigestCCSync(context.Background(), tt.userID, item, []string{"admin@wso2.com"})
+			if err != nil {
+				t.Fatalf("SendReminderDigestCCSync: %v", err)
+			}
+			if delivered != tt.wantDelivered {
+				t.Errorf("delivered = %v, want %v", delivered, tt.wantDelivered)
+			}
+			if got := len(s.sent()); got != tt.wantEmails {
+				t.Errorf("sent %d emails, want %d", got, tt.wantEmails)
+			}
+		})
+	}
+}

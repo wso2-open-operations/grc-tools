@@ -136,6 +136,7 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 // its own, so callers must render the full body before encoding it.
 type sendEmailRequest struct {
 	To       []string `json:"to"`
+	CC       []string `json:"cc,omitempty"`
 	From     string   `json:"from"`
 	Subject  string   `json:"subject"`
 	Template string   `json:"template"`

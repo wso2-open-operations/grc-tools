@@ -208,6 +208,14 @@ func main() {
 		reminderJob = reminderJob.WithLeadAlerts(auditDeps.ResolveOwnerLeads, auditDeps.SendOverdueLeadDigestSync)
 		slog.Info("lead-escalation emails enabled (audit overdue digest + risk escalation notice)")
 	}
+	if cfg.AuditReminderCCEnabled {
+		reminderJob = reminderJob.WithAdminCC(auditDeps.ReminderAdminCCEmails, auditDeps.SendReminderDigestCCSync, auditDeps.SendOverdueLeadDigestCCSync)
+		slog.Info("audit reminder CC enabled (compliance admins copied on assignee and lead emails)")
+	}
+	if cfg.AuditReminderDailyEnabled {
+		reminderJob = reminderJob.WithDailyReminders()
+		slog.Info("audit daily reminders enabled (review, validation and sample statuses remind every day)")
+	}
 	auditDeps.TriggerReminderJob = reminderJob.RunOnce
 	audithandler.RegisterRoutes(mux, auditDeps)
 	// Constructed regardless of SCHEDULER_ENABLED, like the two sweeps above: the

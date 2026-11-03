@@ -38,12 +38,15 @@ const (
 	// AuditEventInfo.Items and sends one email, so a person who is both a
 	// control's and its population's owner in the same request gets exactly
 	// one email, not two.
-	AuditEventOwnerAssigned      AuditEvent = "AUDIT_OWNER_ASSIGNED"
-	AuditEventAuditorAssigned    AuditEvent = "AUDIT_AUDITOR_ASSIGNED"
-	AuditEventReminderDue10      AuditEvent = "AUDIT_REMINDER_DUE_10"
-	AuditEventReminderDue5       AuditEvent = "AUDIT_REMINDER_DUE_5"
-	AuditEventReminderDueToday   AuditEvent = "AUDIT_REMINDER_DUE_TODAY"
-	AuditEventReminderOverdue    AuditEvent = "AUDIT_REMINDER_OVERDUE"
+	AuditEventOwnerAssigned    AuditEvent = "AUDIT_OWNER_ASSIGNED"
+	AuditEventAuditorAssigned  AuditEvent = "AUDIT_AUDITOR_ASSIGNED"
+	AuditEventReminderDue10    AuditEvent = "AUDIT_REMINDER_DUE_10"
+	AuditEventReminderDue5     AuditEvent = "AUDIT_REMINDER_DUE_5"
+	AuditEventReminderDueToday AuditEvent = "AUDIT_REMINDER_DUE_TODAY"
+	AuditEventReminderOverdue  AuditEvent = "AUDIT_REMINDER_OVERDUE"
+	// AuditEventReminderDaily is the digest for items that are waiting but sit
+	// outside the 10/5/0/overdue marks — the statuses that remind every day.
+	AuditEventReminderDaily      AuditEvent = "AUDIT_REMINDER_DAILY"
 	AuditEventResubmissionNeeded AuditEvent = "AUDIT_RESUBMISSION_NEEDED"
 	AuditEventSampleSubmitted    AuditEvent = "AUDIT_SAMPLE_SUBMITTED"
 
@@ -162,6 +165,9 @@ type AuditEventInfo struct {
 	// Groups renders one headed table per person instead of the flat Items table.
 	// When it is set, Items is ignored.
 	Groups []AuditEventGroup
+	// CC is copied on the send and never rendered. SendAuditEvent drops the To
+	// address and duplicates from it.
+	CC []string
 }
 
 // tableGroups is what the template ranges over: Groups, or the flat Items under
@@ -244,6 +250,12 @@ func controlThreadSubject(i AuditEventInfo) string {
 	return fmt.Sprintf("[GRC Platform] %s - %s", i.AuditName, i.Items[0].ControlNumber)
 }
 
+// dailyReminderSubject is the subject for the digest of items reminded every
+// day regardless of how far off their due date is.
+func dailyReminderSubject(i AuditEventInfo) string {
+	return fmt.Sprintf("[GRC Platform] Audit Reminder - %d item(s) awaiting action", len(i.Items))
+}
+
 func reminderSubject(tier string) func(AuditEventInfo) string {
 	return func(i AuditEventInfo) string {
 		return fmt.Sprintf("[GRC Platform] Audit Reminder - %s: %d item(s) due", tier, len(i.Items))
@@ -315,6 +327,11 @@ var auditEventTemplates = map[AuditEvent]auditEventTemplate{
 	AuditEventReminderDueToday: {
 		subject:    reminderSubject("Due today"),
 		lead:       "The following item(s) are waiting on you and are due today.",
+		actorLabel: "",
+	},
+	AuditEventReminderDaily: {
+		subject:    dailyReminderSubject,
+		lead:       "The following item(s) are waiting on you.",
 		actorLabel: "",
 	},
 	AuditEventReminderOverdue: {
@@ -481,9 +498,28 @@ func (c *Client) SendAuditEvent(ctx context.Context, ev AuditEvent, to string, i
 
 	reqBody := sendEmailRequest{
 		To:       []string{to},
+		CC:       cleanCC(info.CC, to),
 		From:     c.from,
 		Subject:  sanitizeSubject(tpl.subject(info)),
 		Template: base64.StdEncoding.EncodeToString(body.Bytes()),
 	}
 	return c.deliver(ctx, "audit", reqBody)
+}
+
+// cleanCC returns cc without blanks, duplicates (case-insensitive) or the To
+// address, so nobody is both To and CC and no address is listed twice. Nil when
+// nothing is left, which keeps the field out of the request body.
+func cleanCC(cc []string, to string) []string {
+	seen := map[string]bool{strings.ToLower(strings.TrimSpace(to)): true}
+	var out []string
+	for _, addr := range cc {
+		addr = strings.TrimSpace(addr)
+		key := strings.ToLower(addr)
+		if addr == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, addr)
+	}
+	return out
 }

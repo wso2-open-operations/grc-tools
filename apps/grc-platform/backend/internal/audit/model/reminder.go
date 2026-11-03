@@ -81,4 +81,9 @@ type ReminderItem struct {
 	// the item is retried on a future run instead of staying claimed forever
 	// with nothing sent.
 	NotificationID int64
+	// Daily marks an item reminded only because its status reminds every day,
+	// not because a 10/5/0/overdue mark fell today. Type still names an
+	// existing audit_notification type for the send log, so the digest reads
+	// this flag, not Type, to choose its wording.
+	Daily bool
 }

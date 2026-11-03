@@ -95,63 +95,80 @@ func (d *Deps) notifyAuditEvent(ev emailer.AuditEvent, ownerUserID int, info ema
 // (SendReminderDigestSync): its items are already logged by the job's own
 // Claim, before the send was even attempted — logging again here would
 // insert a second row and collide with uq_notif_reminder_dedup.
-func (d *Deps) sendAuditEventSync(ctx context.Context, ev emailer.AuditEvent, ownerUserID int, info emailer.AuditEventInfo, logItems []notificationLogItem, skipLog bool) (err error) {
+func (d *Deps) sendAuditEventSync(ctx context.Context, ev emailer.AuditEvent, ownerUserID int, info emailer.AuditEventInfo, logItems []notificationLogItem, skipLog bool) error {
+	_, err := d.sendAuditEventSyncResult(ctx, ev, ownerUserID, info, logItems, skipLog)
+	return err
+}
+
+// sendAuditEventSyncResult is sendAuditEventSync that also reports whether an
+// email actually went out. A recipient who is skipped (not found, inactive, no
+// address) is not an error, so without this a caller cannot tell "sent" from
+// "nobody to send to".
+func (d *Deps) sendAuditEventSyncResult(ctx context.Context, ev emailer.AuditEvent, ownerUserID int, info emailer.AuditEventInfo, logItems []notificationLogItem, skipLog bool) (delivered bool, err error) {
 	select {
 	case notifySem <- struct{}{}:
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	}
 	defer func() { <-notifySem }()
 	defer func() {
 		if p := recover(); p != nil {
 			slog.Error("audit notification: panic", "event", ev, "ownerId", ownerUserID, "panic", p)
-			err = fmt.Errorf("audit notification panic: %v", p)
+			delivered, err = false, fmt.Errorf("audit notification panic: %v", p)
 		}
 	}()
 	ctx, cancel := context.WithTimeout(ctx, notifyTimeout)
 	defer cancel()
-	return d.sendAuditEvent(ctx, ev, ownerUserID, info, logItems, skipLog)
+	return d.deliverAuditEvent(ctx, ev, ownerUserID, info, logItems, skipLog)
 }
 
-// sendAuditEvent resolves ownerUserID (skipping — not an error — if they're
+// sendAuditEvent is deliverAuditEvent without the delivered flag, for the
+// callers that only care whether something failed.
+func (d *Deps) sendAuditEvent(ctx context.Context, ev emailer.AuditEvent, ownerUserID int, info emailer.AuditEventInfo, logItems []notificationLogItem, skipLog bool) error {
+	_, err := d.deliverAuditEvent(ctx, ev, ownerUserID, info, logItems, skipLog)
+	return err
+}
+
+// deliverAuditEvent resolves ownerUserID (skipping — not an error — if they're
 // not found, have no email, or are not ACTIVE, per the cross-cutting
 // active-users-only rule), sends, and — unless skipLog — best-effort logs one
 // audit_notification row per logItems entry.
-func (d *Deps) sendAuditEvent(ctx context.Context, ev emailer.AuditEvent, ownerUserID int, info emailer.AuditEventInfo, logItems []notificationLogItem, skipLog bool) error {
+// delivered is false when the recipient was skipped, and when err is set.
+func (d *Deps) deliverAuditEvent(ctx context.Context, ev emailer.AuditEvent, ownerUserID int, info emailer.AuditEventInfo, logItems []notificationLogItem, skipLog bool) (bool, error) {
 	if ownerUserID <= 0 {
-		return nil
+		return false, nil
 	}
 	u, err := d.Users.GetByID(ctx, ownerUserID)
 	if err != nil {
 		slog.Warn("audit notification: failed to resolve recipient", "event", ev, "ownerId", ownerUserID, "err", err)
-		return fmt.Errorf("resolve recipient: %w", err)
+		return false, fmt.Errorf("resolve recipient: %w", err)
 	}
 	if u == nil {
 		slog.Warn("audit notification: recipient not found", "event", ev, "ownerId", ownerUserID)
-		return nil
+		return false, nil
 	}
 	if u.Status != "" && u.Status != "ACTIVE" {
 		slog.Info("audit notification: recipient not active, skipping", "event", ev, "ownerId", ownerUserID, "status", u.Status)
-		return nil
+		return false, nil
 	}
 	person, found := d.Directory.LookupTyped(ctx, u.UUID, u.UserType)
 	if !found || person.Email == "" {
 		slog.Warn("audit notification: recipient has no email on file", "event", ev, "ownerId", ownerUserID)
-		return nil
+		return false, nil
 	}
 
 	// DetailURLs are app-relative until now: the host depends on who is reading.
 	info = d.Links.ResolveInfo(u.UserType, info)
 	if err := d.Email.SendAuditEvent(ctx, ev, person.Email, info); err != nil {
 		slog.Warn("audit notification: send failed", "event", ev, "ownerId", ownerUserID, "err", err)
-		return fmt.Errorf("send: %w", err)
+		return false, fmt.Errorf("send: %w", err)
 	}
 	slog.Info("audit notification sent", "event", ev, "ownerId", ownerUserID, "items", len(info.Items))
 
 	if !skipLog {
 		d.logSends(ctx, ownerUserID, logItems)
 	}
-	return nil
+	return true, nil
 }
 
 // logSends best-effort logs one audit_notification row per item. A logging
@@ -245,8 +262,17 @@ func (d *Deps) auditName(ctx context.Context, auditID int) string {
 // before this function was even called. Logging again here would insert a
 // second row per item and collide with uq_notif_reminder_dedup.
 func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, items []model.ReminderItem) error {
+	_, err := d.SendReminderDigestCCSync(ctx, ownerUserID, items, nil)
+	return err
+}
+
+// SendReminderDigestCCSync is SendReminderDigestSync with cc copied on the
+// email — the compliance admins, wired in by ReminderJob.WithAdminCC. It also
+// reports whether the email went out: an inactive recipient, or one with no
+// address, is skipped without an error, and then nobody was copied either.
+func (d *Deps) SendReminderDigestCCSync(ctx context.Context, ownerUserID int, items []model.ReminderItem, cc []string) (bool, error) {
 	if len(items) == 0 {
-		return nil
+		return true, nil
 	}
 	emailItems := make([]emailer.AuditEventItem, 0, len(items))
 	for _, it := range items {
@@ -262,22 +288,28 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 	}
 
 	// Pick the event constant that best fits the batch's subject line: the
-	// most urgent tier present (overdue > due-today > due-in-5 > due-in-10),
-	// since an owner with items across multiple tiers still gets exactly one
-	// email.
-	ev := emailer.AuditEventReminderDue10
+	// most urgent tier present (overdue > due-today > due-in-5 > due-in-10 >
+	// daily), since an owner with items across multiple tiers still gets
+	// exactly one email. A daily item reads Daily, not Type, which only names
+	// the row it is logged under.
+	ev, best := emailer.AuditEventReminderDaily, 0
 	for _, it := range items {
+		if it.Daily {
+			continue
+		}
+		rank, event := 0, ev
 		switch it.Type {
 		case "REMINDER_OVERDUE":
-			ev = emailer.AuditEventReminderOverdue
+			rank, event = 4, emailer.AuditEventReminderOverdue
 		case "REMINDER_DUE_TODAY":
-			if ev != emailer.AuditEventReminderOverdue {
-				ev = emailer.AuditEventReminderDueToday
-			}
+			rank, event = 3, emailer.AuditEventReminderDueToday
 		case "REMINDER_DUE_5":
-			if ev != emailer.AuditEventReminderOverdue && ev != emailer.AuditEventReminderDueToday {
-				ev = emailer.AuditEventReminderDue5
-			}
+			rank, event = 2, emailer.AuditEventReminderDue5
+		case "REMINDER_DUE_10":
+			rank, event = 1, emailer.AuditEventReminderDue10
+		}
+		if rank > best {
+			best, ev = rank, event
 		}
 	}
 
@@ -293,8 +325,33 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 		ShowStatus: true,
 		// The digest spans audits, so the subject can't name one.
 		ShowAudit: true,
+		CC:        cc,
 	}
-	return d.sendAuditEventSync(ctx, ev, ownerUserID, info, nil, true)
+	return d.sendAuditEventSyncResult(ctx, ev, ownerUserID, info, nil, true)
+}
+
+// ReminderAdminCCEmails returns the addresses of the given admins (the ids
+// ReminderAdminIDs resolved for the sweep), for the CC on the reminder emails —
+// wired to job.ReminderJob.WithAdminCC. Best-effort: an admin who is not
+// active or has no address is left out, so the reminders go out with whatever
+// CC could be resolved.
+func (d *Deps) ReminderAdminCCEmails(ctx context.Context, adminIDs []int) []string {
+	if d.Users == nil || d.Directory == nil {
+		return nil
+	}
+	emails := make([]string, 0, len(adminIDs))
+	for _, id := range adminIDs {
+		u, err := d.Users.GetByID(ctx, id)
+		if err != nil || u == nil || (u.Status != "" && u.Status != "ACTIVE") {
+			continue
+		}
+		person, found := d.Directory.LookupTyped(ctx, u.UUID, u.UserType)
+		if !found || strings.TrimSpace(person.Email) == "" {
+			continue
+		}
+		emails = append(emails, person.Email)
+	}
+	return emails
 }
 
 // ReminderAdminIDs returns the platform user IDs of every Audit Compliance
@@ -462,6 +519,12 @@ func (d *Deps) ResolveOwnerLeads(ctx context.Context, ownerIDs []int) map[int]st
 // send. Sends to a raw address rather than through sendAuditEventSync, which
 // resolves a platform user id — a lead has none.
 func (d *Deps) SendOverdueLeadDigestSync(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem) error {
+	return d.SendOverdueLeadDigestCCSync(ctx, ownerUserID, leadEmail, items, nil)
+}
+
+// SendOverdueLeadDigestCCSync is SendOverdueLeadDigestSync with cc copied on
+// the email — the compliance admins, wired in by ReminderJob.WithAdminCC.
+func (d *Deps) SendOverdueLeadDigestCCSync(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error {
 	leadEmail = strings.TrimSpace(leadEmail)
 	if len(items) == 0 || leadEmail == "" || d.Email == nil {
 		return nil
@@ -484,6 +547,7 @@ func (d *Deps) SendOverdueLeadDigestSync(ctx context.Context, ownerUserID int, l
 		OwnerName: name,
 		Items:     emailItems,
 		ShowAudit: true,
+		CC:        cc,
 	}
 
 	select {
