@@ -44,6 +44,12 @@ type Config struct {
 	// escalation). One switch for both modules — it replaces the old
 	// AUDIT_LEAD_ESCALATION_ENABLED. See LeadEscalationEmailsDefault.
 	LeadEscalationEmailsEnabled bool
+	// AuditReminderCCEnabled copies the compliance admins on the audit
+	// reminder emails to an item's assignee and lead. See AuditReminderCCDefault.
+	AuditReminderCCEnabled bool
+	// AuditReminderDailyEnabled makes the audit statuses waiting on the
+	// compliance team or the auditor remind every day. See AuditReminderDailyDefault.
+	AuditReminderDailyEnabled bool
 	// SchedulerEnabled turns the background scheduler (internal/scheduler) on
 	// or off. It is the single switch for every daily sweep at once — today
 	// the overdue-risk escalation and the audit due-date reminder digest. See
@@ -158,6 +164,45 @@ func leadEscalationEmailsEnabled() bool {
 		return false
 	default:
 		return LeadEscalationEmailsDefault
+	}
+}
+
+// AuditReminderCCDefault is the built-in setting for copying the compliance
+// admins on the audit reminder emails. Off by default, so current behaviour is
+// unchanged until an environment opts in. AUDIT_REMINDER_CC_ENABLED overrides
+// it with exactly "true" or "false".
+const AuditReminderCCDefault = false
+
+// AuditReminderDailyDefault is the built-in setting for the every-day audit
+// reminders (internal review, under validation, population complete, awaiting
+// sample, submitted sample). Off by default for the same reason as above.
+// AUDIT_REMINDER_DAILY_ENABLED overrides it with exactly "true" or "false".
+const AuditReminderDailyDefault = false
+
+// auditReminderCCEnabled resolves the override against the default above. Any
+// other value — including unset — leaves the default alone, so a typo can
+// never silently start copying admins.
+func auditReminderCCEnabled() bool {
+	switch os.Getenv("AUDIT_REMINDER_CC_ENABLED") {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return AuditReminderCCDefault
+	}
+}
+
+// auditReminderDailyEnabled resolves the override against the default above,
+// the same way.
+func auditReminderDailyEnabled() bool {
+	switch os.Getenv("AUDIT_REMINDER_DAILY_ENABLED") {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return AuditReminderDailyDefault
 	}
 }
 
@@ -568,6 +613,8 @@ func Load() (Config, error) {
 			Enabled:          emailEnabled,
 		},
 		LeadEscalationEmailsEnabled: leadEscalationEmailsEnabled(),
+		AuditReminderCCEnabled:      auditReminderCCEnabled(),
+		AuditReminderDailyEnabled:   auditReminderDailyEnabled(),
 		SchedulerEnabled:            schedulerEnabled(),
 		Portal:                      PortalConfig{Audience: portalAudience, Clients: portalClients},
 		UserGuideURL:                os.Getenv("GRC_USER_GUIDE_URL"),
