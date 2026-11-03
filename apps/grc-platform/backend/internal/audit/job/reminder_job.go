@@ -82,6 +82,16 @@ type ReminderJob struct {
 	// WithLeadAlerts wired them.
 	leads      func(ctx context.Context, ownerIDs []int) map[int]string
 	notifyLead func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem) error
+	// ccEmails turns the admin ids resolved for the sweep into the addresses
+	// copied on every email except the admins' own. notifyCC and notifyLeadCC
+	// are notify and notifyLead with that CC added. All nil unless WithAdminCC
+	// wired them, in which case nothing is ever copied.
+	ccEmails     func(ctx context.Context, adminIDs []int) []string
+	notifyCC     func(ctx context.Context, recipientUserID int, items []model.ReminderItem, cc []string) error
+	notifyLeadCC func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error
+	// daily turns on the every-day reminder for dailyStatuses and the
+	// dailyRouteOverrides. Off, the sweep only reminds on the 10/5/0/overdue marks.
+	daily bool
 	// running serializes runOnce against itself: Start's daily ticker and the
 	// manual-trigger endpoint (handler.reminderJobHandler.run) both end up
 	// calling runOnce on this same instance. This guards a same-process
@@ -126,6 +136,34 @@ func (j *ReminderJob) WithLeadAlerts(
 	return j
 }
 
+// WithAdminCC copies the compliance admins on the emails to an item's
+// assignee and to that assignee's lead. Opt-in: unless all three functions are
+// given it stays off, so a half-wired job never copies some emails and not
+// others, and a disabled deployment resolves no CC list at all. The admins are
+// the ones WithAdminAlerts resolves, so it must be wired as well. While it is on and resolves
+// at least one address, the CC stands in for the overdue admin digest on items
+// that have an assignee; items nobody holds keep the digest.
+func (j *ReminderJob) WithAdminCC(
+	ccEmails func(ctx context.Context, adminIDs []int) []string,
+	notifyCC func(ctx context.Context, recipientUserID int, items []model.ReminderItem, cc []string) error,
+	notifyLeadCC func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error,
+) *ReminderJob {
+	if ccEmails == nil || notifyCC == nil || notifyLeadCC == nil {
+		return j
+	}
+	j.ccEmails = ccEmails
+	j.notifyCC = notifyCC
+	j.notifyLeadCC = notifyLeadCC
+	return j
+}
+
+// WithDailyReminders makes the dailyStatuses remind every day instead of only
+// on the 10/5/0/overdue marks, and sends a submitted sample to the admins.
+func (j *ReminderJob) WithDailyReminders() *ReminderJob {
+	j.daily = true
+	return j
+}
+
 // overdueOnly returns the entries of a digest that escalate to a lead: overdue
 // and still waiting on an owner's submission.
 func overdueOnly(items []model.ReminderItem) []model.ReminderItem {
@@ -136,6 +174,18 @@ func overdueOnly(items []model.ReminderItem) []model.ReminderItem {
 		}
 	}
 	return out
+}
+
+// ccFor returns the admin CC for one recipient's digest: none when every item
+// in it is waiting on the admins themselves, since they are then the To and
+// copying the rest of the team on it adds nothing.
+func ccFor(cc []string, items []model.ReminderItem) []string {
+	for _, it := range items {
+		if it.WaitingOnUserID > 0 {
+			return cc
+		}
+	}
+	return nil
 }
 
 // hasOverdue answers overdueOnly's question without building the slice, for
@@ -195,6 +245,28 @@ var statusRoutes = map[string]statusRoute{
 	"EVIDENCE_INTERNAL_REVIEW":      {actorAdmins, false, "Evidence Internal Review"},
 	"EVIDENCE_UNDER_VALIDATION":     {actorAuditor, false, "Evidence Under Validation"},
 }
+
+// dailyStatuses remind every day, not only on the due-date marks — the
+// statuses waiting on the compliance team or the auditor.
+var dailyStatuses = map[string]bool{
+	"POPULATION_INTERNAL_REVIEW":  true,
+	"EVIDENCE_INTERNAL_REVIEW":    true,
+	"SUBMITTED_SAMPLE":            true,
+	"POPULATION_UNDER_VALIDATION": true,
+	"EVIDENCE_UNDER_VALIDATION":   true,
+	"POPULATION_COMPLETE":         true,
+	"AWAITING_SAMPLE":             true,
+}
+
+// dailyRouteOverrides changes who a status waits on once the daily reminders
+// are on: a submitted sample is the compliance team's to review, not the owner's.
+var dailyRouteOverrides = map[string]actorKind{
+	"SUBMITTED_SAMPLE": actorAdmins,
+}
+
+// dailyTierLabel heads the Status column of an item reminded only because its
+// status reminds every day.
+const dailyTierLabel = "Awaiting action"
 
 // assignee is the person the control is waiting on, nil when that role is the
 // admins as a group or nobody holds it.
@@ -324,6 +396,17 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		}
 	}
 
+	// The CC list is resolved once per sweep. Empty means no CC is sent and
+	// the overdue admin digest keeps covering assigned items too.
+	var cc []string
+	if j.ccEmails != nil && len(adminIDs) > 0 {
+		cc = j.ccEmails(ctx, adminIDs)
+		if len(cc) == 0 {
+			slog.Warn("reminder job: no admin CC addresses, emails go out without a CC and the overdue admin digest stays on this run")
+		}
+	}
+	ccActive := len(cc) > 0
+
 	controls, err := j.controls.ListAllForReminders(ctx)
 	if err != nil {
 		slog.Error("reminder job: list controls", "err", err)
@@ -420,6 +503,11 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		if !ok {
 			continue
 		}
+		if j.daily {
+			if kind, ok := dailyRouteOverrides[c.Status]; ok {
+				route.waitsOn = kind
+			}
+		}
 		populationPhase := route.population && c.PopulationID != nil
 		dueDate := c.DueDate
 		if populationPhase && c.PopulationDueDate != nil {
@@ -430,14 +518,26 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		}
 		due := *dueDate
 		tier := reminderTier(due, today)
+		daily := false
 		if tier == "" {
-			continue
+			if !j.daily || !dailyStatuses[c.Status] {
+				continue
+			}
+			// No mark falls today, but this status reminds every day. It logs
+			// under an existing type so no new audit_notification type is
+			// needed; the digest reads Daily for its wording. A due-today item
+			// uses the same type and today's date either way, so it cannot send twice.
+			tier, daily = "REMINDER_DUE_TODAY", true
 		}
 		actorID := route.assignee(c)
 		overdue := tier == "REMINDER_OVERDUE"
 		dedupSnapshot := due
-		if overdue {
+		if overdue || daily {
 			dedupSnapshot = todayStr // re-fires daily — see model.ReminderItem.DedupSnapshot
+		}
+		tierText := tierLabel(tier)
+		if daily {
+			tierText = dailyTierLabel
 		}
 		// audit_notification treats control_id/population_id as mutually exclusive.
 		controlID, populationID := &c.ID, (*int)(nil)
@@ -454,9 +554,10 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 			ControlNumber:   c.ControlNumber,
 			Description:     c.Description,
 			DueDate:         due,
-			Tier:            tierLabel(tier),
+			Tier:            tierText,
 			RequirementType: requirementType,
 			DedupSnapshot:   dedupSnapshot,
+			Daily:           daily,
 			AuditName:       auditNames[c.AuditID],
 			LinkControlID:   c.ID,
 			Status:          route.label,
@@ -466,7 +567,9 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 			item.WaitingOnUserID = *actorID
 			item.EscalatesToLead = route.waitsOn == actorOwner
 			queue(*actorID, item, controlID, populationID)
-			if overdue {
+			// With a CC on the assignee's email the admins already hear about
+			// this item, so the separate digest would only repeat it.
+			if overdue && !ccActive {
 				queueAdmins(item, controlID, populationID)
 			}
 			continue
@@ -508,7 +611,13 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	sent, notifyFailed := 0, 0
 	leadSent, leadFailed := 0, 0
 	for recipientID, items := range byRecipient {
-		if err := j.notify(ctx, recipientID, items); err != nil {
+		var err error
+		if rcc := ccFor(cc, items); len(rcc) > 0 {
+			err = j.notifyCC(ctx, recipientID, items, rcc)
+		} else {
+			err = j.notify(ctx, recipientID, items)
+		}
+		if err != nil {
 			slog.Warn("reminder job: notification failed", "recipientId", recipientID, "items", len(items), "err", err)
 			// The digest failed, so every item it covered must give up its
 			// claim — otherwise it stays claimed forever with nothing sent.
@@ -527,7 +636,13 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		// they were already told about.
 		if leadEmail := ownerLeads[recipientID]; leadEmail != "" {
 			if overdue := overdueOnly(items); len(overdue) > 0 {
-				if err := j.notifyLead(ctx, recipientID, leadEmail, overdue); err != nil {
+				var err error
+				if ccActive {
+					err = j.notifyLeadCC(ctx, recipientID, leadEmail, overdue, cc)
+				} else {
+					err = j.notifyLead(ctx, recipientID, leadEmail, overdue)
+				}
+				if err != nil {
 					slog.Warn("reminder job: lead escalation failed", "recipientId", recipientID, "items", len(overdue), "err", err)
 					leadFailed++
 				} else {
