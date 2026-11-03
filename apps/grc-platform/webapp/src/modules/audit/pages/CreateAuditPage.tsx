@@ -1998,7 +1998,8 @@ export default function CreateAuditPage(): JSX.Element {
   // after a bulkAdd failure skips re-creation and avoids duplicate audits.
   const createdAuditIdRef = useRef<number | null>(null);
   // Same idea for a framework created in Step 1: it is only persisted at submit.
-  const createdFrameworkIdRef = useRef<number | null>(null);
+  // Keyed by name so a retry only reuses it while the same pending framework is selected.
+  const createdFrameworkRef = useRef<{ name: string; id: number } | null>(null);
 
   const frameworks = useMemo(() => frameworksData ?? [], [frameworksData]);
   const products = productsData ?? [];
@@ -2060,11 +2061,11 @@ export default function CreateAuditPage(): JSX.Element {
       if (createdAuditIdRef.current === null) {
         let frameworkId = framework.id;
         if (frameworkId === PENDING_FW_ID) {
-          if (createdFrameworkIdRef.current === null) {
+          if (createdFrameworkRef.current?.name !== framework.name) {
             const created = await createFramework.mutateAsync({ name: framework.name });
-            createdFrameworkIdRef.current = created.id;
+            createdFrameworkRef.current = { name: framework.name, id: created.id };
           }
-          frameworkId = createdFrameworkIdRef.current;
+          frameworkId = createdFrameworkRef.current.id;
         }
         const audit = await createAudit.mutateAsync({
           name: name.trim(),
