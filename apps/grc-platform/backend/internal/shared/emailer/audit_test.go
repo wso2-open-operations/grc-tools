@@ -362,3 +362,51 @@ func TestAuditEmailCarriesSmallScreenRules(t *testing.T) {
 		t.Error("container must not be pinned to a fixed pixel width")
 	}
 }
+
+func TestSendAuditEventCopiesCC(t *testing.T) {
+	var raw map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	})
+	info := AuditEventInfo{
+		Items: []AuditEventItem{{ControlNumber: "C-1", RequirementType: "Evidence Requirement"}},
+		// The To address, a repeat in another case, and a blank must all go.
+		CC: []string{"admin@example.com", "Owner@Example.com", " ", "ADMIN@example.com", "other@example.com"},
+	}
+	if err := c.SendAuditEvent(context.Background(), AuditEventReminderDaily, "owner@example.com", info); err != nil {
+		t.Fatalf("SendAuditEvent: %v", err)
+	}
+	cc, _ := raw["cc"].([]any)
+	if len(cc) != 2 || cc[0] != "admin@example.com" || cc[1] != "other@example.com" {
+		t.Errorf("cc = %v, want [admin@example.com other@example.com]", raw["cc"])
+	}
+}
+
+// An empty CC stays out of the body, so a send without one is exactly what it was.
+func TestSendAuditEventOmitsEmptyCC(t *testing.T) {
+	var raw map[string]any
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	})
+	info := AuditEventInfo{
+		Items: []AuditEventItem{{ControlNumber: "C-1"}},
+		CC:    []string{"owner@example.com"}, // only the To address, so nothing is left
+	}
+	if err := c.SendAuditEvent(context.Background(), AuditEventReminderDaily, "owner@example.com", info); err != nil {
+		t.Fatalf("SendAuditEvent: %v", err)
+	}
+	if _, ok := raw["cc"]; ok {
+		t.Errorf("cc present in %v, want it omitted", raw)
+	}
+}
+
+func TestDailyReminderSubjectCountsItems(t *testing.T) {
+	got := dailyReminderSubject(AuditEventInfo{Items: make([]AuditEventItem, 3)})
+	if want := "[GRC Platform] Audit Reminder - 3 item(s) awaiting action"; got != want {
+		t.Errorf("subject = %q, want %q", got, want)
+	}
+}
