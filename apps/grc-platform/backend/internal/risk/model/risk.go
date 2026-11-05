@@ -461,6 +461,8 @@ type LookupRef struct {
 	Name   string  `json:"name"`
 	Code   *string `json:"code,omitempty"` // customers only
 	Status string  `json:"status"`         // ACTIVE | INACTIVE
+	// ParentID is set on a sub-platform: the platform it sits under.
+	ParentID *int `json:"parent_id,omitempty"`
 }
 
 // UpdateAssigneesRequest is the payload for PATCH /api/v1/risks/{id}/assignees,

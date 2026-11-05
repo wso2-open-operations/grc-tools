@@ -31,8 +31,11 @@ type Team struct {
 	// HasRisks is true once any risk uses the team as its source register. The
 	// template can then no longer change, so the Admin Console disables that
 	// choice.
-	HasRisks bool   `json:"has_risks"`
-	Status   string `json:"status"`
+	HasRisks bool `json:"has_risks"`
+	// PlatformIDs are the platforms and sub-platforms an AGGREGATED register
+	// offers on Add Risk. Empty means it offers every active platform.
+	PlatformIDs []int  `json:"platform_ids"`
+	Status      string `json:"status"`
 }
 
 // Register templates, as stored in risk_team.register_template.
@@ -65,6 +68,9 @@ type CreateTeamRequest struct {
 	TeamType    string  `json:"team_type"`
 	// RegisterTemplate defaults to STANDARD when empty.
 	RegisterTemplate string `json:"register_template,omitempty"`
+	// PlatformIDs narrows the platforms an AGGREGATED register offers; omitted
+	// or empty offers every active platform.
+	PlatformIDs []int `json:"platform_ids,omitempty"`
 }
 
 // UpdateTeamRequest is the payload for PUT /api/v1/risks/teams/{id}.
@@ -77,4 +83,8 @@ type UpdateTeamRequest struct {
 	// RegisterTemplate empty leaves it unchanged. Changing it once the register
 	// has risks is refused by the entity with a 409.
 	RegisterTemplate string `json:"register_template,omitempty"`
+	// PlatformIDs replaces the register's platform list when present; an empty
+	// list clears it (every active platform is offered again), and an absent
+	// one leaves it unchanged.
+	PlatformIDs []int `json:"platform_ids,omitempty"`
 }

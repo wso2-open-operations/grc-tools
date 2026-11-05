@@ -6062,6 +6062,9 @@ components:
         code:
           type: string
           description: Customers only.
+        parent_id:
+          type: integer
+          description: Platforms only. Set on a sub-platform, the platform it sits under.
         status:
           type: string
           enum:
@@ -6082,6 +6085,9 @@ components:
           type: string
           pattern: '^[A-Z0-9]{1,12}$'
           description: Required for customers; rejected for the other lookups.
+        parent_id:
+          type: integer
+          description: Platforms only. Makes the new value a sub-platform of this top-level, ACTIVE platform; one level only. Cannot be changed afterwards.
     UpdateLookupRequest:
       type: object
       properties:
@@ -6108,6 +6114,9 @@ components:
         code:
           type: string
           description: Customers only.
+        parent_id:
+          type: integer
+          description: Platforms only. Set on a sub-platform, the platform it sits under.
         status:
           type: string
           enum:
@@ -6138,6 +6147,11 @@ components:
         has_risks:
           type: boolean
           description: True once any risk uses the team as its source register. Its template can then no longer change (a PUT that tries is a 409).
+        platform_ids:
+          type: array
+          items:
+            type: integer
+          description: The platforms and sub-platforms an Aggregated register offers on Add Risk. Empty means every active platform.
         status:
           type: string
     RiskScore:
@@ -7632,6 +7646,11 @@ components:
           - STANDARD
           - AGGREGATED
           - MANAGED_SERVICES
+        platform_ids:
+          type: array
+          items:
+            type: integer
+          description: Aggregated registers only. Omitted or empty offers every active platform. A sub-platform needs its platform listed too.
     UpdateRiskTeamRequest:
       type: object
       required:
@@ -7657,6 +7676,11 @@ components:
           - STANDARD
           - AGGREGATED
           - MANAGED_SERVICES
+        platform_ids:
+          type: array
+          items:
+            type: integer
+          description: Aggregated registers only. Replaces the register's list when present; an empty list clears it (every active platform is offered again); omit to leave it unchanged.
     # --- Risk Compliance References -----------------------------------------
     CreateComplianceReferenceRequest:
       type: object

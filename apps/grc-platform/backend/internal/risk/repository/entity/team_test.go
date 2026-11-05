@@ -68,3 +68,65 @@ func TestTeamRepository_PassesHasRisksThrough(t *testing.T) {
 		t.Errorf("created = %+v", created)
 	}
 }
+
+// A register's platform list goes to the entity as platformIds, comes back as
+// platform_ids ([] rather than null when it offers every platform), and on an
+// update an absent list is not sent at all, so it cannot clear the stored one.
+func TestTeamRepository_PlatformIDs(t *testing.T) {
+	var created, updated map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/risk/teams":
+			created = body
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 3, "name": "New", "teamType": "BOTH",
+				"registerTemplate": "AGGREGATED", "platformIds": []int{7, 9}, "status": "ACTIVE"})
+		case r.Method == http.MethodPatch && r.URL.Path == "/risk/teams/3":
+			updated = body
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 3})
+		case r.Method == http.MethodPost && r.URL.Path == "/risk/teams/search":
+			_ = json.NewEncoder(w).Encode(map[string]any{"total": 1, "teams": []map[string]any{
+				{"id": 4, "name": "Open", "teamType": "BOTH", "registerTemplate": "AGGREGATED", "platformIds": nil, "status": "ACTIVE"}}})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	repo := &teamRepository{c: entityclient.New(srv.URL)}
+
+	team, err := repo.Create(context.Background(),
+		model.CreateTeamRequest{Name: "New", TeamType: "BOTH", RegisterTemplate: "AGGREGATED", PlatformIDs: []int{7, 9}}, "admin")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got, _ := json.Marshal(created["platformIds"]); string(got) != "[7,9]" {
+		t.Errorf("sent platformIds = %s", got)
+	}
+	if len(team.PlatformIDs) != 2 || team.PlatformIDs[1] != 9 {
+		t.Errorf("PlatformIDs = %v", team.PlatformIDs)
+	}
+
+	if err := repo.Update(context.Background(), 3, model.UpdateTeamRequest{Name: "New", TeamType: "BOTH", Status: "ACTIVE"}, "admin"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if _, sent := updated["platformIds"]; sent {
+		t.Error("an update without platform_ids must not send platformIds")
+	}
+	if err := repo.Update(context.Background(), 3, model.UpdateTeamRequest{Name: "New", TeamType: "BOTH", Status: "ACTIVE", PlatformIDs: []int{}}, "admin"); err != nil {
+		t.Fatalf("Update clear: %v", err)
+	}
+	if got, sent := updated["platformIds"]; !sent || len(got.([]any)) != 0 {
+		t.Errorf("an empty list must be sent to clear; sent=%v value=%v", sent, got)
+	}
+
+	teams, err := repo.List(context.Background(), model.ListTeamsFilter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if teams[0].PlatformIDs == nil || len(teams[0].PlatformIDs) != 0 {
+		t.Errorf("an unrestricted register must list platform_ids as [], got %#v", teams[0].PlatformIDs)
+	}
+}
