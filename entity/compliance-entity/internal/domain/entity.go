@@ -452,10 +452,14 @@ type RiskTeam struct {
 	// HasRisks reports whether any risk uses this team as its source register.
 	// While true the template can no longer change, because those risks carry
 	// its fields.
-	HasRisks  bool      `json:"hasRisks"`
-	Status    string    `json:"status"`
-	CreatedOn time.Time `json:"createdOn"`
-	UpdatedOn time.Time `json:"updatedOn"`
+	HasRisks bool `json:"hasRisks"`
+	// PlatformIDs are the platforms and sub-platforms an AGGREGATED register
+	// offers on Add Risk. Empty means it offers every active platform (the
+	// state of every register that predates the list).
+	PlatformIDs []int     `json:"platformIds"`
+	Status      string    `json:"status"`
+	CreatedOn   time.Time `json:"createdOn"`
+	UpdatedOn   time.Time `json:"updatedOn"`
 }
 
 // SearchRiskTeamsRequest is the payload for POST /risk/teams/search.
@@ -507,8 +511,12 @@ type RiskLookup struct {
 	Name string `json:"name"`
 	// Code is set for customers only: the A-Z/0-9 code embedded in Managed
 	// Services risk codes. Omitted for the other three lookups.
-	Code   *string `json:"code,omitempty"`
-	Status string  `json:"status"` // ACTIVE | INACTIVE
+	Code *string `json:"code,omitempty"`
+	// ParentID is set on a sub-platform: the top-level platform it sits under.
+	// Platforms only; omitted for a top-level platform and for the other three
+	// lookups.
+	ParentID *int   `json:"parentId,omitempty"`
+	Status   string `json:"status"` // ACTIVE | INACTIVE
 	// InUse reports whether any risk references this value. A value in use
 	// can be deactivated but not deleted, and a customer in use cannot have
 	// its code changed.
@@ -522,9 +530,12 @@ type ListRiskLookupsResponse struct {
 
 // CreateRiskLookupRequest is the payload for POST /risk/{platforms|customers|products|deployment-types}.
 type CreateRiskLookupRequest struct {
-	Name      string  `json:"name"`
-	Code      *string `json:"code"` // required for customers, rejected for the rest
-	CreatedBy string  `json:"createdBy"`
+	Name string  `json:"name"`
+	Code *string `json:"code"` // required for customers, rejected for the rest
+	// ParentID makes the new value a sub-platform of that top-level platform.
+	// Platforms only; it cannot be changed afterwards.
+	ParentID  *int   `json:"parentId"`
+	CreatedBy string `json:"createdBy"`
 }
 
 // UpdateRiskLookupRequest is the payload for PATCH /risk/{platforms|customers|products|deployment-types}/{id}.
@@ -1180,8 +1191,12 @@ type CreateRiskTeamRequest struct {
 	TeamType    string  `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
 	// RegisterTemplate defaults to STANDARD when empty.
 	RegisterTemplate string `json:"registerTemplate"`
-	Status           string `json:"status"`
-	CreatedBy        string `json:"createdBy"`
+	// PlatformIDs narrows the platforms an AGGREGATED register offers; omitted
+	// or empty offers every active platform. A sub-platform needs its platform
+	// listed too.
+	PlatformIDs []int  `json:"platformIds"`
+	Status      string `json:"status"`
+	CreatedBy   string `json:"createdBy"`
 }
 
 // UpdateRiskTeamRequest is the payload for PATCH /risk/teams/{id}.
@@ -1193,8 +1208,12 @@ type UpdateRiskTeamRequest struct {
 	// RegisterTemplate may change only while no risk has this team as its
 	// source register; after that the update is refused with a 409.
 	RegisterTemplate *string `json:"registerTemplate"`
-	Status           *string `json:"status"`
-	UpdatedBy        string  `json:"updatedBy"`
+	// PlatformIDs replaces the register's platform list when present (an empty
+	// list clears it, so the register offers every active platform again);
+	// absent leaves it unchanged.
+	PlatformIDs []int   `json:"platformIds"`
+	Status      *string `json:"status"`
+	UpdatedBy   string  `json:"updatedBy"`
 }
 
 // =============================================================================
@@ -2062,6 +2081,8 @@ type RiskLookupRef struct {
 	Name   string  `json:"name"`
 	Code   *string `json:"code,omitempty"` // customers only
 	Status string  `json:"status"`         // ACTIVE | INACTIVE
+	// ParentID is set on a sub-platform: the platform it sits under.
+	ParentID *int `json:"parentId,omitempty"`
 }
 
 // RiskActionPlanDetail is the risk's STANDARD action plan with its steps

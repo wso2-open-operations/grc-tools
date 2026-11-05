@@ -103,6 +103,9 @@ func (r *riskTeamRepo) SearchRiskTeams(ctx context.Context, req domain.SearchRis
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("risk_team.Search rows: %w", err)
 	}
+	if err := attachTeamPlatforms(ctx, r.db, teams); err != nil {
+		return nil, 0, err
+	}
 	return teams, total, nil
 }
 
@@ -116,7 +119,11 @@ func (r *riskTeamRepo) GetRiskTeamByID(ctx context.Context, id int) (*domain.Ris
 	if err != nil {
 		return nil, fmt.Errorf("risk_team.GetByID(%d): %w", id, err)
 	}
-	return t, nil
+	one := []domain.RiskTeam{*t}
+	if err := attachTeamPlatforms(ctx, r.db, one); err != nil {
+		return nil, err
+	}
+	return &one[0], nil
 }
 
 func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRiskTeamRequest) (*domain.RiskTeam, error) {
@@ -128,7 +135,13 @@ func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRisk
 	if template == "" {
 		template = "STANDARD"
 	}
-	res, err := r.db.ExecContext(ctx,
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("risk_team.Create begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	res, err := tx.ExecContext(ctx,
 		"INSERT INTO risk_team (name, code, description, team_type, register_template, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		req.Name, nullableString(req.Code), nullableString(req.Description),
 		req.TeamType, template, status, req.CreatedBy, req.CreatedBy)
@@ -136,6 +149,14 @@ func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRisk
 		return nil, fmt.Errorf("risk_team.Create: %w", err)
 	}
 	id, _ := res.LastInsertId()
+	if len(req.PlatformIDs) > 0 {
+		if err := replaceTeamPlatforms(ctx, tx, int(id), template, req.PlatformIDs); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("risk_team.Create commit: %w", err)
+	}
 	return r.GetRiskTeamByID(ctx, int(id))
 }
 
@@ -163,6 +184,9 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 
 	sets := []string{}
 	args := []any{}
+	// templateAfter is the register's template once this update lands: the
+	// platform list below is only valid for AGGREGATED.
+	templateAfter := currentTemplate
 
 	if req.Name != nil {
 		sets = append(sets, "name = ?")
@@ -192,6 +216,7 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 		}
 		sets = append(sets, "register_template = ?")
 		args = append(args, *req.RegisterTemplate)
+		templateAfter = *req.RegisterTemplate
 	}
 	if req.Status != nil {
 		sets = append(sets, "status = ?")
@@ -204,6 +229,19 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 	if _, err := tx.ExecContext(ctx,
 		"UPDATE risk_team SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil { // #nosec G202
 		return nil, fmt.Errorf("risk_team.Update(%d): %w", id, err)
+	}
+	// Leaving the AGGREGATED template (possible only before the register has
+	// risks) drops its platform list; otherwise a sent list replaces it, and an
+	// absent one leaves it alone.
+	switch {
+	case templateAfter != TemplateAggregated && currentTemplate == TemplateAggregated && req.PlatformIDs == nil:
+		if err := replaceTeamPlatforms(ctx, tx, id, templateAfter, nil); err != nil {
+			return nil, err
+		}
+	case req.PlatformIDs != nil:
+		if err := replaceTeamPlatforms(ctx, tx, id, templateAfter, req.PlatformIDs); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("risk_team.Update(%d) commit: %w", id, err)

@@ -5565,6 +5565,9 @@ components:
         code:
           type: string
           description: Customers only; omitted for the other lookups.
+        parentId:
+          type: integer
+          description: Platforms only. Set on a sub-platform, the top-level platform it sits under; omitted for a top-level platform.
         status:
           type: string
           enum:
@@ -5584,6 +5587,9 @@ components:
         code:
           type: string
           description: Customers only.
+        parentId:
+          type: integer
+          description: Platforms only. Set on a sub-platform, the platform it sits under.
         status:
           type: string
           enum:
@@ -5610,6 +5616,10 @@ components:
           nullable: true
           pattern: '^[A-Z0-9]{1,12}$'
           description: Required for customers; rejected for the other lookups.
+        parentId:
+          type: integer
+          nullable: true
+          description: Platforms only. Makes the new value a sub-platform of this top-level, ACTIVE platform; one level only. Cannot be changed afterwards.
         createdBy:
           type: string
     UpdateRiskLookupRequest:
@@ -5922,6 +5932,11 @@ components:
         hasRisks:
           type: boolean
           description: True once any risk uses the team as its source register. The template can then no longer change.
+        platformIds:
+          type: array
+          items:
+            type: integer
+          description: The platforms and sub-platforms an AGGREGATED register offers on Add Risk. Empty means every active platform.
         status:
           type: string
         createdOn:
@@ -5988,6 +6003,11 @@ components:
           - STANDARD
           - AGGREGATED
           - MANAGED_SERVICES
+        platformIds:
+          type: array
+          items:
+            type: integer
+          description: AGGREGATED registers only. Omitted or empty offers every active platform. A sub-platform needs its platform listed too.
         status:
           type: string
         createdBy:
@@ -6015,6 +6035,12 @@ components:
           - STANDARD
           - AGGREGATED
           - MANAGED_SERVICES
+        platformIds:
+          type: array
+          nullable: true
+          items:
+            type: integer
+          description: Replaces the register's platform list when present (empty clears it, offering every active platform again); omitted leaves it unchanged. AGGREGATED registers only.
         status:
           type: string
           nullable: true

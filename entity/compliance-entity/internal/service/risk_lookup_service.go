@@ -92,6 +92,14 @@ func (s *riskLookupService) CreateRiskLookup(ctx context.Context, req domain.Cre
 	} else if req.Code != nil {
 		return domain.RiskLookup{}, &apierror.ValidationError{Msg: "a " + s.kind.Noun() + " has no code"}
 	}
+	if req.ParentID != nil {
+		if !s.kind.HasParent() {
+			return domain.RiskLookup{}, &apierror.ValidationError{Msg: "a " + s.kind.Noun() + " has no parent"}
+		}
+		if *req.ParentID <= 0 {
+			return domain.RiskLookup{}, &apierror.ValidationError{Msg: "parentId must be a positive integer"}
+		}
+	}
 	v, err := s.repo.CreateRiskLookup(ctx, req)
 	if err != nil {
 		return domain.RiskLookup{}, err
