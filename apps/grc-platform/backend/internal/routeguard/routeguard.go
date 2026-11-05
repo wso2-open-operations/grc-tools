@@ -42,8 +42,9 @@ var externalVisible = map[string]bool{
 	"GET /api/v1/meta/user-guide-url": true,
 
 	// ── Audit Hub: landing pages ─────────────────────────────────────────────
-	"GET /api/v1/audits/dashboard":  true,
-	"GET /api/v1/audits/work-queue": true,
+	// Internal-only: the dashboard page is hidden from external auditors.
+	"GET /api/v1/audits/dashboard":  false,
+	"GET /api/v1/audits/work-queue": false,
 
 	// ── Audit Hub: lookups ───────────────────────────────────────────────────
 	// Gated on AUDIT_VIEW_AUDITS, which the auditor holds — not admin-only.
