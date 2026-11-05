@@ -36,7 +36,7 @@ export const auditNav: NavSection = {
       label: "Dashboard",
       path: auditPaths.dashboard,
       icon: LayoutDashboard,
-      requiredPrivilege: AuditPrivilege.ViewAudits,
+      requiredPrivilege: AuditPrivilege.ViewInternalComments,
     },
     {
       id: "audit-audits",
