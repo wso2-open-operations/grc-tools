@@ -24,6 +24,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/go-sql-driver/mysql"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -275,6 +276,31 @@ func TestCreateRiskTeam_PlatformListOnStandardRegisterRollsBack(t *testing.T) {
 	var ve *apierror.ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("err = %v, want ValidationError", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}
+
+// A code another team already uses is a 409 the admin can act on, not a 500.
+func TestCreateRiskTeam_DuplicateCodeIsAConflict(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	repo := &riskTeamRepo{db: db}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(re("INSERT INTO risk_team")).
+		WillReturnError(&mysql.MySQLError{Number: 1062, Message: "Duplicate entry 'ASG' for key 'uq_risk_team_code'"})
+	mock.ExpectRollback()
+
+	_, err = repo.CreateRiskTeam(context.Background(), domain.CreateRiskTeamRequest{
+		Name: "Identity Platform", Code: strPtr("ASG"), TeamType: "BOTH", CreatedBy: "admin"})
+	var ce *apierror.ConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %v, want ConflictError", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Error(err)

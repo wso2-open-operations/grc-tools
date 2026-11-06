@@ -126,6 +126,10 @@ func (r *riskTeamRepo) GetRiskTeamByID(ctx context.Context, id int) (*domain.Ris
 	return &one[0], nil
 }
 
+// The only unique key on risk_team besides the id is the code, so a duplicate
+// entry on a save is always a code another team already uses.
+var errTeamCodeTaken = &apierror.ConflictError{Msg: "another team already uses that code, so choose a different one"}
+
 func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRiskTeamRequest) (*domain.RiskTeam, error) {
 	status := req.Status
 	if status == "" {
@@ -146,6 +150,9 @@ func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRisk
 		req.Name, nullableString(req.Code), nullableString(req.Description),
 		req.TeamType, template, status, req.CreatedBy, req.CreatedBy)
 	if err != nil {
+		if isDuplicateKey(err) {
+			return nil, errTeamCodeTaken
+		}
 		return nil, fmt.Errorf("risk_team.Create: %w", err)
 	}
 	id, _ := res.LastInsertId()
@@ -228,6 +235,9 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 
 	if _, err := tx.ExecContext(ctx,
 		"UPDATE risk_team SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil { // #nosec G202
+		if isDuplicateKey(err) {
+			return nil, errTeamCodeTaken
+		}
 		return nil, fmt.Errorf("risk_team.Update(%d): %w", id, err)
 	}
 	// Leaving the AGGREGATED template (possible only before the register has
