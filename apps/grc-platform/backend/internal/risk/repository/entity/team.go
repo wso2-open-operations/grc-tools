@@ -44,7 +44,17 @@ type entTeam struct {
 	// RegisterTemplate: STANDARD | AGGREGATED | MANAGED_SERVICES.
 	RegisterTemplate string `json:"registerTemplate"`
 	HasRisks         bool   `json:"hasRisks"`
+	PlatformIDs      []int  `json:"platformIds"`
 	Status           string `json:"status"`
+}
+
+// platformIDsOrEmpty keeps an unrestricted register's list as [] in the API
+// rather than null.
+func platformIDsOrEmpty(ids []int) []int {
+	if ids == nil {
+		return []int{}
+	}
+	return ids
 }
 
 func (t entTeam) toModel() *model.Team {
@@ -56,6 +66,7 @@ func (t entTeam) toModel() *model.Team {
 		TeamType:         t.TeamType,
 		RegisterTemplate: t.RegisterTemplate,
 		HasRisks:         t.HasRisks,
+		PlatformIDs:      platformIDsOrEmpty(t.PlatformIDs),
 		Status:           t.Status,
 	}
 }
@@ -122,6 +133,9 @@ func (r *teamRepository) Create(ctx context.Context, req model.CreateTeamRequest
 	if req.RegisterTemplate != "" {
 		body["registerTemplate"] = req.RegisterTemplate
 	}
+	if len(req.PlatformIDs) > 0 {
+		body["platformIds"] = req.PlatformIDs
+	}
 	var t entTeam
 	if err := r.c.Post(ctx, "/risk/teams", body, &t); err != nil {
 		return nil, fmt.Errorf("create team: %w", err)
@@ -141,6 +155,9 @@ func (r *teamRepository) Update(ctx context.Context, id int, req model.UpdateTea
 	}
 	if req.RegisterTemplate != "" {
 		body["registerTemplate"] = req.RegisterTemplate
+	}
+	if req.PlatformIDs != nil {
+		body["platformIds"] = req.PlatformIDs
 	}
 	if err := r.c.Patch(ctx, fmt.Sprintf("/risk/teams/%d", id), body, &entTeam{}); err != nil {
 		return fmt.Errorf("update team %d: %w", id, err)

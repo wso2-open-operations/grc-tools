@@ -78,8 +78,8 @@ func TestUpdateRiskLookup_SameCodeAllowedWhenInUse(t *testing.T) {
 		WithArgs("Bank One Subsidiary", "admin", 7).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	mock.ExpectQuery(re("FROM risk_customer l WHERE l.id = ?")).WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "code", "status", "in_use"}).
-			AddRow(7, "Bank One Subsidiary", "BANKONESUB", "ACTIVE", true))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "code", "parent_id", "status", "in_use"}).
+			AddRow(7, "Bank One Subsidiary", "BANKONESUB", nil, "ACTIVE", true))
 
 	got, err := repo.UpdateRiskLookup(context.Background(), 7, domain.UpdateRiskLookupRequest{
 		Name: strPtr("Bank One Subsidiary"), Code: strPtr("BANKONESUB"), UpdatedBy: "admin"})
@@ -199,6 +199,8 @@ func TestRiskTeamUpdate_SameTemplateSkipsLockCheck(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "code", "description", "team_type",
 			"register_template", "has_risks", "status", "created_at", "updated_at"}).
 			AddRow(5, "Asgardeo IAM", "ASG", nil, "BOTH", "STANDARD", true, "ACTIVE", time.Now(), time.Now()))
+	mock.ExpectQuery(re("FROM risk_team_platform")).WithArgs(5).
+		WillReturnRows(sqlmock.NewRows([]string{"risk_team_id", "platform_id"}))
 
 	got, err := repo.UpdateRiskTeam(context.Background(), 5, domain.UpdateRiskTeamRequest{
 		Name: strPtr("Asgardeo IAM"), RegisterTemplate: strPtr("STANDARD"), UpdatedBy: "admin"})

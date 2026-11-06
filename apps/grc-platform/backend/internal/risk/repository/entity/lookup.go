@@ -40,15 +40,16 @@ func NewLookupRepository(c *entityclient.Client, path string) repository.LookupR
 }
 
 type entLookup struct {
-	ID     int     `json:"id"`
-	Name   string  `json:"name"`
-	Code   *string `json:"code"`
-	Status string  `json:"status"`
-	InUse  bool    `json:"inUse"`
+	ID       int     `json:"id"`
+	Name     string  `json:"name"`
+	Code     *string `json:"code"`
+	ParentID *int    `json:"parentId"`
+	Status   string  `json:"status"`
+	InUse    bool    `json:"inUse"`
 }
 
 func (e entLookup) toModel() *model.Lookup {
-	return &model.Lookup{ID: e.ID, Name: e.Name, Code: e.Code, Status: e.Status, InUse: e.InUse}
+	return &model.Lookup{ID: e.ID, Name: e.Name, Code: e.Code, ParentID: e.ParentID, Status: e.Status, InUse: e.InUse}
 }
 
 func (r *lookupRepository) List(ctx context.Context, status string) ([]*model.Lookup, error) {
@@ -73,6 +74,9 @@ func (r *lookupRepository) Create(ctx context.Context, req model.CreateLookupReq
 	body := map[string]any{"name": req.Name, "createdBy": createdBy}
 	if req.Code != nil {
 		body["code"] = *req.Code
+	}
+	if req.ParentID != nil {
+		body["parentId"] = *req.ParentID
 	}
 	var v entLookup
 	if err := r.c.Post(ctx, r.path, body, &v); err != nil {

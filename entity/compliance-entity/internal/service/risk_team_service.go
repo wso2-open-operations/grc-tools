@@ -90,6 +90,9 @@ func (s *riskTeamService) CreateRiskTeam(ctx context.Context, req domain.CreateR
 	if req.CreatedBy == "" {
 		return domain.RiskTeam{}, &apierror.ValidationError{Msg: "createdBy is required"}
 	}
+	if err := checkPlatformIDs(req.PlatformIDs); err != nil {
+		return domain.RiskTeam{}, err
+	}
 	t, err := s.repo.CreateRiskTeam(ctx, req)
 	if err != nil {
 		return domain.RiskTeam{}, err
@@ -110,9 +113,29 @@ func (s *riskTeamService) UpdateRiskTeam(ctx context.Context, id int, req domain
 	if req.RegisterTemplate != nil && !validRegisterTemplates[*req.RegisterTemplate] {
 		return domain.RiskTeam{}, &apierror.ValidationError{Msg: invalidRegisterTemplateMsg}
 	}
+	if err := checkPlatformIDs(req.PlatformIDs); err != nil {
+		return domain.RiskTeam{}, err
+	}
 	t, err := s.repo.UpdateRiskTeam(ctx, id, req)
 	if err != nil {
 		return domain.RiskTeam{}, err
 	}
 	return *t, nil
+}
+
+// checkPlatformIDs rejects non-positive and repeated ids in a register's
+// platform list; whether they name real platforms is checked against the
+// database. A nil or empty list is valid.
+func checkPlatformIDs(ids []int) error {
+	seen := map[int]bool{}
+	for _, id := range ids {
+		if id <= 0 {
+			return &apierror.ValidationError{Msg: "platformIds must be positive integers"}
+		}
+		if seen[id] {
+			return &apierror.ValidationError{Msg: "platformIds must not repeat a platform"}
+		}
+		seen[id] = true
+	}
+	return nil
 }

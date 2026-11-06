@@ -141,7 +141,7 @@ func templateTx(t *testing.T, template string, team int) (*sql.Tx, sqlmock.Sqlmo
 		t.Fatalf("begin: %v", err)
 	}
 	mock.ExpectQuery(re("SELECT t.register_template, r.assignment_team_id")).WithArgs(9).
-		WillReturnRows(sqlmock.NewRows([]string{"t", "team"}).AddRow(template, team))
+		WillReturnRows(sqlmock.NewRows([]string{"t", "team", "register"}).AddRow(template, team, 3))
 	return tx, mock
 }
 
