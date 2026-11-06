@@ -165,7 +165,7 @@ func checkTemplateValues(ctx context.Context, tx *sql.Tx, req domain.CreateRiskR
 			return err
 		}
 	}
-	return checkRegisterPlatforms(ctx, tx, req.SourceRegisterID, req.PlatformIDs, req.PlatformIDs)
+	return checkRegisterPlatforms(ctx, tx, req.SourceRegisterID, req.PlatformIDs, req.PlatformIDs, nil)
 }
 
 // checkRegisterPlatforms applies a register's platform list to a risk's
@@ -174,13 +174,16 @@ func checkTemplateValues(ctx context.Context, tx *sql.Tx, req domain.CreateRiskR
 //     register with no rows offers every platform, as every register did before
 //     the list existed);
 //   - a sub-platform needs its platform on the risk too;
-//   - a newly added platform whose sub-platforms the register lists needs at
-//     least one of them on the risk.
+//   - a newly added platform, or one the risk already carries a sub-platform
+//     under, whose sub-platforms the register lists needs at least one of them
+//     on the risk.
 //
 // added is the subset of want the caller is writing now. Platforms the risk
 // already had are not re-checked for membership, so a register narrowed later
-// never blocks an edit of a risk it already carries.
-func checkRegisterPlatforms(ctx context.Context, tx *sql.Tx, registerID int, want, added []int) error {
+// never blocks an edit of a risk it already carries. held lists the platforms
+// the risk has sub-platforms under today: an edit may not strip the last one,
+// while a risk that never had one is left as it is.
+func checkRegisterPlatforms(ctx context.Context, tx *sql.Tx, registerID int, want, added, held []int) error {
 	if len(want) == 0 {
 		return nil
 	}
@@ -226,8 +229,12 @@ func checkRegisterPlatforms(ctx context.Context, tx *sql.Tx, registerID int, wan
 			return &apierror.ValidationError{Msg: fmt.Sprintf("platform %d is not offered by this register", id)}
 		}
 	}
-	for _, id := range added {
-		if parentOf[id] != 0 {
+	enforce := map[int]bool{}
+	for _, id := range append(append([]int{}, added...), held...) {
+		enforce[id] = true
+	}
+	for _, id := range want {
+		if parentOf[id] != 0 || !enforce[id] {
 			continue
 		}
 		hasOfferedSub, hasChosenSub := false, false
@@ -461,7 +468,22 @@ func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain
 	if err := requireActive(ctx, tx, LookupPlatform, added); err != nil {
 		return err
 	}
-	if err := checkRegisterPlatforms(ctx, tx, registerID, req.PlatformIDs, added); err != nil {
+	var held []int
+	if len(req.PlatformIDs) > 0 {
+		current, err := platformParents(ctx, tx, `
+			SELECT p.id, p.parent_id FROM risk_platform_reference r
+			JOIN risk_platform p ON p.id = r.platform_id
+			WHERE r.risk_id = ?`, riskID)
+		if err != nil {
+			return err
+		}
+		for _, parent := range current {
+			if parent != 0 {
+				held = append(held, parent)
+			}
+		}
+	}
+	if err := checkRegisterPlatforms(ctx, tx, registerID, req.PlatformIDs, added, held); err != nil {
 		return err
 	}
 	if added, err = addedIDs(ctx, tx, "SELECT product_id FROM risk_product_reference WHERE risk_id = ?", riskID, req.ProductIDs); err != nil {

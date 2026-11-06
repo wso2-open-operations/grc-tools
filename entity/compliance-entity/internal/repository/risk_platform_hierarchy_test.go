@@ -61,25 +61,32 @@ func TestCheckRegisterPlatforms(t *testing.T) {
 		name    string
 		want    []int
 		added   []int
+		held    []int                // platforms the risk has sub-platforms under today
 		chosen  *sqlmock.Rows        // the chosen platforms with their parents
 		offered func() *sqlmock.Rows // no rows: the register offers every platform
 		wantErr bool
 	}{
-		{"no restriction: any platform", []int{4}, []int{4},
+		{"no restriction: any platform", []int{4}, []int{4}, nil,
 			platformRows([2]any{4, nil}), func() *sqlmock.Rows { return platformRows() }, false},
-		{"restricted: offered platform with offered sub-platform", []int{7, 9}, []int{7, 9},
+		{"restricted: offered platform with offered sub-platform", []int{7, 9}, []int{7, 9}, nil,
 			platformRows([2]any{7, nil}, [2]any{9, 7}), offeredIntegration, false},
-		{"restricted: platform not offered", []int{4}, []int{4},
+		{"restricted: platform not offered", []int{4}, []int{4}, nil,
 			platformRows([2]any{4, nil}), offeredIntegration, true},
-		{"restricted: sub-platform not offered", []int{7, 10}, []int{7, 10},
+		{"restricted: sub-platform not offered", []int{7, 10}, []int{7, 10}, nil,
 			platformRows([2]any{7, nil}, [2]any{10, 7}), offeredIntegration, true},
-		{"restricted: offered sub-platforms are required", []int{7}, []int{7},
+		{"restricted: offered sub-platforms are required", []int{7}, []int{7}, nil,
 			platformRows([2]any{7, nil}), offeredIntegration, true},
-		{"restricted: an inactive offered sub-platform is not required", []int{7}, []int{7},
+		{"restricted: an inactive offered sub-platform is not required", []int{7}, []int{7}, nil,
 			platformRows([2]any{7, nil}), offeredIntegration, false},
-		{"sub-platform without its platform", []int{9}, []int{9},
+		{"sub-platform without its platform", []int{9}, []int{9}, nil,
 			platformRows([2]any{9, 7}), nil, true},
-		{"unchanged platform no longer offered is not re-checked", []int{4}, nil,
+		{"unchanged platform no longer offered is not re-checked", []int{4}, nil, nil,
+			platformRows([2]any{4, nil}), offeredIntegration, false},
+		{"an edit may not strip the last sub-platform", []int{7}, nil, []int{7},
+			platformRows([2]any{7, nil}), offeredIntegration, true},
+		{"a risk that never had a sub-platform is left as it is", []int{7}, nil, nil,
+			platformRows([2]any{7, nil}), offeredIntegration, false},
+		{"held platform the register no longer offers is not required", []int{4}, nil, []int{4},
 			platformRows([2]any{4, nil}), offeredIntegration, false},
 	}
 	for _, tc := range cases {
@@ -96,7 +103,7 @@ func TestCheckRegisterPlatforms(t *testing.T) {
 					mock.ExpectQuery(re("p.status = 'ACTIVE'")).WithArgs(3).WillReturnRows(active)
 				}
 			}
-			err := checkRegisterPlatforms(context.Background(), tx, 3, tc.want, tc.added)
+			err := checkRegisterPlatforms(context.Background(), tx, 3, tc.want, tc.added, tc.held)
 			var ve *apierror.ValidationError
 			if tc.wantErr && !errors.As(err, &ve) {
 				t.Fatalf("err = %v, want ValidationError", err)
