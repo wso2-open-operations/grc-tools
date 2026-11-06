@@ -55,7 +55,9 @@ type LookupKind struct {
 var (
 	LookupPlatform = LookupKind{
 		table: "risk_platform", noun: "platform", hasParent: true,
-		inUse: "EXISTS(SELECT 1 FROM risk_platform_reference x WHERE x.platform_id = l.id)",
+		inUse: "(EXISTS(SELECT 1 FROM risk_platform_reference x WHERE x.platform_id = l.id)" +
+			" OR EXISTS(SELECT 1 FROM risk_team_platform x WHERE x.platform_id = l.id)" +
+			" OR EXISTS(SELECT 1 FROM risk_platform x WHERE x.parent_id = l.id))",
 	}
 	LookupCustomer = LookupKind{
 		table: "risk_customer", noun: "customer", hasCode: true,

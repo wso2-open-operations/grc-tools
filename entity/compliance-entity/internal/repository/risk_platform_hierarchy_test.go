@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -401,5 +402,20 @@ func TestUpdateRiskTeam_PlatformList(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+}
+
+// A platform counts as in use when a risk carries it, a register offers it, or
+// it has sub-platforms, so the admin list never offers Delete for a platform
+// the database would refuse to remove.
+func TestLookupPlatform_InUseCoversRisksRegistersAndSubPlatforms(t *testing.T) {
+	for _, want := range []string{
+		"FROM risk_platform_reference x WHERE x.platform_id = l.id",
+		"FROM risk_team_platform x WHERE x.platform_id = l.id",
+		"FROM risk_platform x WHERE x.parent_id = l.id",
+	} {
+		if !strings.Contains(LookupPlatform.inUse, want) {
+			t.Errorf("platform inUse does not check %q", want)
+		}
 	}
 }
