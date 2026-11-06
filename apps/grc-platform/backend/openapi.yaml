@@ -2224,6 +2224,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/risks/teams/{id}:
@@ -2255,6 +2257,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/risks/scores:
@@ -6072,7 +6076,7 @@ components:
           - INACTIVE
         in_use:
           type: boolean
-          description: True once any risk uses the value. It can then be deactivated but not deleted, and a customer's code is frozen.
+          description: True once any risk uses the value; for a platform, also once a register lists it or it has sub-platforms. It can then be deactivated but not deleted, and a customer's code is frozen.
     CreateLookupRequest:
       type: object
       required:

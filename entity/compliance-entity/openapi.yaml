@@ -2032,6 +2032,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /risk/teams:
@@ -2055,6 +2057,8 @@ paths:
                 $ref: '#/components/schemas/RiskTeam'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /risk/scores:
@@ -5575,7 +5579,7 @@ components:
           - INACTIVE
         inUse:
           type: boolean
-          description: True once any risk references the value. Such a value can be deactivated but not deleted, and a customer's code is then frozen.
+          description: True once any risk references the value; for a platform, also once a register lists it or it has sub-platforms. Such a value can be deactivated but not deleted, and a customer's code is then frozen.
     RiskLookupRef:
       type: object
       description: A register-template lookup value as it appears on one risk.
