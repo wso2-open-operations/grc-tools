@@ -104,7 +104,7 @@ function TeamCard({ audits }: { audits: Audit[] }): JSX.Element {
 }
 
 // Statuses each role's view tracks — the conditions the stakeholders asked for.
-const AUDITOR_STATUSES = ["EVIDENCE_UNDER_VALIDATION", "POPULATION_UNDER_VALIDATION"] as const;
+const AUDITOR_STATUSES = ["EVIDENCE_UNDER_VALIDATION", "POPULATION_UNDER_VALIDATION", "POPULATION_COMPLETE"] as const;
 const OWNER_STATUSES = [
   "POPULATION_PENDING", "EVIDENCE_PENDING", "EVIDENCE_NEED_CLARIFICATION",
   "POPULATION_NEED_CLARIFICATION", "OVERDUE",
