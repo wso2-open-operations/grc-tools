@@ -61,6 +61,9 @@ func (h *controlHandler) listControls(w http.ResponseWriter, r *http.Request) {
 		response.MapServiceError(ctx, w, err, response.ErrMsgInternal)
 		return
 	}
+	if !auth.HasPrivilege(ctx, privilege.ViewInternalComments) {
+		controls = filterExternalAuditorVisible(controls)
+	}
 	if controls == nil {
 		controls = []*model.AuditControl{}
 	}
@@ -106,7 +109,31 @@ func (h *controlHandler) getControl(w http.ResponseWriter, r *http.Request) {
 		response.MapServiceError(ctx, w, err, response.ErrMsgInternal)
 		return
 	}
+	if !auth.HasPrivilege(ctx, privilege.ViewInternalComments) && !externalAuditorVisible(c) {
+		response.WriteError(w, http.StatusNotFound, response.ErrMsgNotFound)
+		return
+	}
 	response.WriteJSONValue(w, http.StatusOK, c)
+}
+
+// externalAuditorVisible reports whether an external auditor (no
+// ViewInternalComments) may see c: only controls awaiting their validation.
+func externalAuditorVisible(c *model.AuditControl) bool {
+	switch c.Status {
+	case "EVIDENCE_UNDER_VALIDATION", "POPULATION_UNDER_VALIDATION", "POPULATION_COMPLETE":
+		return true
+	}
+	return false
+}
+
+func filterExternalAuditorVisible(controls []*model.AuditControl) []*model.AuditControl {
+	out := make([]*model.AuditControl, 0, len(controls))
+	for _, c := range controls {
+		if externalAuditorVisible(c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // addControl handles POST /api/v1/audits/{id}/controls.
