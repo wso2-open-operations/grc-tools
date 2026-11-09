@@ -165,7 +165,114 @@ func checkTemplateValues(ctx context.Context, tx *sql.Tx, req domain.CreateRiskR
 			return err
 		}
 	}
+	return checkRegisterPlatforms(ctx, tx, req.SourceRegisterID, req.PlatformIDs, req.PlatformIDs, nil)
+}
+
+// checkRegisterPlatforms applies a register's platform list to a risk's
+// platforms (want), inside tx:
+//   - a platform in added must be on the register's list, when it has one (a
+//     register with no rows offers every platform, as every register did before
+//     the list existed);
+//   - a sub-platform needs its platform on the risk too;
+//   - a newly added platform, or one the risk already carries a sub-platform
+//     under, whose sub-platforms the register lists needs at least one of them
+//     on the risk.
+//
+// added is the subset of want the caller is writing now. Platforms the risk
+// already had are not re-checked for membership, so a register narrowed later
+// never blocks an edit of a risk it already carries. held lists the platforms
+// the risk has sub-platforms under today: an edit may not strip the last one,
+// while a risk that never had one is left as it is.
+func checkRegisterPlatforms(ctx context.Context, tx *sql.Tx, registerID int, want, added, held []int) error {
+	if len(want) == 0 {
+		return nil
+	}
+	ph := strings.Repeat("?,", len(want))
+	parentOf, err := platformParents(ctx, tx,
+		"SELECT id, parent_id FROM risk_platform WHERE id IN ("+ph[:len(ph)-1]+")", toAny(want)...) // #nosec G202 -- placeholders only
+	if err != nil {
+		return err
+	}
+	onRisk := map[int]bool{}
+	for _, id := range want {
+		onRisk[id] = true
+	}
+	for _, id := range want {
+		if parent := parentOf[id]; parent != 0 && !onRisk[parent] {
+			return &apierror.ValidationError{
+				Msg: fmt.Sprintf("sub-platform %d needs its platform %d selected too", id, parent)}
+		}
+	}
+
+	offered, err := platformParents(ctx, tx, `
+		SELECT p.id, p.parent_id FROM risk_team_platform t
+		JOIN risk_platform p ON p.id = t.platform_id
+		WHERE t.risk_team_id = ?`, registerID)
+	if err != nil {
+		return err
+	}
+	if len(offered) == 0 {
+		return nil
+	}
+	// Only an active sub-platform counts towards the requirement below: an
+	// inactive one drops out of every picker, so demanding it would leave the
+	// risk impossible to raise. The register stays restricted regardless.
+	active, err := platformParents(ctx, tx, `
+		SELECT p.id, p.parent_id FROM risk_team_platform t
+		JOIN risk_platform p ON p.id = t.platform_id
+		WHERE t.risk_team_id = ? AND p.status = 'ACTIVE'`, registerID)
+	if err != nil {
+		return err
+	}
+	for _, id := range added {
+		if _, ok := offered[id]; !ok {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("platform %d is not offered by this register", id)}
+		}
+	}
+	enforce := map[int]bool{}
+	for _, id := range append(append([]int{}, added...), held...) {
+		enforce[id] = true
+	}
+	for _, id := range want {
+		if parentOf[id] != 0 || !enforce[id] {
+			continue
+		}
+		hasOfferedSub, hasChosenSub := false, false
+		for sub, parent := range active {
+			if parent != id {
+				continue
+			}
+			hasOfferedSub = true
+			if onRisk[sub] {
+				hasChosenSub = true
+			}
+		}
+		if hasOfferedSub && !hasChosenSub {
+			return &apierror.ValidationError{
+				Msg: fmt.Sprintf("select at least one sub-platform of platform %d", id)}
+		}
+	}
 	return nil
+}
+
+// platformParents runs query, which selects (id, parent_id), and returns each
+// row's parent, 0 for a top-level platform (ids start at 1).
+func platformParents(ctx context.Context, tx *sql.Tx, query string, args ...any) (map[int]int, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("risk platforms: %w", err)
+	}
+	defer rows.Close()
+	out := map[int]int{}
+	for rows.Next() {
+		var id int
+		var parent sql.NullInt64
+		if err := rows.Scan(&id, &parent); err != nil {
+			return nil, fmt.Errorf("risk platforms scan: %w", err)
+		}
+		out[id] = int(parent.Int64) // 0 when NULL
+	}
+	return out, rows.Err()
 }
 
 // reserveCustomerSequence takes the next per-(register, customer) sequence
@@ -246,13 +353,13 @@ func (r *riskRepo) detailTemplateValues(ctx context.Context, id int, d *domain.R
 	}
 
 	if d.Products, err = r.detailLookupList(ctx, `
-		SELECT p.id, p.name, p.status FROM risk_product_reference x
+		SELECT p.id, p.name, p.status, NULL FROM risk_product_reference x
 		JOIN risk_product p ON p.id = x.product_id
 		WHERE x.risk_id = ? ORDER BY p.name`, id); err != nil {
 		return fmt.Errorf("risk.GetDetail products: %w", err)
 	}
 	if d.Platforms, err = r.detailLookupList(ctx, `
-		SELECT p.id, p.name, p.status FROM risk_platform_reference x
+		SELECT p.id, p.name, p.status, p.parent_id FROM risk_platform_reference x
 		JOIN risk_platform p ON p.id = x.platform_id
 		WHERE x.risk_id = ? ORDER BY p.name`, id); err != nil {
 		return fmt.Errorf("risk.GetDetail platforms: %w", err)
@@ -271,8 +378,13 @@ func (r *riskRepo) detailLookupList(ctx context.Context, query string, id int) (
 	refs := []domain.RiskLookupRef{}
 	for rows.Next() {
 		var ref domain.RiskLookupRef
-		if err := rows.Scan(&ref.ID, &ref.Name, &ref.Status); err != nil {
+		var parentID sql.NullInt64
+		if err := rows.Scan(&ref.ID, &ref.Name, &ref.Status, &parentID); err != nil {
 			return nil, err
+		}
+		if parentID.Valid {
+			id := int(parentID.Int64)
+			ref.ParentID = &id
 		}
 		refs = append(refs, ref)
 	}
@@ -306,11 +418,11 @@ func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain
 		return nil
 	}
 	var template string
-	var currentTeam int
+	var currentTeam, registerID int
 	if err := tx.QueryRowContext(ctx, `
-		SELECT t.register_template, r.assignment_team_id
+		SELECT t.register_template, r.assignment_team_id, r.source_register_id
 		FROM risk r JOIN risk_team t ON t.id = r.source_register_id
-		WHERE r.id = ? FOR UPDATE OF r FOR SHARE OF t`, riskID).Scan(&template, &currentTeam); err != nil {
+		WHERE r.id = ? FOR UPDATE OF r FOR SHARE OF t`, riskID).Scan(&template, &currentTeam, &registerID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d not found", riskID)}
 		}
@@ -354,6 +466,24 @@ func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain
 		return err
 	}
 	if err := requireActive(ctx, tx, LookupPlatform, added); err != nil {
+		return err
+	}
+	var held []int
+	if len(req.PlatformIDs) > 0 {
+		current, err := platformParents(ctx, tx, `
+			SELECT p.id, p.parent_id FROM risk_platform_reference r
+			JOIN risk_platform p ON p.id = r.platform_id
+			WHERE r.risk_id = ?`, riskID)
+		if err != nil {
+			return err
+		}
+		for _, parent := range current {
+			if parent != 0 {
+				held = append(held, parent)
+			}
+		}
+	}
+	if err := checkRegisterPlatforms(ctx, tx, registerID, req.PlatformIDs, added, held); err != nil {
 		return err
 	}
 	if added, err = addedIDs(ctx, tx, "SELECT product_id FROM risk_product_reference WHERE risk_id = ?", riskID, req.ProductIDs); err != nil {

@@ -602,18 +602,22 @@ CREATE TABLE IF NOT EXISTS risk_reminder (
 
 -- -----------------------------------------------------------------------------
 -- risk_platform
--- Platforms an AGGREGATED-template risk can affect.
+-- Platforms an AGGREGATED-template risk can affect. A row with a parent_id is a
+-- sub-platform (Ballerina under Integration Platform); one level only, enforced
+-- by the application. NULL parent_id is a top-level platform.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS risk_platform (
   id          INT          NOT NULL AUTO_INCREMENT,
   name        VARCHAR(255) NOT NULL,
+  parent_id   INT          NULL COMMENT 'Set on a sub-platform: the top-level platform it sits under. NULL for a top-level platform, including every platform that predates the column',
   status      ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
   created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by  VARCHAR(255) NULL,
   updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   updated_by  VARCHAR(255) NULL,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_risk_platform_name (name)
+  UNIQUE KEY uq_risk_platform_name (name),
+  CONSTRAINT fk_rplat_parent FOREIGN KEY (parent_id) REFERENCES risk_platform(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -718,6 +722,24 @@ CREATE TABLE IF NOT EXISTS risk_platform_reference (
   KEY idx_rplat_platform (platform_id),
   CONSTRAINT fk_rplat_risk     FOREIGN KEY (risk_id)     REFERENCES risk(id)          ON DELETE CASCADE,
   CONSTRAINT fk_rplat_platform FOREIGN KEY (platform_id) REFERENCES risk_platform(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_team_platform  (junction table)
+-- The platforms and sub-platforms an AGGREGATED register offers on Add Risk.
+-- A register with no rows offers every active platform. Which rows may exist
+-- (AGGREGATED registers only; a sub-platform needs its parent listed) is
+-- enforced by the Compliance Entity.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_team_platform (
+  risk_team_id INT      NOT NULL,
+  platform_id  INT      NOT NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (risk_team_id, platform_id),
+  KEY idx_rtplat_platform (platform_id),
+  CONSTRAINT fk_rtplat_team     FOREIGN KEY (risk_team_id) REFERENCES risk_team(id)     ON DELETE RESTRICT,
+  CONSTRAINT fk_rtplat_platform FOREIGN KEY (platform_id)  REFERENCES risk_platform(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

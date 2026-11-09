@@ -22,8 +22,11 @@ type Lookup struct {
 	Name string `json:"name"`
 	// Code is set for customers only: the A-Z/0-9 code embedded in Managed
 	// Services risk codes.
-	Code   *string `json:"code,omitempty"`
-	Status string  `json:"status"` // ACTIVE | INACTIVE
+	Code *string `json:"code,omitempty"`
+	// ParentID is set on a sub-platform: the platform it sits under. Platforms
+	// only.
+	ParentID *int   `json:"parent_id,omitempty"`
+	Status   string `json:"status"` // ACTIVE | INACTIVE
 	// InUse reports whether any risk references the value. One in use can be
 	// deactivated but not deleted, and a customer's code is then frozen.
 	InUse bool `json:"in_use"`
@@ -33,6 +36,9 @@ type Lookup struct {
 type CreateLookupRequest struct {
 	Name string  `json:"name"`
 	Code *string `json:"code,omitempty"` // required for customers, rejected for the rest
+	// ParentID makes the new value a sub-platform of that top-level platform.
+	// Platforms only; it cannot be changed afterwards.
+	ParentID *int `json:"parent_id,omitempty"`
 }
 
 // UpdateLookupRequest is the payload for PUT /api/v1/risks/{platforms|customers|products|deployment-types}/{id}.

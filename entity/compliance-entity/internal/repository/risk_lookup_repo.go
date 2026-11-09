@@ -38,6 +38,9 @@ type LookupKind struct {
 	noun string
 	// hasCode is true for risk_customer only.
 	hasCode bool
+	// hasParent is true for risk_platform only: a row with a parent_id is a
+	// sub-platform of that top-level platform.
+	hasParent bool
 	// inUse is a boolean SQL expression over the lookup row aliased `l`. It
 	// is true once any risk references the value. For customers it also
 	// counts risk_customer_sequence: a sequence row means a risk code with
@@ -51,8 +54,10 @@ type LookupKind struct {
 // rather than a table.
 var (
 	LookupPlatform = LookupKind{
-		table: "risk_platform", noun: "platform",
-		inUse: "EXISTS(SELECT 1 FROM risk_platform_reference x WHERE x.platform_id = l.id)",
+		table: "risk_platform", noun: "platform", hasParent: true,
+		inUse: "(EXISTS(SELECT 1 FROM risk_platform_reference x WHERE x.platform_id = l.id)" +
+			" OR EXISTS(SELECT 1 FROM risk_team_platform x WHERE x.platform_id = l.id)" +
+			" OR EXISTS(SELECT 1 FROM risk_platform x WHERE x.parent_id = l.id))",
 	}
 	LookupCustomer = LookupKind{
 		table: "risk_customer", noun: "customer", hasCode: true,
@@ -75,6 +80,10 @@ func (k LookupKind) Noun() string { return k.noun }
 // HasCode reports whether values of this kind carry a code (customers only).
 func (k LookupKind) HasCode() bool { return k.hasCode }
 
+// HasParent reports whether values of this kind can sit under a parent
+// (platforms only).
+func (k LookupKind) HasParent() bool { return k.hasParent }
+
 // RiskLookupRepository defines persistence operations for one lookup table.
 type RiskLookupRepository interface {
 	// ListRiskLookups returns every value ordered by name; statusKey
@@ -96,14 +105,17 @@ func NewRiskLookupRepository(db *sql.DB, kind LookupKind) RiskLookupRepository {
 	return &riskLookupRepo{db: db, kind: kind}
 }
 
-// selectCols is the column list scanRiskLookup reads. code is selected as
-// NULL for the three code-less tables so one scan serves every kind.
+// selectCols is the column list scanRiskLookup reads. code and parent_id are
+// selected as NULL for the tables that lack them so one scan serves every kind.
 func (r *riskLookupRepo) selectCols() string {
-	code := "NULL"
+	code, parent := "NULL", "NULL"
 	if r.kind.hasCode {
 		code = "l.code"
 	}
-	return "l.id, l.name, " + code + ", l.status, " + r.kind.inUse
+	if r.kind.hasParent {
+		parent = "l.parent_id"
+	}
+	return "l.id, l.name, " + code + ", " + parent + ", l.status, " + r.kind.inUse
 }
 
 func (r *riskLookupRepo) ListRiskLookups(ctx context.Context, statusKey string) ([]domain.RiskLookup, error) {
@@ -147,6 +159,9 @@ func (r *riskLookupRepo) GetRiskLookupByID(ctx context.Context, id int) (*domain
 // code, for customers) are case-insensitive through the column collation;
 // a clash maps to a 409.
 func (r *riskLookupRepo) CreateRiskLookup(ctx context.Context, req domain.CreateRiskLookupRequest) (*domain.RiskLookup, error) {
+	if req.ParentID != nil {
+		return r.createSubValue(ctx, req)
+	}
 	var res sql.Result
 	var err error
 	if r.kind.hasCode {
@@ -270,6 +285,49 @@ func (r *riskLookupRepo) DeleteRiskLookup(ctx context.Context, id int) error {
 	return nil
 }
 
+// createSubValue inserts a sub-platform under req.ParentID. The parent is read
+// FOR SHARE so an admin cannot deactivate it, or make it a child, between the
+// check and the insert. Only one level exists: the parent must itself be
+// top-level, and must be ACTIVE like any value offered for new use.
+func (r *riskLookupRepo) createSubValue(ctx context.Context, req domain.CreateRiskLookupRequest) (*domain.RiskLookup, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s.Create begin: %w", r.kind.table, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var parentOfParent sql.NullInt64
+	var status string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT parent_id, status FROM "+r.kind.table+" WHERE id = ? FOR SHARE", *req.ParentID, // #nosec G202 -- table is fixed per kind
+	).Scan(&parentOfParent, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &apierror.ValidationError{Msg: fmt.Sprintf("parent %s %d not found", r.kind.noun, *req.ParentID)}
+		}
+		return nil, fmt.Errorf("%s.Create read parent: %w", r.kind.table, err)
+	}
+	if parentOfParent.Valid {
+		return nil, &apierror.ValidationError{Msg: "a sub-" + r.kind.noun + " cannot have its own sub-" + r.kind.noun + "s"}
+	}
+	if status != "ACTIVE" {
+		return nil, &apierror.ValidationError{Msg: "the parent " + r.kind.noun + " is not active"}
+	}
+	res, err := tx.ExecContext(ctx,
+		"INSERT INTO "+r.kind.table+" (name, parent_id, created_by, updated_by) VALUES (?, ?, ?, ?)", // #nosec G202
+		req.Name, *req.ParentID, req.CreatedBy, req.CreatedBy)
+	if err != nil {
+		if isDuplicateKey(err) {
+			return nil, r.duplicateError()
+		}
+		return nil, fmt.Errorf("%s.Create: %w", r.kind.table, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("%s.Create commit: %w", r.kind.table, err)
+	}
+	id, _ := res.LastInsertId()
+	return r.GetRiskLookupByID(ctx, int(id))
+}
+
 func (r *riskLookupRepo) duplicateError() error {
 	if r.kind.hasCode {
 		return &apierror.ConflictError{Msg: fmt.Sprintf("a %s with that name or code already exists", r.kind.noun)}
@@ -279,14 +337,19 @@ func (r *riskLookupRepo) duplicateError() error {
 
 func (r *riskLookupRepo) inUseError() error {
 	return &apierror.ConflictError{
-		Msg: fmt.Sprintf("this %s is used by existing risks and cannot be deleted; deactivate it instead", r.kind.noun)}
+		Msg: fmt.Sprintf("this %s is used by existing risks, registers or sub-%ss and cannot be deleted; deactivate it instead", r.kind.noun, r.kind.noun)}
 }
 
 func scanRiskLookup(s scanner) (*domain.RiskLookup, error) {
 	var v domain.RiskLookup
 	var code sql.NullString
-	if err := s.Scan(&v.ID, &v.Name, &code, &v.Status, &v.InUse); err != nil {
+	var parentID sql.NullInt64
+	if err := s.Scan(&v.ID, &v.Name, &code, &parentID, &v.Status, &v.InUse); err != nil {
 		return nil, err
+	}
+	if parentID.Valid {
+		id := int(parentID.Int64)
+		v.ParentID = &id
 	}
 	if code.Valid {
 		v.Code = &code.String

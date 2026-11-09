@@ -197,6 +197,9 @@ func lookupDetails(v *model.Lookup) map[string]any {
 	if v.Code != nil {
 		details["code"] = *v.Code
 	}
+	if v.ParentID != nil {
+		details["parentId"] = *v.ParentID
+	}
 	return details
 }
 

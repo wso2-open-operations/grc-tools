@@ -87,14 +87,15 @@ type entRisk struct {
 
 // entLookupRef is a register-template lookup value on one risk.
 type entLookupRef struct {
-	ID     int     `json:"id"`
-	Name   string  `json:"name"`
-	Code   *string `json:"code"`
-	Status string  `json:"status"`
+	ID       int     `json:"id"`
+	Name     string  `json:"name"`
+	Code     *string `json:"code"`
+	Status   string  `json:"status"`
+	ParentID *int    `json:"parentId"`
 }
 
 func (e entLookupRef) toModel() model.LookupRef {
-	return model.LookupRef{ID: e.ID, Name: e.Name, Code: e.Code, Status: e.Status}
+	return model.LookupRef{ID: e.ID, Name: e.Name, Code: e.Code, Status: e.Status, ParentID: e.ParentID}
 }
 
 func lookupRefPtr(e *entLookupRef) *model.LookupRef {
