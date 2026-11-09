@@ -219,7 +219,7 @@ func parseAuditIDsStrict(vals []string) ([]int, error) {
 }
 
 func (h *dashboardHandler) getDashboard(w http.ResponseWriter, r *http.Request) {
-	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+	if !auth.RequireAllPrivileges(r.Context(), w, privilege.ViewAudits, privilege.ViewInternalComments) {
 		return
 	}
 	user := auth.FromContext(r.Context())
@@ -248,7 +248,7 @@ func (h *dashboardHandler) getDashboard(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *dashboardHandler) getWorkQueue(w http.ResponseWriter, r *http.Request) {
-	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+	if !auth.RequireAllPrivileges(r.Context(), w, privilege.ViewAudits, privilege.ViewInternalComments) {
 		return
 	}
 	user := auth.FromContext(r.Context())

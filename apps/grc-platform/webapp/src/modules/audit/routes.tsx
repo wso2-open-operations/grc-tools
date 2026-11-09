@@ -34,6 +34,7 @@ export const auditRoutes = (
     {/* ViewInternalComments, not ViewAudits: the trail is internal-only, so an
         external auditor must not reach this page by typing the URL. */}
     <Route path="audits/:auditId/activity" element={<AuditPrivilegeGuard privilege={AuditPrivilege.ViewInternalComments}><AuditActivityLogPage /></AuditPrivilegeGuard>} />
-    <Route path="dashboard" element={<AuditPrivilegeGuard privilege={AuditPrivilege.ViewAudits}><AuditDashboard /></AuditPrivilegeGuard>} />
+    {/* Internal-only: external auditors must not see the dashboard. */}
+    <Route path="dashboard" element={<AuditPrivilegeGuard privilege={AuditPrivilege.ViewInternalComments}><AuditDashboard /></AuditPrivilegeGuard>} />
   </Route>
 );
