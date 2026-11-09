@@ -32,6 +32,8 @@ import { AlertCircle, Filter, Search, SlidersHorizontal, X } from "@wso2/oxygen-
 import { useState, type JSX, type ReactNode } from "react";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import UserAvatar from "@modules/audit/components/UserAvatar";
+import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
+import { AuditPrivilege } from "@modules/audit/privileges";
 import { formatAuditDate } from "@modules/audit/utils/format";
 import { CONTROL_STATUS_LABELS, isPopulationOverdue } from "@modules/audit/utils/controlStatus";
 import type { AuditControl, ControlStatus } from "@modules/audit/types/audit";
@@ -311,6 +313,18 @@ const STATUS_FILTER_OPTIONS: { label: string; value: string }[] = [
   })),
 ];
 
+// External auditors only ever receive controls in these statuses (the backend
+// filters the list), so their status dropdown offers only these.
+const EXTERNAL_AUDITOR_STATUSES: ControlStatus[] = [
+  "EVIDENCE_UNDER_VALIDATION",
+  "POPULATION_UNDER_VALIDATION",
+  "POPULATION_COMPLETE",
+];
+
+const EXTERNAL_AUDITOR_STATUS_FILTER_OPTIONS = STATUS_FILTER_OPTIONS.filter(
+  (o) => o.value === "OVERDUE" || EXTERNAL_AUDITOR_STATUSES.includes(o.value as ControlStatus),
+);
+
 // The column catalogue (CONTROL_COLUMNS / DEFAULT_VISIBLE_CONTROL_COLUMNS /
 // CONTROL_COLUMNS_STORAGE_KEY) lives in ./controlColumns so this component file
 // only exports components (react-refresh/only-export-components).
@@ -407,6 +421,12 @@ export default function ControlsTable({
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<ListingTableSortDirection>("asc");
 
+  // ViewInternalComments is the internal-vs-external proxy used across this module.
+  const { can, loading: privilegesLoading } = useAuditPrivileges();
+  const statusFilterOptions = privilegesLoading || can(AuditPrivilege.ViewInternalComments)
+    ? STATUS_FILTER_OPTIONS
+    : EXTERNAL_AUDITOR_STATUS_FILTER_OPTIONS;
+
   // Derive unique options for the filter dropdowns from the full (unfiltered) list.
   const auditorOptions = [
     ...new Set(allControls.map((c) => c.auditorName).filter((n): n is string => n !== null)),
@@ -442,7 +462,7 @@ export default function ControlsTable({
       filterKey: "controlType", filterOptions: CTRL_TYPE_OPTIONS,
       render: (c) => <Typography variant="body2" noWrap>{CTRL_TYPE_LABELS[c.controlType]}</Typography> },
     { id: "status", label: "Status", minWidth: 185, sortField: "status",
-      filterKey: "status", filterOptions: STATUS_FILTER_OPTIONS, searchableFilter: true,
+      filterKey: "status", filterOptions: statusFilterOptions, searchableFilter: true,
       render: (c) => <ControlStatusChip status={c.status} /> },
     { id: "auditorName", label: "Auditor POC", minWidth: 140, sortField: "auditorName",
       filterKey: "auditorName", filterOptions: auditorOptions, searchableFilter: true,
