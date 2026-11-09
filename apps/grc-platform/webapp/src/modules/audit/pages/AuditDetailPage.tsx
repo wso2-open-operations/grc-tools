@@ -356,8 +356,9 @@ export default function AuditDetailPage(): JSX.Element {
                     icon={<AlertTriangle size={12} />}
                     label={`${overdueCount} overdue`}
                     size="small"
-                    clickable
-                    onClick={() => setQuickFilter("overdue")}
+                    // Only internal users have the overdue quick filter to jump to.
+                    clickable={showQuickFilterTabs}
+                    onClick={showQuickFilterTabs ? () => setQuickFilter("overdue") : undefined}
                     sx={{
                       height: 22, fontSize: "0.7rem", fontWeight: 700,
                       color: "error.main", bgcolor: "transparent", border: "1px solid", borderColor: "error.main",
