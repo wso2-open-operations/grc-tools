@@ -127,7 +127,7 @@ export default function AuditDetailPage(): JSX.Element {
   const canManageControls = can(AuditPrivilege.ManageControls);
   // Same internal-audience gate as the control History tab — see ControlDrawer.
   const canViewHistory = can(AuditPrivilege.ViewInternalComments);
-  // External auditors only get the "All" tab — no Pending/Approved/In Progress/Overdue filters.
+  // External auditors get no quick-filter tab bar at all (not even "All").
   const showQuickFilterTabs = canViewHistory;
 
   const controls = useMemo(() => controlsData?.items ?? [], [controlsData]);
@@ -378,7 +378,7 @@ export default function AuditDetailPage(): JSX.Element {
       )}
 
       {/* Quick filter tabs — replace the old stat cards; identical filtering */}
-      {controlsLoading ? (
+      {!showQuickFilterTabs ? null : controlsLoading ? (
         <Skeleton variant="rectangular" height={42} sx={{ borderRadius: 1, mb: 2 }} />
       ) : (
         <Tabs
@@ -390,17 +390,14 @@ export default function AuditDetailPage(): JSX.Element {
           }}
         >
           <Tab value="all" label={`All (${controls.length})`} />
-          {showQuickFilterTabs && [
-            <Tab key="allPending" value="allPending" label={`All Pending (${allPendingCount})`} />,
-            <Tab key="approved" value="approved" label={`Approved (${approvedCount})`} />,
-            <Tab key="inProgress" value="inProgress" label={`In Progress (${inProgressCount})`} />,
-            <Tab
-              key="overdue"
-              value="overdue"
-              label={`Overdue (${overdueCount})`}
-              sx={overdueCount > 0 ? { color: "#E53935", "&.Mui-selected": { color: "#E53935" } } : undefined}
-            />,
-          ]}
+          <Tab value="allPending" label={`All Pending (${allPendingCount})`} />
+          <Tab value="approved" label={`Approved (${approvedCount})`} />
+          <Tab value="inProgress" label={`In Progress (${inProgressCount})`} />
+          <Tab
+            value="overdue"
+            label={`Overdue (${overdueCount})`}
+            sx={overdueCount > 0 ? { color: "#E53935", "&.Mui-selected": { color: "#E53935" } } : undefined}
+          />
         </Tabs>
       )}
 
