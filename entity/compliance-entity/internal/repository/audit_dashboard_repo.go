@@ -389,7 +389,7 @@ func (r *dashboardRepo) queryActionItemsCount(ctx context.Context, class domain.
 // Statuses each role view tracks. Auditors wait on validation, owners on
 // submission/clarification, and compliance on internal review.
 const (
-	auditorViewStatusFilter    = "c.status IN ('EVIDENCE_UNDER_VALIDATION','POPULATION_UNDER_VALIDATION')"
+	auditorViewStatusFilter    = "c.status IN ('EVIDENCE_UNDER_VALIDATION','POPULATION_UNDER_VALIDATION','POPULATION_COMPLETE')"
 	ownerViewStatusFilter      = "c.status IN ('POPULATION_PENDING','EVIDENCE_PENDING','EVIDENCE_NEED_CLARIFICATION','POPULATION_NEED_CLARIFICATION')"
 	complianceViewStatusFilter = "c.status IN ('EVIDENCE_INTERNAL_REVIEW','POPULATION_INTERNAL_REVIEW')"
 )
