@@ -77,3 +77,37 @@ func TestQueryAssigneeStatusDistribution_RolesAndArgs(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// TestQueryAssigneeStatusDistribution_AuditorIncludesPopulationComplete: the
+// auditor view's SQL filter must list POPULATION_COMPLETE so the Auditor Team
+// card can show those controls, and the row passes through with its status.
+func TestQueryAssigneeStatusDistribution_AuditorIncludesPopulationComplete(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	repo := &dashboardRepo{db: db}
+
+	mock.ExpectQuery(re("c.status IN ('EVIDENCE_UNDER_VALIDATION','POPULATION_UNDER_VALIDATION','POPULATION_COMPLETE')")).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid", "type", "status", "n"}).
+			AddRow("u-a", "INTERNAL", "POPULATION_COMPLETE", 2))
+	mock.ExpectQuery(re("LEFT JOIN `user` u ON u.id = c.owner_id")).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid", "type", "status", "n"}))
+	mock.ExpectQuery(re("< CURDATE() AND c.status != 'COMPLETE'")).
+		WillReturnRows(sqlmock.NewRows([]string{"uuid", "type", "n"}))
+	mock.ExpectQuery(re("LEFT JOIN audit_team t ON t.id = c.team_id")).
+		WillReturnRows(sqlmock.NewRows([]string{"team", "status", "n"}))
+
+	got, err := repo.queryAssigneeStatusDistribution(context.Background(), "WHERE a.status = 'ACTIVE'", nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	want := domain.AssigneeStatusCount{Role: "auditor", AssigneeUUID: "u-a", AssigneeUserType: "INTERNAL", Status: "POPULATION_COMPLETE", Count: 2}
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("got %+v, want [%+v]", got, want)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}

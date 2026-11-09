@@ -43,6 +43,7 @@ import AuditProgramFilter from "@modules/audit/components/dashboard/AuditProgram
 import { ALL_PROGRAMS, auditIdsFor } from "@modules/audit/utils/assigneeProgress";
 import PersonStatusTable from "@modules/audit/components/dashboard/PersonStatusTable";
 import RoleProgressCard from "@modules/audit/components/dashboard/RoleProgressCard";
+import RoleStatusTotalsCard from "@modules/audit/components/dashboard/RoleStatusTotalsCard";
 import SectionCard from "@modules/audit/components/dashboard/SectionCard";
 import PhaseInsightDialog from "@modules/audit/components/dashboard/PhaseInsightDialog";
 import TeamProgress from "@modules/audit/components/dashboard/TeamProgress";
@@ -103,7 +104,7 @@ function TeamCard({ audits }: { audits: Audit[] }): JSX.Element {
 }
 
 // Statuses each role's view tracks — the conditions the stakeholders asked for.
-const AUDITOR_STATUSES = ["EVIDENCE_UNDER_VALIDATION", "POPULATION_UNDER_VALIDATION"] as const;
+const AUDITOR_STATUSES = ["EVIDENCE_UNDER_VALIDATION", "POPULATION_UNDER_VALIDATION", "POPULATION_COMPLETE"] as const;
 const OWNER_STATUSES = [
   "POPULATION_PENDING", "EVIDENCE_PENDING", "EVIDENCE_NEED_CLARIFICATION",
   "POPULATION_NEED_CLARIFICATION", "OVERDUE",
@@ -293,7 +294,7 @@ export default function AuditDashboard(): JSX.Element {
           as a full-width table (one row per person, a column per status). */}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 2 }}>
         <RoleProgressCard title="Auditor Team" role="auditor" statuses={AUDITOR_STATUSES} audits={audits} />
-        <RoleProgressCard title="Compliance Team" role="compliance" statuses={COMPLIANCE_STATUSES} audits={audits} />
+        <RoleStatusTotalsCard title="Compliance Team" role="compliance" statuses={COMPLIANCE_STATUSES} audits={audits} />
       </Box>
       <PersonStatusTable title="Process Owner Team" role="owner" statuses={OWNER_STATUSES} personLabel="Process Owner" audits={audits} />
 
