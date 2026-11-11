@@ -26,7 +26,6 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aigateway"
-	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
 // LikelihoodSuggestionService generates and records AI Likelihood
@@ -134,20 +133,10 @@ func (s *likelihoodSuggestionService) Suggest(ctx context.Context, req model.Sug
 		return nil, fmt.Errorf("suggest likelihood: model returned out-of-range score %d", result.Score)
 	}
 
-	requestedBy := ""
-	if u := auth.FromContext(ctx); u != nil {
-		requestedBy = u.Subject
-	}
-	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureLikelihood, strconv.Itoa(result.Score), result.Reason, result.Confidence, req.RiskID, requestedBy)
-	if err != nil {
-		return nil, fmt.Errorf("suggest likelihood: sign suggestion: %w", err)
-	}
-
 	return &model.SuggestLikelihoodResponse{
 		Score:      result.Score,
 		Reason:     result.Reason,
 		Confidence: result.Confidence,
-		Token:      token,
 	}, nil
 }
 
@@ -185,21 +174,25 @@ func (s *likelihoodSuggestionService) RecordDecision(ctx context.Context, riskID
 		return nil
 	}
 
-	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureLikelihood, riskID, decidedBy)
+	// The suggestion is reported by the web app, so validate it before it is
+	// written: a score of 1-3, a known confidence, bounded text.
+	score := suggestion.Score
+	if score < 1 || score > 3 {
+		return fmt.Errorf("record likelihood suggestion: score %d out of range", score)
+	}
+	confidence, err := normaliseSuggestionConfidence(suggestion.Confidence)
 	if err != nil {
 		return fmt.Errorf("record likelihood suggestion: %w", err)
 	}
-	score, err := strconv.Atoi(payload.Value)
-	if err != nil {
-		return fmt.Errorf("record likelihood suggestion: suggested score %q: %w", payload.Value, err)
+	if err := validateSuggestionText("reason", suggestion.Reason, maxSuggestionReasonLen); err != nil {
+		return fmt.Errorf("record likelihood suggestion: %w", err)
 	}
 
-	confidence := strings.ToUpper(payload.Confidence)
 	id, err := s.suggestionRepo.Create(ctx, model.CreateSuggestionRequest{
 		RiskID:          riskID,
 		Feature:         model.SuggestionFeatureLikelihood,
-		SuggestedValue:  payload.Value,
-		SuggestedReason: payload.Reason,
+		SuggestedValue:  strconv.Itoa(score),
+		SuggestedReason: suggestion.Reason,
 		Confidence:      confidence,
 	})
 	if err != nil {
