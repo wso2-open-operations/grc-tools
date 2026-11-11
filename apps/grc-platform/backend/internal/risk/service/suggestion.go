@@ -21,12 +21,10 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/aigateway"
-	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
 )
 
 // CategorySuggestionService generates and records AI category suggestions.
@@ -102,21 +100,11 @@ func (s *categorySuggestionService) Suggest(ctx context.Context, req model.Sugge
 		return nil, fmt.Errorf("suggest category: model returned unknown category id %d", result.CategoryID)
 	}
 
-	requestedBy := ""
-	if u := auth.FromContext(ctx); u != nil {
-		requestedBy = u.Subject
-	}
-	token, err := s.gateway.SignSuggestion(model.SuggestionFeatureCategory, strconv.Itoa(cat.ID), result.Reason, result.Confidence, req.RiskID, requestedBy)
-	if err != nil {
-		return nil, fmt.Errorf("suggest category: sign suggestion: %w", err)
-	}
-
 	return &model.SuggestCategoryResponse{
 		CategoryID:   cat.ID,
 		CategoryName: cat.Name,
 		Reason:       result.Reason,
 		Confidence:   result.Confidence,
-		Token:        token,
 	}, nil
 }
 
@@ -125,21 +113,24 @@ func (s *categorySuggestionService) RecordDecision(ctx context.Context, riskID i
 		return nil
 	}
 
-	payload, err := s.gateway.VerifySuggestion(suggestion.Token, model.SuggestionFeatureCategory, riskID, decidedBy)
+	// The suggestion is reported by the web app, so validate it before it is
+	// written: a positive category id, a known confidence, bounded text.
+	if suggestion.CategoryID <= 0 {
+		return fmt.Errorf("record category suggestion: invalid category id %d", suggestion.CategoryID)
+	}
+	confidence, err := normaliseSuggestionConfidence(suggestion.Confidence)
 	if err != nil {
 		return fmt.Errorf("record category suggestion: %w", err)
 	}
-	categoryID, err := strconv.Atoi(payload.Value)
-	if err != nil {
-		return fmt.Errorf("record category suggestion: suggested category id %q: %w", payload.Value, err)
+	if err := validateSuggestionText("reason", suggestion.Reason, maxSuggestionReasonLen); err != nil {
+		return fmt.Errorf("record category suggestion: %w", err)
 	}
 
-	confidence := strings.ToUpper(payload.Confidence)
 	id, err := s.suggestionRepo.Create(ctx, model.CreateSuggestionRequest{
 		RiskID:          riskID,
 		Feature:         model.SuggestionFeatureCategory,
-		SuggestedValue:  payload.Value,
-		SuggestedReason: payload.Reason,
+		SuggestedValue:  strconv.Itoa(suggestion.CategoryID),
+		SuggestedReason: suggestion.Reason,
 		Confidence:      confidence,
 	})
 	if err != nil {
@@ -148,7 +139,7 @@ func (s *categorySuggestionService) RecordDecision(ctx context.Context, riskID i
 
 	status := model.SuggestionStatusOverridden
 	var overrideReason *string
-	if slices.Contains(finalCategoryIDs, categoryID) {
+	if slices.Contains(finalCategoryIDs, suggestion.CategoryID) {
 		status = model.SuggestionStatusAccepted
 	}
 	// Override reason is optional for CATEGORY (unlike LIKELIHOOD, later) —

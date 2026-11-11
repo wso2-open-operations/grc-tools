@@ -297,7 +297,7 @@ type AIValidationConfig struct {
 // suggestion feature still gets its own enable switch, deliberately not one
 // shared flag: they have different rollout timelines, different cost/risk
 // profiles (categorisation is one cheap text call; likelihood uses
-// web_search/web_fetch and a quarterly sweep across every IN_REMEDIATION
+// web_search/web_fetch and a quarterly sweep across every APPROVED
 // risk), and this repo's own convention is per-feature switches
 // (AIValidationConfig.Enabled is its own independent flag too, not folded
 // into anything broader). CategorizationEnabled gates

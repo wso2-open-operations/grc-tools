@@ -148,7 +148,7 @@ func TestHandleAssessRisk(t *testing.T) {
 				},
 			}}
 			assess := &fakeAssessmentSvc{}
-			d := &Deps{Risk: risk, Assessment: assess, Users: fakeUserRepo{uuid: "test-caller-uuid", id: c.callerID}}
+			d := (&Deps{Risk: risk, Assessment: assess, Users: fakeUserRepo{uuid: "test-caller-uuid", id: c.callerID}}).withNoopAISuggestions()
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/risks/1/assess", strings.NewReader(c.body)).
 				WithContext(contextForGrants(t, nil, c.byTeam))
