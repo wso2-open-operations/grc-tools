@@ -74,7 +74,7 @@ func TestHandleUpdateRiskRiskAcceptor(t *testing.T) {
 			risk := &fakeRiskSvc{byID: map[int]*model.RiskDetail{
 				1: {ID: 1, SourceRegisterID: asgardeo, AssignmentTeamID: choreo, AssignerID: assignerID},
 			}}
-			d := &Deps{Risk: risk, Users: fakeUserRepo{uuid: "test-caller-uuid", id: assignerID}}
+			d := (&Deps{Risk: risk, Users: fakeUserRepo{uuid: "test-caller-uuid", id: assignerID}}).withNoopAISuggestions()
 			req := httptest.NewRequest(http.MethodPut, "/api/v1/risks/1", strings.NewReader(c.body)).
 				WithContext(contextForGrants(t, nil, byTeam))
 			req.Header.Set("Content-Type", "application/json")
