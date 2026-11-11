@@ -60,7 +60,7 @@ type likelihoodChecker interface {
 }
 
 // LikelihoodRecheckJob is the quarterly re-check sweep: for every
-// IN_REMEDIATION risk, inside the last recheckWindowDays of each quarter,
+// APPROVED risk, inside the last recheckWindowDays of each quarter,
 // re-run the same live Likelihood check used for the original suggestion and
 // compare it against the risk's current EFFECTIVE score — the latest
 // reassessment's Residual when one exists, else Gross. Comparing against
@@ -132,12 +132,12 @@ func (j *LikelihoodRecheckJob) runOnce(parent context.Context) (runErr error) {
 	offset := 0
 	for {
 		page, err := j.risks.List(ctx, model.ListRisksFilter{
-			Statuses: []string{model.StatusInRemediation},
+			Statuses: []string{model.StatusApproved},
 			Limit:    pageLimit,
 			Offset:   offset,
 		})
 		if err != nil {
-			slog.Error("likelihood recheck job: list IN_REMEDIATION risks", "err", err)
+			slog.Error("likelihood recheck job: list APPROVED risks", "err", err)
 			return fmt.Errorf("list risks: %w", err)
 		}
 		if len(page.Items) == 0 {
@@ -179,7 +179,7 @@ func (j *LikelihoodRecheckJob) runOnce(parent context.Context) (runErr error) {
 			// not new evidence, it's a decision already reviewed and on
 			// record.
 			if detail.EffectiveScore == nil {
-				// Not expected for an IN_REMEDIATION risk, but fail safe
+				// Not expected for an APPROVED risk, but fail safe
 				// rather than crash the sweep.
 				skippedErr++
 				continue

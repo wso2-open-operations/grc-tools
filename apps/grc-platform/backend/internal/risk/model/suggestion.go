@@ -52,47 +52,37 @@ type SuggestCategoryRequest struct {
 	Title                  string `json:"title"`
 	Description            string `json:"description"`
 	ComplianceReferenceIDs []int  `json:"compliance_reference_ids"`
-	// RiskID is the risk this suggestion is about, when one already exists
-	// (Edit Risk) — omitted/0 on Add Risk, before the risk has an id. Bound
-	// into the suggestion token and checked at RecordDecision time so a token
-	// requested for one risk can't be replayed to record a decision on
-	// another.
-	RiskID int `json:"risk_id,omitempty"`
 }
 
 // SuggestCategoryResponse is what the form shows inline and pre-fills the
-// Risk Category select with. Token is an opaque, signed receipt of this
-// exact result (aigateway.Client.SignSuggestion) that the frontend must echo
-// back unmodified as AICategorySuggestion.Token — see that type's doc
-// comment for why.
+// Risk Category select with. The frontend sends the suggestion back at save
+// time as AICategorySuggestion.
 type SuggestCategoryResponse struct {
 	CategoryID   int    `json:"category_id"`
 	CategoryName string `json:"category_name"`
 	Reason       string `json:"reason"`
 	Confidence   string `json:"confidence"`
-	Token        string `json:"token"`
 }
 
-// AICategorySuggestion is the suggestion receipt the frontend includes in the
-// risk Create/Update request body when a suggestion was shown — whether the
-// risk is being created for the first time (no risk id existed when the
-// suggestion was generated) or edited (one did). Nil when the user never
-// clicked "Suggest category" at all, in which case nothing is written to
-// risk_ai_suggestion for this save.
+// AICategorySuggestion is the suggestion the frontend includes in the risk
+// Create/Update request body when one was shown — whether the risk is being
+// created for the first time (no risk id existed when the suggestion was
+// generated) or edited. Nil when the user never clicked "Suggest category"
+// at all, in which case nothing is written to risk_ai_suggestion for this
+// save.
 //
-// Token is the exact, unmodified value SuggestCategoryResponse.Token
-// returned — not the category id/reason/confidence themselves. RecordDecision
-// recovers those by verifying the token (aigateway.Client.VerifySuggestion)
-// rather than trusting whatever this struct might otherwise claim; without
-// that, a save request could resend arbitrary category id/reason/confidence
-// values and have them recorded in the audit trail as a genuine AI
-// suggestion the model never actually produced. The service separately
-// compares the token's verified category id against the risk's final,
-// actually-chosen category to decide ACCEPTED vs OVERRIDDEN — the frontend
-// does not send that decision directly either, so it can't drift out of sync
-// with what was actually saved.
+// The fields are exactly what SuggestCategoryResponse returned. They are
+// reported by the web app and recorded as reported: the backend checks that
+// they are valid (see normaliseSuggestionConfidence / validateSuggestionText)
+// but cannot prove the model produced them. That is accepted — the history
+// only feeds acceptance statistics and changes no risk data. The service
+// decides ACCEPTED vs OVERRIDDEN itself by comparing CategoryID against the
+// risk's final, actually-chosen category, so the frontend never sends that
+// decision and it can't drift out of sync with what was saved.
 type AICategorySuggestion struct {
-	Token string `json:"token"`
+	CategoryID int    `json:"category_id"`
+	Reason     string `json:"reason"`
+	Confidence string `json:"confidence"`
 }
 
 // SuggestionStatus mirrors the entity's RiskAISuggestionStatus — only the two
@@ -144,30 +134,26 @@ type SuggestLikelihoodRequest struct {
 	ComplianceReferenceIDs []int  `json:"compliance_reference_ids"`
 	CategoryID             int    `json:"category_id"`
 	SourceRegisterID       int    `json:"source_register_id"`
-	// RiskID is the risk this suggestion is about, when one already exists
-	// (reassessment) — omitted/0 on Add Risk's Gross suggestion, before the
-	// risk has an id. See SuggestCategoryRequest.RiskID.
-	RiskID int `json:"risk_id,omitempty"`
 }
 
 // SuggestLikelihoodResponse is what the form shows inline and highlights the
-// matrix row for. Token is this result's signed receipt — see
-// SuggestCategoryResponse.Token.
+// matrix row for. The frontend sends the suggestion back at save time as
+// AILikelihoodSuggestion.
 type SuggestLikelihoodResponse struct {
 	Score      int    `json:"score"`
 	Reason     string `json:"reason"`
 	Confidence string `json:"confidence"`
-	Token      string `json:"token"`
 }
 
-// AILikelihoodSuggestion is the suggestion receipt the frontend includes in
-// the risk-create payload (Gross) or the reassessment payload (Residual) —
-// same pattern and same reason as AICategorySuggestion: Token is the signed,
-// unmodified value from SuggestLikelihoodResponse.Token, verified by
-// RecordDecision rather than trusting a resent score/reason/confidence. Nil
-// when the user never clicked "Suggest Likelihood".
+// AILikelihoodSuggestion is the suggestion the frontend includes in the
+// risk-create payload (Gross) or the reassessment payload (Residual) — same
+// pattern and same trust model as AICategorySuggestion: reported by the web
+// app, validated, recorded as reported. Nil when the user never clicked
+// "Suggest Likelihood".
 type AILikelihoodSuggestion struct {
-	Token string `json:"token"`
+	Score      int    `json:"score"`
+	Reason     string `json:"reason"`
+	Confidence string `json:"confidence"`
 }
 
 // SuggestActionPlanRequest is the payload for
@@ -182,29 +168,22 @@ type SuggestActionPlanRequest struct {
 	CategoryID             int    `json:"category_id"`
 	ComplianceReferenceIDs []int  `json:"compliance_reference_ids"`
 	TreatmentStrategy      string `json:"treatment_strategy"`
-	// RiskID is the risk this suggestion is about, when one already exists
-	// (adding another action plan to an in-remediation risk) — omitted/0 on
-	// the Add Risk wizard's Action Plan step. See SuggestCategoryRequest.RiskID.
-	RiskID int `json:"risk_id,omitempty"`
 }
 
 // SuggestActionPlanResponse is what the form shows inline and offers to copy
-// into the Action Plan Description field. Token is this result's signed
-// receipt — see SuggestCategoryResponse.Token.
+// into the Action Plan Description field. The frontend sends the suggestion
+// back at save time as AIActionPlanSuggestion.
 type SuggestActionPlanResponse struct {
 	Description string `json:"description"`
 	Reason      string `json:"reason"`
 	Confidence  string `json:"confidence"`
-	Token       string `json:"token"`
 }
 
-// AIActionPlanSuggestion is the suggestion receipt the frontend includes in
-// the risk-create payload or the create-action-plan payload when a
-// suggestion was shown — same pattern as AICategorySuggestion/
-// AILikelihoodSuggestion: Token is the signed, unmodified value from
-// SuggestActionPlanResponse.Token, verified by RecordDecision rather than
-// trusting a resent description/reason/confidence. Nil when the user never
-// clicked "Suggest action plan".
+// AIActionPlanSuggestion is the suggestion the frontend includes in the
+// risk-create payload or the create-action-plan payload when one was shown —
+// same pattern and same trust model as AICategorySuggestion/
+// AILikelihoodSuggestion: reported by the web app, validated, recorded as
+// reported. Nil when the user never clicked "Suggest action plan".
 //
 // Unlike Category/Likelihood, there is no fixed suggested value to compare
 // against what was finally saved here — "accepting" this suggestion means
@@ -212,10 +191,10 @@ type SuggestActionPlanResponse struct {
 // there's nothing for the service to diff. Instead the frontend tracks
 // directly whether the user clicked "use this suggestion" and sends that as
 // Used — the service sets ACCEPTED/OVERRIDDEN straight from that flag, no
-// comparison logic (see ActionPlanSuggestionService.RecordDecision). Used
-// itself needs no integrity check the way the suggestion content does: it
-// only labels the human's own action, not a claim about what the AI said.
+// comparison logic (see ActionPlanSuggestionService.RecordDecision).
 type AIActionPlanSuggestion struct {
-	Token string `json:"token"`
-	Used  bool   `json:"used"`
+	Description string `json:"description"`
+	Reason      string `json:"reason"`
+	Confidence  string `json:"confidence"`
+	Used        bool   `json:"used"`
 }
