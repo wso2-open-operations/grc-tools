@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -70,10 +71,34 @@ type ControlRepository interface {
 const evidenceActionableStatuses = `'POPULATION_PENDING','POPULATION_NEED_CLARIFICATION',
 		'EVIDENCE_PENDING','EVIDENCE_NEED_CLARIFICATION','SUBMITTED_SAMPLE','EVIDENCE_INTERNAL_REVIEW'`
 
-type controlRepo struct{ db *sql.DB }
+type controlRepo struct {
+	db  *sql.DB
+	now func() time.Time // time source for hand-offs; nil means time.Now
+}
+
+// ControlRepoOption configures a controlRepo.
+type ControlRepoOption func(*controlRepo)
+
+// WithClock replaces the time source, for tests.
+func WithClock(now func() time.Time) ControlRepoOption {
+	return func(r *controlRepo) { r.now = now }
+}
+
+func (r *controlRepo) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
+}
 
 // NewControlRepository constructs a ControlRepository.
-func NewControlRepository(db *sql.DB) ControlRepository { return &controlRepo{db: db} }
+func NewControlRepository(db *sql.DB, opts ...ControlRepoOption) ControlRepository {
+	r := &controlRepo{db: db}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
 
 // GetEvidenceAssignment returns the control's audit id when the user is the
 // control's owner and it is currently actionable. Returning the audit id lets the
@@ -215,6 +240,14 @@ func buildControlFilters(seedWhere string, seedArgs []any, req domain.SearchCont
 		where += " AND c.id IN (" + ph[:len(ph)-1] + ")"
 		for _, id := range req.ControlIDs {
 			args = append(args, id)
+		}
+	}
+	if len(req.CurrentHandlers) > 0 {
+		ph := strings.Repeat("?,", len(req.CurrentHandlers))
+		where += " AND EXISTS (SELECT 1 FROM audit_control_stage st WHERE st.control_id = c.id" +
+			" AND st.phase = 'EVIDENCE' AND st.ended_at IS NULL AND st.handled_by IN (" + ph[:len(ph)-1] + "))"
+		for _, h := range req.CurrentHandlers {
+			args = append(args, h)
 		}
 	}
 	scopeClause, scopeArgs := controlScopeWhere(req.Scope, req.UserID, req.ScopeTeamIDs)
@@ -363,6 +396,11 @@ func (r *controlRepo) CreateControl(ctx context.Context, auditID int, req domain
 			return nil, fmt.Errorf("control.Create population: %w", err)
 		}
 	}
+	if strings.EqualFold(defCols.requirementType, "DESIGN") && req.DueDate != nil && *req.DueDate != "" {
+		if err := openFirstStage(ctx, tx, auditID, int(id), *req.DueDate, r.clock()); err != nil {
+			return nil, fmt.Errorf("control.Create stage: %w", err)
+		}
+	}
 	if err := recomputeAuditStatus(ctx, tx, auditID); err != nil {
 		return nil, err
 	}
@@ -413,6 +451,11 @@ func (r *controlRepo) BulkCreateControls(ctx context.Context, auditID int, reqs 
 		if req.Population != nil && strings.EqualFold(req.RequirementType, "OE") {
 			if err := insertPendingPopulation(ctx, tx, int(id), req.Population, req.CreatedBy); err != nil {
 				return nil, fmt.Errorf("control.BulkCreate population %q: %w", req.ControlNumber, err)
+			}
+		}
+		if strings.EqualFold(defCols.requirementType, "DESIGN") && req.DueDate != nil && *req.DueDate != "" {
+			if err := openFirstStage(ctx, tx, auditID, int(id), *req.DueDate, r.clock()); err != nil {
+				return nil, fmt.Errorf("control.BulkCreate stage %q: %w", req.ControlNumber, err)
 			}
 		}
 	}
@@ -624,6 +667,17 @@ func (r *controlRepo) UpdateControl(ctx context.Context, auditID, controlID int,
 		}
 	}
 
+	if req.Status != nil && req.ExpectedStatus != "" {
+		if err := applyStageTransition(ctx, tx, auditID, controlID, req.ExpectedStatus, *req.Status, req.UpdatedBy, false, r.clock()); err != nil {
+			return nil, err
+		}
+	}
+	if req.DueDate != nil {
+		if err := syncFirstStageDueDate(ctx, tx, auditID, controlID, *req.DueDate); err != nil {
+			return nil, err
+		}
+	}
+
 	if req.Status != nil {
 		if err := recomputeAuditStatus(ctx, tx, auditID); err != nil {
 			return nil, err
@@ -712,6 +766,9 @@ func (r *controlRepo) OverrideControlStatus(ctx context.Context, auditID, contro
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return nil, &apierror.ConflictError{Msg: "control was modified concurrently, please retry"}
+	}
+	if err := applyStageTransition(ctx, tx, auditID, controlID, req.ExpectedStatus, req.Status, req.UpdatedBy, true, r.clock()); err != nil {
+		return nil, err
 	}
 
 	if popTarget, ok := overridePopulationTarget[req.Status]; ok {
@@ -878,6 +935,9 @@ func (r *controlRepo) ChangeRequirementType(ctx context.Context, auditID, contro
 		return nil, fmt.Errorf("control.ChangeRequirementType(%d,%d): %w", auditID, controlID, err)
 	}
 	if err := applyFields(); err != nil {
+		return nil, err
+	}
+	if err := resetStagesForRequirementType(ctx, tx, auditID, controlID, req.RequirementType, r.clock()); err != nil {
 		return nil, err
 	}
 	if err := recomputeAuditStatus(ctx, tx, auditID); err != nil {

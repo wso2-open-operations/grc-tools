@@ -362,6 +362,10 @@ func TestChangeRequirementType_DesignToOE_Success(t *testing.T) {
 	mock.ExpectExec(re("SET requirement_type = ?, status = ?, status_overridden = FALSE")).
 		WithArgs("OE", "POPULATION_PENDING", "actor", 1, 2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// OE controls are not tracked: the control's stage history is cleared.
+	mock.ExpectExec(re("DELETE FROM audit_control_stage WHERE control_id = ?")).
+		WithArgs(2).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
 		WithArgs(1).
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
@@ -423,6 +427,19 @@ func TestChangeRequirementType_OEToDesign_Success(t *testing.T) {
 	mock.ExpectExec(re("SET requirement_type = ?, status = ?, status_overridden = FALSE")).
 		WithArgs("DESIGN", "EVIDENCE_PENDING", "actor", 1, 2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// A DESIGN control starts a fresh first stage from its due date.
+	mock.ExpectExec(re("DELETE FROM audit_control_stage WHERE control_id = ?")).
+		WithArgs(2).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(re("SELECT DATE_FORMAT(due_date, '%Y-%m-%d') FROM audit_control WHERE id = ?")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"due_date"}).AddRow("2026-11-07"))
+	mock.ExpectQuery(re("FROM audit_deadline_days")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(re("INSERT INTO audit_control_stage")).
+		WithArgs(2, "OWNER", "INITIAL", sqlmock.AnyArg(), "2026-11-07", "2026-11-17", "2026-11-27").
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
 		WithArgs(1).
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
