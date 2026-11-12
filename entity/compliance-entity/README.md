@@ -241,7 +241,9 @@ here).
 | `DELETE` | `/audits/{id}` | Delete audit |
 | `POST` | `/audits/{auditId}/controls` | Add control |
 | `POST` | `/audits/{auditId}/controls/bulk` | Bulk-add controls |
-| `POST` | `/audits/{auditId}/controls/search` | Search an audit's controls |
+| `POST` | `/audits/{auditId}/controls/search` | Search an audit's controls (`currentHandlers` limits to controls currently held by OWNER, COMPLIANCE or AUDITOR) |
+| `GET` | `/audits/{auditId}/deadline-days` | The audit's allowed days per cycle and group, defaults filled in |
+| `PUT` | `/audits/{auditId}/deadline-days` | Edit allowed days (1 to 365); only affects hand-offs that happen afterwards |
 | `GET` | `/audits/{auditId}/controls/{controlId}` | Get control |
 | `PATCH` | `/audits/{auditId}/controls/{controlId}` | Update control |
 | `DELETE` | `/audits/{auditId}/controls/{controlId}` | Delete control |

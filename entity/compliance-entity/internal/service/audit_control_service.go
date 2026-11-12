@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/deadline"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/repository"
 )
@@ -33,6 +35,24 @@ type controlService struct {
 	repo          repository.ControlRepository
 	frameworkRepo repository.FrameworkControlRepository
 	auditRepo     repository.AuditRepository
+	// stageRepo, when set, makes every control response carry its hand-off
+	// based deadline fields (see enrichDeadlines). Nil leaves responses as before.
+	stageRepo repository.StageRepository
+	now       func() time.Time
+}
+
+// ControlServiceOption configures a controlService.
+type ControlServiceOption func(*controlService)
+
+// WithDeadlineReads turns on the workflow-aware deadline fields in control
+// responses, read from the given stage repository.
+func WithDeadlineReads(stageRepo repository.StageRepository) ControlServiceOption {
+	return func(s *controlService) { s.stageRepo = stageRepo }
+}
+
+// WithControlClock replaces the time source, for tests.
+func WithControlClock(now func() time.Time) ControlServiceOption {
+	return func(s *controlService) { s.now = now }
 }
 
 // NewControlService constructs a ControlService. frameworkRepo/auditRepo back
@@ -40,8 +60,85 @@ type controlService struct {
 // applyFrameworkPushBack) — resolving the audit's framework id and writing
 // into the catalog are the only things that ever touch audit_framework_control
 // from this service.
-func NewControlService(repo repository.ControlRepository, frameworkRepo repository.FrameworkControlRepository, auditRepo repository.AuditRepository) ControlService {
-	return &controlService{repo: repo, frameworkRepo: frameworkRepo, auditRepo: auditRepo}
+func NewControlService(repo repository.ControlRepository, frameworkRepo repository.FrameworkControlRepository, auditRepo repository.AuditRepository, opts ...ControlServiceOption) ControlService {
+	s := &controlService{repo: repo, frameworkRepo: frameworkRepo, auditRepo: auditRepo, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// normalizeCurrentHandlers upper-cases and validates the currentHandlers filter.
+func normalizeCurrentHandlers(req *domain.SearchControlsRequest) error {
+	for i, h := range req.CurrentHandlers {
+		h = strings.ToUpper(strings.TrimSpace(h))
+		if !deadline.ValidHandler(h) {
+			return &apierror.ValidationError{Msg: "invalid currentHandler: " + req.CurrentHandlers[i] + " (must be OWNER, COMPLIANCE or AUDITOR)"}
+		}
+		req.CurrentHandlers[i] = h
+	}
+	return nil
+}
+
+// enrichDeadlines fills each DESIGN control's deadline fields (current holder
+// and deadline, planned dates, Delayed, delay log) from its recorded hand-offs
+// in one query. Everything is worked out as of now and nothing is stored. A
+// failure to load them is logged and leaves the fields empty rather than
+// failing the request, since they are additive to the control.
+func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.AuditControl) {
+	if s.stageRepo == nil || len(controls) == 0 {
+		return
+	}
+	ids := make([]int, 0, len(controls))
+	for _, c := range controls {
+		if strings.EqualFold(c.RequirementType, "DESIGN") {
+			ids = append(ids, c.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	stages, err := s.stageRepo.ListStagesByControls(ctx, ids)
+	if err != nil {
+		log.Printf("control deadlines: load stages: %v", err)
+		return
+	}
+	now := s.now()
+	for i := range controls {
+		st := stages[controls[i].ID]
+		if len(st) == 0 {
+			continue
+		}
+		applyEvaluation(&controls[i], deadline.Evaluate(st, now))
+	}
+}
+
+func (s *controlService) enrichOne(ctx context.Context, c *domain.AuditControl) {
+	one := []domain.AuditControl{*c}
+	s.enrichDeadlines(ctx, one)
+	*c = one[0]
+}
+
+func applyEvaluation(c *domain.AuditControl, ev deadline.Evaluation) {
+	day := func(t *time.Time) *string {
+		if t == nil {
+			return nil
+		}
+		v := deadline.FormatDay(*t)
+		return &v
+	}
+	delayed := ev.Delayed
+	c.DeadlineTracked = true
+	c.CurrentHandler = ev.CurrentHandler
+	c.CurrentDueDate = day(ev.CurrentDueDate)
+	c.PlannedOwnerDate = day(ev.PlannedOwnerDate)
+	c.PlannedComplianceDate = day(ev.PlannedComplianceDate)
+	c.PlannedAuditorDate = day(ev.PlannedAuditorDate)
+	c.Delayed = &delayed
+	c.DelayLog = nil
+	for _, e := range ev.DelayLog {
+		c.DelayLog = append(c.DelayLog, domain.DelayLogEntry{HandledBy: e.HandledBy, Date: deadline.FormatDay(e.Date)})
+	}
 }
 
 // validControlStatuses mirrors the audit_control.status ENUM in audit_schema.sql
@@ -168,6 +265,9 @@ func (s *controlService) SearchControls(ctx context.Context, auditID int, req do
 			return domain.SearchControlsResponse{}, &apierror.ValidationError{Msg: "invalid requirementType: " + rt + " (must be DESIGN or OE)"}
 		}
 	}
+	if err := normalizeCurrentHandlers(&req); err != nil {
+		return domain.SearchControlsResponse{}, err
+	}
 	normalizePagination(&req.Pagination)
 	controls, total, err := s.repo.SearchControls(ctx, auditID, req)
 	if err != nil {
@@ -176,6 +276,7 @@ func (s *controlService) SearchControls(ctx context.Context, auditID int, req do
 	if controls == nil {
 		controls = []domain.AuditControl{}
 	}
+	s.enrichDeadlines(ctx, controls)
 	return domain.SearchControlsResponse{Controls: controls, Total: total, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
 }
 
@@ -190,6 +291,9 @@ func (s *controlService) SearchControlsGlobal(ctx context.Context, req domain.Se
 			return domain.SearchControlsResponse{}, &apierror.ValidationError{Msg: "invalid requirementType: " + rt + " (must be DESIGN or OE)"}
 		}
 	}
+	if err := normalizeCurrentHandlers(&req); err != nil {
+		return domain.SearchControlsResponse{}, err
+	}
 	normalizePagination(&req.Pagination)
 	controls, total, err := s.repo.SearchControlsGlobal(ctx, req)
 	if err != nil {
@@ -198,6 +302,7 @@ func (s *controlService) SearchControlsGlobal(ctx context.Context, req domain.Se
 	if controls == nil {
 		controls = []domain.AuditControl{}
 	}
+	s.enrichDeadlines(ctx, controls)
 	return domain.SearchControlsResponse{Controls: controls, Total: total, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
 }
 
@@ -241,6 +346,7 @@ func (s *controlService) BulkCreateControls(ctx context.Context, auditID int, re
 	if err := s.applyFrameworkPushBacks(ctx, auditID, req.Controls); err != nil {
 		return domain.BulkCreateControlsResponse{}, err
 	}
+	s.enrichDeadlines(ctx, controls)
 	return domain.BulkCreateControlsResponse{Controls: controls, Created: len(controls)}, nil
 }
 
@@ -369,6 +475,7 @@ func (s *controlService) GetControlByID(ctx context.Context, auditID, controlID 
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	s.enrichOne(ctx, c)
 	return *c, nil
 }
 
@@ -425,6 +532,7 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 			return domain.AuditControl{}, err
 		}
 	}
+	s.enrichOne(ctx, c)
 	return *c, nil
 }
 
@@ -495,6 +603,7 @@ func (s *controlService) UpdateControl(ctx context.Context, auditID, controlID i
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	s.enrichOne(ctx, c)
 	return *c, nil
 }
 
@@ -571,6 +680,7 @@ func (s *controlService) OverrideControlStatus(ctx context.Context, auditID, con
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	s.enrichOne(ctx, c)
 	return *c, nil
 }
 
@@ -609,5 +719,6 @@ func (s *controlService) ChangeRequirementType(ctx context.Context, auditID, con
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	s.enrichOne(ctx, c)
 	return *c, nil
 }
