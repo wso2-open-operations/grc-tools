@@ -80,6 +80,12 @@ type ProductRepository interface {
 }
 
 // ControlRepository is the data-access contract for audit controls.
+// DeadlineDaysRepository reads and edits an audit's allowed days.
+type DeadlineDaysRepository interface {
+	Get(ctx context.Context, auditID int) (*model.DeadlineDays, error)
+	Put(ctx context.Context, auditID int, rows []model.DeadlineDaysRow, updatedBy string) (*model.DeadlineDays, error)
+}
+
 type ControlRepository interface {
 	// List returns every control in auditID, unscoped — for internal callers
 	// that need the full picture regardless of the caller's row scope (e.g.

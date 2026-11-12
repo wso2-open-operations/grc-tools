@@ -58,6 +58,20 @@ type AuditControl struct {
 	IsOverdue           bool      `json:"isOverdue"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
+	// Workflow-aware due dates (DESIGN controls), worked out by the Compliance
+	// Entity from the control's recorded hand-offs. DeadlineTracked is false for
+	// a control with no hand-offs recorded (OE, or one that predates the
+	// feature), in which case the rest stay empty and DueDate is the only date.
+	// DelayLog is cleared for callers who are not org-wide GRC viewers — see
+	// redactDelayLog in the handler package.
+	DeadlineTracked       bool            `json:"deadlineTracked"`
+	CurrentHandler        *string         `json:"currentHandler"` // OWNER | COMPLIANCE | AUDITOR; empty once complete
+	CurrentDueDate        *string         `json:"currentDueDate"`
+	PlannedOwnerDate      *string         `json:"plannedOwnerDate"`
+	PlannedComplianceDate *string         `json:"plannedComplianceDate"`
+	PlannedAuditorDate    *string         `json:"plannedAuditorDate"`
+	Delayed               *bool           `json:"delayed"`
+	DelayLog              []DelayLogEntry `json:"delayLog,omitempty"`
 	// Population-phase fields (OE controls), joined from the initial audit_population record.
 	PopulationDescription *string `json:"populationDescription"`
 	PopulationComments    *string `json:"populationComments"`
