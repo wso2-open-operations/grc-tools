@@ -50,6 +50,8 @@ var controlExportHeader = []string{
 	"Control No.", "Description", "Evidence Requirement", "Req. Type", "Control Type",
 	"Status", "Overdue", "Scope", "Team", "Process Owner", "Auditor POC", "Due Date",
 	"Population Due Date", "Population Owner", "Population Team",
+	"Current Holder", "Current Deadline", "Planned Owner Date", "Planned Compliance Date", "Planned Auditor Date",
+	"Delayed", "Delay Log",
 }
 
 // controlExportParams is what the audit detail page is currently showing:
@@ -210,7 +212,26 @@ func controlExportRecord(c *model.AuditControl) []string {
 		csvexport.Date(csvexport.Deref(c.PopulationDueDate)),
 		csvexport.SafeCell(csvexport.Deref(c.PopulationOwnerName)),
 		csvexport.SafeCell(csvexport.Deref(c.PopulationTeamName)),
+		csvexport.SafeCell(handlerLabels[csvexport.Deref(c.CurrentHandler)]),
+		csvexport.Date(csvexport.Deref(c.CurrentDueDate)),
+		csvexport.Date(csvexport.Deref(c.PlannedOwnerDate)),
+		csvexport.Date(csvexport.Deref(c.PlannedComplianceDate)),
+		csvexport.Date(csvexport.Deref(c.PlannedAuditorDate)),
+		delayedCell(c),
+		csvexport.SafeCell(delayLogText(c.DelayLog)),
 	}
+}
+
+// delayedCell is blank for a control with no hand-offs tracked, so an untracked
+// control is never reported as "No".
+func delayedCell(c *model.AuditControl) string {
+	switch {
+	case c.Delayed == nil:
+		return ""
+	case *c.Delayed:
+		return "Yes"
+	}
+	return "No"
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)

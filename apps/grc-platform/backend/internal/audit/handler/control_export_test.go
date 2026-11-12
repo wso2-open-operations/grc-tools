@@ -211,7 +211,7 @@ func TestExportControls_CSV(t *testing.T) {
 	}
 	// Display labels, a date, and the name columns come through as the table shows them.
 	first := strings.Join(rows[1], "|")
-	if first != "CA-01|Access is reviewed||Design|Non-Config|Complete|No|Common|Platform|Owen Owner|Ada Auditor|2026-11-05|||" {
+	if first != "CA-01|Access is reviewed||Design|Non-Config|Complete|No|Common|Platform|Owen Owner|Ada Auditor|2026-11-05||||||||||" {
 		t.Errorf("first row = %q", first)
 	}
 	if rows[2][1] != "'=cmd|' /C calc'!A0" {

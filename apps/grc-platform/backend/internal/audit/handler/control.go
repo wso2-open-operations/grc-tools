@@ -67,6 +67,7 @@ func (h *controlHandler) listControls(w http.ResponseWriter, r *http.Request) {
 	if controls == nil {
 		controls = []*model.AuditControl{}
 	}
+	redactDelayLog(controls, canSeeDelayLog(ctx))
 	response.WriteJSONValue(w, http.StatusOK, &model.ControlListResponse{
 		Items: controls,
 		Total: len(controls),
@@ -113,6 +114,7 @@ func (h *controlHandler) getControl(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusNotFound, response.ErrMsgNotFound)
 		return
 	}
+	redactDelayLog([]*model.AuditControl{c}, canSeeDelayLog(ctx))
 	response.WriteJSONValue(w, http.StatusOK, c)
 }
 
