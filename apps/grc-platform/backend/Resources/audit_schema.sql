@@ -496,4 +496,55 @@ CREATE TABLE IF NOT EXISTS audit_notification (
   CONSTRAINT fk_notif_population FOREIGN KEY (population_id) REFERENCES audit_population(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================================================
+-- audit_deadline_days  (per-audit allowed days for each group, per cycle)
+--
+-- How many calendar days a group may hold a control before passing it on:
+-- INITIAL is a control's first pass, REVISION any pass after a rejection.
+-- An audit with no rows here uses the built-in defaults (INITIAL 30/10/10,
+-- REVISION 15/5/5 for OWNER/COMPLIANCE/AUDITOR), so existing audits need no
+-- data change. Editing a value only affects hand-offs that happen afterwards.
+-- phase is EVIDENCE for DESIGN controls; POPULATION is reserved for OE controls.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS audit_deadline_days (
+  audit_id     INT                          NOT NULL,
+  phase        ENUM('EVIDENCE','POPULATION') NOT NULL DEFAULT 'EVIDENCE',
+  cycle_type   ENUM('INITIAL','REVISION')    NOT NULL,
+  handled_by   ENUM('OWNER','COMPLIANCE','AUDITOR') NOT NULL,
+  allowed_days SMALLINT UNSIGNED             NOT NULL,
+  PRIMARY KEY (audit_id, phase, cycle_type, handled_by),
+  CONSTRAINT fk_deadline_days_audit FOREIGN KEY (audit_id) REFERENCES audit(id) ON DELETE CASCADE,
+  CONSTRAINT chk_deadline_days_range CHECK (allowed_days BETWEEN 1 AND 365)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- audit_control_stage  (hand-off history: one row per period a group holds a control)
+--
+-- A row is added for every hand-off, late or not. The one row with a NULL
+-- ended_at is the control's current holder. due_date is the holder's deadline
+-- (start day + their allowed days). The two planned_* dates hold the original
+-- plan for GRC and EY and are only set on a control's first row; the owner's
+-- planned date is that first row's due_date. updated_by is whoever closed the
+-- row, i.e. the person who handled that stage. Delayed and the delay log are
+-- worked out from these rows when read; nothing about them is stored.
+-- At most one open row per control and phase is enforced in application code.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS audit_control_stage (
+  id                      BIGINT       NOT NULL AUTO_INCREMENT,
+  control_id              INT          NOT NULL,
+  phase                   ENUM('EVIDENCE','POPULATION') NOT NULL DEFAULT 'EVIDENCE',
+  handled_by              ENUM('OWNER','COMPLIANCE','AUDITOR') NOT NULL,
+  cycle_type              ENUM('INITIAL','REVISION') NOT NULL,
+  started_at              DATETIME     NOT NULL,
+  due_date                DATE         NOT NULL,
+  planned_compliance_date DATE         NULL,
+  planned_auditor_date    DATE         NULL,
+  ended_at                DATETIME     NULL,
+  updated_by              VARCHAR(255) NULL,
+  PRIMARY KEY (id),
+  CONSTRAINT fk_stage_control FOREIGN KEY (control_id) REFERENCES audit_control(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
