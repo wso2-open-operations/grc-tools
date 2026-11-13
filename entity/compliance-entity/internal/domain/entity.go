@@ -354,6 +354,19 @@ type AuditControl struct {
 	StatusOverridden bool       `json:"statusOverridden"`
 	OverriddenBy     *string    `json:"overriddenBy"`
 	OverriddenAt     *time.Time `json:"overriddenAt"`
+	// Workflow-aware due dates (DESIGN controls). All
+	// worked out from the control's recorded hand-offs when read; nothing here is
+	// stored on audit_control. DeadlineTracked is false for a control with no
+	// hand-offs recorded yet, in which case the rest stay empty and DueDate is
+	// the only date that applies.
+	DeadlineTracked       bool            `json:"deadlineTracked"`
+	CurrentHandler        *string         `json:"currentHandler"` // OWNER | COMPLIANCE | AUDITOR; empty once complete
+	CurrentDueDate        *string         `json:"currentDueDate"` // YYYY-MM-DD
+	PlannedOwnerDate      *string         `json:"plannedOwnerDate"`
+	PlannedComplianceDate *string         `json:"plannedComplianceDate"`
+	PlannedAuditorDate    *string         `json:"plannedAuditorDate"`
+	Delayed               *bool           `json:"delayed"`
+	DelayLog              []DelayLogEntry `json:"delayLog,omitempty"`
 	// Population-phase fields (OE controls only), from the initial audit_population record.
 	PopulationDescription *string `json:"populationDescription"`
 	PopulationComments    *string `json:"populationComments"`
@@ -385,6 +398,10 @@ type SearchControlsRequest struct {
 	// single-item scope check (is controlId visible to this caller at this
 	// scope?) so it can reuse this same query instead of a bespoke endpoint.
 	ControlIDs []int `json:"controlIds"`
+	// CurrentHandlers restricts to controls whose open stage is held by one of
+	// OWNER, COMPLIANCE or AUDITOR — the "My deadlines" view. Controls with no
+	// recorded hand-offs never match.
+	CurrentHandlers []string `json:"currentHandlers"`
 	// Scope/UserID apply the same row-scoping rule as the dashboard (see
 	// dashboard.go's Scope type and audit_dashboard_repo.go's scopeWhere).
 	// Omitted/empty Scope matches nothing; internal callers that want every

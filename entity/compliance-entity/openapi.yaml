@@ -1147,6 +1147,63 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /audits/{auditId}/deadline-days:
+    get:
+      tags:
+      - Controls
+      summary: Get an audit's allowed days
+      description: Allowed days each group may hold a DESIGN control, per cycle (INITIAL or REVISION). Always lists all six combinations; isDefault is true where no saved value overrides the default.
+      operationId: getDeadlineDays
+      parameters:
+      - name: auditId
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDaysResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags:
+      - Controls
+      summary: Edit an audit's allowed days
+      description: Upserts the listed rows (allowedDays 1 to 365). Only hand-offs that happen afterwards use the new values; deadlines already given never move.
+      operationId: updateDeadlineDays
+      parameters:
+      - name: auditId
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeadlineDaysRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDaysResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /audits/{auditId}/controls/{controlId}/status-override:
     post:
       tags:
@@ -4670,11 +4727,87 @@ components:
           nullable: true
         updatedBy:
           type: string
+    DeadlineDaysRow:
+      type: object
+      properties:
+        cycleType:
+          type: string
+          enum: [INITIAL, REVISION]
+        handledBy:
+          type: string
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+        allowedDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        isDefault:
+          type: boolean
+    DeadlineDaysResponse:
+      type: object
+      properties:
+        auditId:
+          type: integer
+        phase:
+          type: string
+          enum: [EVIDENCE]
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineDaysRow'
+    UpdateDeadlineDaysRequest:
+      type: object
+      required: [days, updatedBy]
+      properties:
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineDaysRow'
+        updatedBy:
+          type: string
+    DelayLogEntry:
+      type: object
+      properties:
+        handledBy:
+          type: string
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+        date:
+          type: string
+          format: date
     AuditControl:
       type: object
       properties:
         id:
           type: integer
+        deadlineTracked:
+          type: boolean
+          description: False for a control with no recorded hand-offs; the fields below are then empty.
+        currentHandler:
+          type: string
+          nullable: true
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+        currentDueDate:
+          type: string
+          format: date
+          nullable: true
+        plannedOwnerDate:
+          type: string
+          format: date
+          nullable: true
+        plannedComplianceDate:
+          type: string
+          format: date
+          nullable: true
+        plannedAuditorDate:
+          type: string
+          format: date
+          nullable: true
+        delayed:
+          type: boolean
+          nullable: true
+        delayLog:
+          type: array
+          items:
+            $ref: '#/components/schemas/DelayLogEntry'
         auditId:
           type: integer
         controlNumber:
@@ -4780,6 +4913,12 @@ components:
     SearchControlsRequest:
       type: object
       properties:
+        currentHandlers:
+          type: array
+          description: Limit to controls whose open stage is held by one of these groups (the My deadlines view).
+          items:
+            type: string
+            enum: [OWNER, COMPLIANCE, AUDITOR]
         searchQuery:
           type: string
         statusKeys:
@@ -4884,6 +5023,7 @@ components:
         dueDate:
           type: string
           nullable: true
+          description: Optional for a DESIGN control, which then gets today (Asia/Colombo) plus the audit's INITIAL/OWNER allowed days. Required for OE controls.
         population:
           allOf:
           - $ref: '#/components/schemas/InlinePopulationRequest'

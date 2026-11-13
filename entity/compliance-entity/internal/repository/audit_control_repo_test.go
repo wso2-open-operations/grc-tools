@@ -105,6 +105,136 @@ func requireValidation(t *testing.T, err error, wantMsg string) {
 	}
 }
 
+// A due date sent with an unchanged requirement type must still move the
+// owner's open first stage and replan the GRC and EY dates.
+func TestChangeRequirementType_SameType_DueDateSyncsFirstStage(t *testing.T) {
+	repo, mock := newControlRepoMock(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(re("SELECT requirement_type, status FROM audit_control WHERE audit_id = ? AND id = ? FOR UPDATE")).
+		WithArgs(1, 2).
+		WillReturnRows(sqlmock.NewRows([]string{"requirement_type", "status"}).AddRow("DESIGN", "EVIDENCE_PENDING"))
+	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
+	mock.ExpectExec(re("UPDATE audit_control SET")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(re("FROM audit_control_stage")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "due_date"}).AddRow(7, "2026-11-07"))
+	mock.ExpectQuery(re("SELECT cycle_type, handled_by, allowed_days FROM audit_deadline_days")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+	// Defaults are 30/10/10: owner due 2026-12-01, so 2026-12-11 and 2026-12-21.
+	mock.ExpectExec(re("UPDATE audit_control_stage SET due_date = ?, planned_compliance_date = ?, planned_auditor_date = ? WHERE id = ?")).
+		WithArgs("2026-12-01", "2026-12-11", "2026-12-21", 7).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(re("WHERE c.audit_id = ? AND c.id = ?")).
+		WithArgs(1, 2).
+		WillReturnRows(controlRow(2, 1, "DESIGN", "EVIDENCE_PENDING"))
+
+	_, err := repo.ChangeRequirementType(context.Background(), 1, 2,
+		domain.ChangeRequirementTypeRequest{RequirementType: "DESIGN", UpdatedBy: "actor",
+			Control: &domain.UpdateControlRequest{DueDate: strPtr("2026-12-01")}})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+// Saving the control with the same due date must not replan from the current
+// allowed days: no days lookup and no stage update.
+func TestChangeRequirementType_SameType_UnchangedDueDateKeepsPlan(t *testing.T) {
+	repo, mock := newControlRepoMock(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(re("SELECT requirement_type, status FROM audit_control WHERE audit_id = ? AND id = ? FOR UPDATE")).
+		WithArgs(1, 2).
+		WillReturnRows(sqlmock.NewRows([]string{"requirement_type", "status"}).AddRow("DESIGN", "EVIDENCE_PENDING"))
+	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
+	mock.ExpectExec(re("UPDATE audit_control SET")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(re("FROM audit_control_stage")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "due_date"}).AddRow(7, "2026-11-07"))
+	mock.ExpectCommit()
+	mock.ExpectQuery(re("WHERE c.audit_id = ? AND c.id = ?")).
+		WithArgs(1, 2).
+		WillReturnRows(controlRow(2, 1, "DESIGN", "EVIDENCE_PENDING"))
+
+	_, err := repo.ChangeRequirementType(context.Background(), 1, 2,
+		domain.ChangeRequirementTypeRequest{RequirementType: "DESIGN", UpdatedBy: "actor",
+			Control: &domain.UpdateControlRequest{DueDate: strPtr("2026-11-07")}})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+// A request that edits the due date and hands the control on in one go must move
+// the owner's stage first; once the hand-off closes it there is nothing to move.
+func TestUpdateControl_DueDateSyncsBeforeHandOff(t *testing.T) {
+	repo, mock := newControlRepoMock(t)
+	mock.ExpectBegin()
+	mock.ExpectExec(re("UPDATE audit_control SET")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// 1. the due date edit moves the open owner stage and replans (30/10/10 defaults).
+	mock.ExpectQuery(re("FROM audit_control_stage")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "due_date"}).AddRow(7, "2026-11-07"))
+	mock.ExpectQuery(re("FROM audit_deadline_days")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(re("UPDATE audit_control_stage SET due_date = ?, planned_compliance_date = ?, planned_auditor_date = ? WHERE id = ?")).
+		WithArgs("2026-12-01", "2026-12-11", "2026-12-21", 7).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// 2. then the hand-off closes that stage and opens Compliance's.
+	mock.ExpectQuery(re("SELECT requirement_type FROM audit_control")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("DESIGN"))
+	mock.ExpectQuery(re("FROM audit_control_stage")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "handled_by", "cycle_type", "ended_at"}).AddRow(7, "OWNER", "INITIAL", nil))
+	mock.ExpectQuery(re("FROM audit_deadline_days")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(re("UPDATE audit_control_stage SET ended_at")).
+		WithArgs(sqlmock.AnyArg(), "actor", int64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(re("INSERT INTO audit_control_stage")).
+		WithArgs(2, "COMPLIANCE", "INITIAL", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(8, 1))
+	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
+	mock.ExpectQuery(re("SELECT COUNT(*) FROM audit_control WHERE audit_id = ? AND status <> 'COMPLETE' FOR UPDATE")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectCommit()
+	mock.ExpectQuery(re("WHERE c.audit_id = ? AND c.id = ?")).
+		WithArgs(1, 2).
+		WillReturnRows(controlRow(2, 1, "DESIGN", "EVIDENCE_INTERNAL_REVIEW"))
+
+	status := "EVIDENCE_INTERNAL_REVIEW"
+	_, err := repo.UpdateControl(context.Background(), 1, 2, domain.UpdateControlRequest{
+		Status: &status, ExpectedStatus: "EVIDENCE_PENDING", DueDate: strPtr("2026-12-01"), UpdatedBy: "actor",
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestChangeRequirementType_ControlNotFound(t *testing.T) {
 	repo, mock := newControlRepoMock(t)
 	mock.ExpectBegin()
@@ -362,6 +492,10 @@ func TestChangeRequirementType_DesignToOE_Success(t *testing.T) {
 	mock.ExpectExec(re("SET requirement_type = ?, status = ?, status_overridden = FALSE")).
 		WithArgs("OE", "POPULATION_PENDING", "actor", 1, 2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// OE controls are not tracked: the control's stage history is cleared.
+	mock.ExpectExec(re("DELETE FROM audit_control_stage WHERE control_id = ?")).
+		WithArgs(2).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
 		WithArgs(1).
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
@@ -423,6 +557,19 @@ func TestChangeRequirementType_OEToDesign_Success(t *testing.T) {
 	mock.ExpectExec(re("SET requirement_type = ?, status = ?, status_overridden = FALSE")).
 		WithArgs("DESIGN", "EVIDENCE_PENDING", "actor", 1, 2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	// A DESIGN control starts a fresh first stage from its due date.
+	mock.ExpectExec(re("DELETE FROM audit_control_stage WHERE control_id = ?")).
+		WithArgs(2).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(re("SELECT DATE_FORMAT(due_date, '%Y-%m-%d') FROM audit_control WHERE id = ?")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"due_date"}).AddRow("2026-11-07"))
+	mock.ExpectQuery(re("FROM audit_deadline_days")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(re("INSERT INTO audit_control_stage")).
+		WithArgs(2, "OWNER", "INITIAL", sqlmock.AnyArg(), "2026-11-07", "2026-11-17", "2026-11-27").
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
 		WithArgs(1).
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))

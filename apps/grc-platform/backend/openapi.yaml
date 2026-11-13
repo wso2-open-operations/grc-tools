@@ -603,6 +603,61 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/audits/{id}/settings/deadline-days:
+    get:
+      tags:
+      - Audit Controls
+      summary: Get an audit's allowed days
+      description: How many calendar days each group (OWNER, COMPLIANCE, AUDITOR) may hold a DESIGN control before passing it on, per cycle (INITIAL or REVISION). Always lists all six combinations; isDefault is true where no saved value overrides the default. Requires the manage-controls privilege.
+      operationId: getAuditDeadlineDays
+      parameters:
+      - $ref: '#/components/parameters/AuditId'
+      responses:
+        '200':
+          description: The audit's allowed days
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDays'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags:
+      - Audit Controls
+      summary: Edit an audit's allowed days
+      description: Requires the manage-controls privilege. Changes the listed rows (allowedDays 1 to 365). Only hand-offs that happen afterwards use the new values; deadlines already given never move. Each change is recorded in the audit trail.
+      operationId: updateAuditDeadlineDays
+      parameters:
+      - $ref: '#/components/parameters/AuditId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeadlineDaysRequest'
+      responses:
+        '200':
+          description: The audit's allowed days after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDays'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /api/v1/audits/{id}/controls:
     get:
       tags:
@@ -5266,6 +5321,7 @@ components:
           type: string
           format: date
           nullable: true
+          description: Optional for a single DESIGN control, which then gets today plus the audit's initial Owner days (see Deadline Days). Required for OE controls and for every row of a bulk add.
         population:
           nullable: true
           anyOf:
@@ -5354,6 +5410,50 @@ components:
       properties:
         status:
           type: string
+    DelayLogEntry:
+      type: object
+      properties:
+        handledBy:
+          type: string
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+        date:
+          type: string
+          format: date
+    DeadlineDaysRow:
+      type: object
+      properties:
+        cycleType:
+          type: string
+          enum: [INITIAL, REVISION]
+        handledBy:
+          type: string
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+        allowedDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        isDefault:
+          type: boolean
+    DeadlineDays:
+      type: object
+      properties:
+        auditId:
+          type: integer
+        phase:
+          type: string
+          enum: [EVIDENCE]
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineDaysRow'
+    UpdateDeadlineDaysRequest:
+      type: object
+      required: [days]
+      properties:
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineDaysRow'
     AuditControl:
       type: object
       description: A control under evaluation within an audit. Owns its full definition text directly (never FK-linked to the framework catalog).
@@ -5362,6 +5462,39 @@ components:
           type: integer
         auditId:
           type: integer
+        deadlineTracked:
+          type: boolean
+          description: False for a control with no recorded hand-offs (OE, or one that predates the feature); the deadline fields below are then empty and dueDate is the only date.
+        currentHandler:
+          type: string
+          nullable: true
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+          description: The group holding the control now; null once it is complete.
+        currentDueDate:
+          type: string
+          format: date
+          nullable: true
+          description: The current holder's deadline.
+        plannedOwnerDate:
+          type: string
+          format: date
+          nullable: true
+        plannedComplianceDate:
+          type: string
+          format: date
+          nullable: true
+        plannedAuditorDate:
+          type: string
+          format: date
+          nullable: true
+        delayed:
+          type: boolean
+          nullable: true
+        delayLog:
+          type: array
+          description: One entry per late day per group. Only returned to org-wide GRC viewers; omitted for everyone else.
+          items:
+            $ref: '#/components/schemas/DelayLogEntry'
         ownerId:
           type: integer
           nullable: true

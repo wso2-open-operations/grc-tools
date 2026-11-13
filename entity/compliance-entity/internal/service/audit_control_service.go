@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/deadline"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/repository"
 )
@@ -33,6 +35,24 @@ type controlService struct {
 	repo          repository.ControlRepository
 	frameworkRepo repository.FrameworkControlRepository
 	auditRepo     repository.AuditRepository
+	// stageRepo, when set, makes every control response carry its hand-off
+	// based deadline fields (see enrichDeadlines). Nil leaves responses as before.
+	stageRepo repository.StageRepository
+	now       func() time.Time
+}
+
+// ControlServiceOption configures a controlService.
+type ControlServiceOption func(*controlService)
+
+// WithDeadlineReads turns on the workflow-aware deadline fields in control
+// responses, read from the given stage repository.
+func WithDeadlineReads(stageRepo repository.StageRepository) ControlServiceOption {
+	return func(s *controlService) { s.stageRepo = stageRepo }
+}
+
+// WithControlClock replaces the time source, for tests.
+func WithControlClock(now func() time.Time) ControlServiceOption {
+	return func(s *controlService) { s.now = now }
 }
 
 // NewControlService constructs a ControlService. frameworkRepo/auditRepo back
@@ -40,8 +60,97 @@ type controlService struct {
 // applyFrameworkPushBack) — resolving the audit's framework id and writing
 // into the catalog are the only things that ever touch audit_framework_control
 // from this service.
-func NewControlService(repo repository.ControlRepository, frameworkRepo repository.FrameworkControlRepository, auditRepo repository.AuditRepository) ControlService {
-	return &controlService{repo: repo, frameworkRepo: frameworkRepo, auditRepo: auditRepo}
+func NewControlService(repo repository.ControlRepository, frameworkRepo repository.FrameworkControlRepository, auditRepo repository.AuditRepository, opts ...ControlServiceOption) ControlService {
+	s := &controlService{repo: repo, frameworkRepo: frameworkRepo, auditRepo: auditRepo, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// normalizeCurrentHandlers upper-cases and validates the currentHandlers filter.
+func normalizeCurrentHandlers(req *domain.SearchControlsRequest) error {
+	for i, h := range req.CurrentHandlers {
+		h = strings.ToUpper(strings.TrimSpace(h))
+		if !deadline.ValidHandler(h) {
+			return &apierror.ValidationError{Msg: "invalid currentHandler: " + req.CurrentHandlers[i] + " (must be OWNER, COMPLIANCE or AUDITOR)"}
+		}
+		req.CurrentHandlers[i] = h
+	}
+	return nil
+}
+
+// enrichDeadlines fills each DESIGN control's deadline fields (current holder
+// and deadline, planned dates, Delayed, delay log) from its recorded hand-offs
+// in one query. Everything is worked out as of now and nothing is stored. A
+// failure to load them is returned, so a read never shows a tracked control as
+// untracked; writes that already committed use enrichAfterWrite instead.
+func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.AuditControl) error {
+	if s.stageRepo == nil || len(controls) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(controls))
+	for _, c := range controls {
+		if strings.EqualFold(c.RequirementType, "DESIGN") {
+			ids = append(ids, c.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	stages, err := s.stageRepo.ListStagesByControls(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("control deadlines: load stages: %w", err)
+	}
+	now := s.now()
+	for i := range controls {
+		st := stages[controls[i].ID]
+		if len(st) == 0 {
+			continue
+		}
+		applyEvaluation(&controls[i], deadline.Evaluate(st, now))
+	}
+	return nil
+}
+
+func (s *controlService) enrichOne(ctx context.Context, c *domain.AuditControl) error {
+	one := []domain.AuditControl{*c}
+	if err := s.enrichDeadlines(ctx, one); err != nil {
+		return err
+	}
+	*c = one[0]
+	return nil
+}
+
+// enrichAfterWrite fills the deadline fields on the response of a write that has
+// already committed. Failing here would tell the client the write failed when it
+// did not, so the error is logged and the fields are left empty.
+func (s *controlService) enrichAfterWrite(ctx context.Context, c *domain.AuditControl) {
+	if err := s.enrichOne(ctx, c); err != nil {
+		log.Printf("%v", err)
+	}
+}
+
+func applyEvaluation(c *domain.AuditControl, ev deadline.Evaluation) {
+	day := func(t *time.Time) *string {
+		if t == nil {
+			return nil
+		}
+		v := deadline.FormatDay(*t)
+		return &v
+	}
+	delayed := ev.Delayed
+	c.DeadlineTracked = true
+	c.CurrentHandler = ev.CurrentHandler
+	c.CurrentDueDate = day(ev.CurrentDueDate)
+	c.PlannedOwnerDate = day(ev.PlannedOwnerDate)
+	c.PlannedComplianceDate = day(ev.PlannedComplianceDate)
+	c.PlannedAuditorDate = day(ev.PlannedAuditorDate)
+	c.Delayed = &delayed
+	c.DelayLog = nil
+	for _, e := range ev.DelayLog {
+		c.DelayLog = append(c.DelayLog, domain.DelayLogEntry{HandledBy: e.HandledBy, Date: deadline.FormatDay(e.Date)})
+	}
 }
 
 // validControlStatuses mirrors the audit_control.status ENUM in audit_schema.sql
@@ -168,6 +277,9 @@ func (s *controlService) SearchControls(ctx context.Context, auditID int, req do
 			return domain.SearchControlsResponse{}, &apierror.ValidationError{Msg: "invalid requirementType: " + rt + " (must be DESIGN or OE)"}
 		}
 	}
+	if err := normalizeCurrentHandlers(&req); err != nil {
+		return domain.SearchControlsResponse{}, err
+	}
 	normalizePagination(&req.Pagination)
 	controls, total, err := s.repo.SearchControls(ctx, auditID, req)
 	if err != nil {
@@ -175,6 +287,9 @@ func (s *controlService) SearchControls(ctx context.Context, auditID int, req do
 	}
 	if controls == nil {
 		controls = []domain.AuditControl{}
+	}
+	if err := s.enrichDeadlines(ctx, controls); err != nil {
+		return domain.SearchControlsResponse{}, err
 	}
 	return domain.SearchControlsResponse{Controls: controls, Total: total, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
 }
@@ -190,6 +305,9 @@ func (s *controlService) SearchControlsGlobal(ctx context.Context, req domain.Se
 			return domain.SearchControlsResponse{}, &apierror.ValidationError{Msg: "invalid requirementType: " + rt + " (must be DESIGN or OE)"}
 		}
 	}
+	if err := normalizeCurrentHandlers(&req); err != nil {
+		return domain.SearchControlsResponse{}, err
+	}
 	normalizePagination(&req.Pagination)
 	controls, total, err := s.repo.SearchControlsGlobal(ctx, req)
 	if err != nil {
@@ -197,6 +315,9 @@ func (s *controlService) SearchControlsGlobal(ctx context.Context, req domain.Se
 	}
 	if controls == nil {
 		controls = []domain.AuditControl{}
+	}
+	if err := s.enrichDeadlines(ctx, controls); err != nil {
+		return domain.SearchControlsResponse{}, err
 	}
 	return domain.SearchControlsResponse{Controls: controls, Total: total, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
 }
@@ -240,6 +361,9 @@ func (s *controlService) BulkCreateControls(ctx context.Context, auditID int, re
 	}
 	if err := s.applyFrameworkPushBacks(ctx, auditID, req.Controls); err != nil {
 		return domain.BulkCreateControlsResponse{}, err
+	}
+	if err := s.enrichDeadlines(ctx, controls); err != nil {
+		log.Printf("%v", err)
 	}
 	return domain.BulkCreateControlsResponse{Controls: controls, Created: len(controls)}, nil
 }
@@ -369,7 +493,26 @@ func (s *controlService) GetControlByID(ctx context.Context, auditID, controlID 
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	if err := s.enrichOne(ctx, c); err != nil {
+		return domain.AuditControl{}, err
+	}
 	return *c, nil
+}
+
+// defaultOwnerDueDate is the owner's first deadline for a new Design control
+// that came without one: today (Asia/Colombo) plus the audit's Owner initial
+// days, or the default 30 when the audit has not saved its own.
+func (s *controlService) defaultOwnerDueDate(ctx context.Context, auditID int) (string, error) {
+	days := deadline.DefaultDays()
+	if s.stageRepo != nil {
+		saved, err := s.stageRepo.GetDeadlineDays(ctx, auditID)
+		if err != nil {
+			return "", err
+		}
+		days = saved
+	}
+	due := deadline.AddDays(deadline.DayOf(s.now()), days.For(deadline.Initial, deadline.Owner))
+	return deadline.FormatDay(due), nil
 }
 
 func (s *controlService) CreateControl(ctx context.Context, auditID int, req domain.CreateControlRequest) (domain.AuditControl, error) {
@@ -400,7 +543,16 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 	// Population block on control creation went completely unvalidated, letting
 	// an OE control end up with no due date anywhere.
 	if req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "" {
-		return domain.AuditControl{}, &apierror.ValidationError{Msg: "dueDate is required"}
+		// A Design control may leave it out: the owner's first deadline then
+		// follows the audit's Owner initial days, counted from today.
+		if !strings.EqualFold(req.RequirementType, "DESIGN") {
+			return domain.AuditControl{}, &apierror.ValidationError{Msg: "dueDate is required"}
+		}
+		def, err := s.defaultOwnerDueDate(ctx, auditID)
+		if err != nil {
+			return domain.AuditControl{}, err
+		}
+		req.DueDate = &def
 	}
 	if strings.EqualFold(req.RequirementType, "OE") {
 		if req.Population == nil || req.Population.DueDate == nil || strings.TrimSpace(*req.Population.DueDate) == "" {
@@ -425,6 +577,7 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 			return domain.AuditControl{}, err
 		}
 	}
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
 
@@ -495,6 +648,7 @@ func (s *controlService) UpdateControl(ctx context.Context, auditID, controlID i
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
 
@@ -571,6 +725,7 @@ func (s *controlService) OverrideControlStatus(ctx context.Context, auditID, con
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
 
@@ -609,5 +764,6 @@ func (s *controlService) ChangeRequirementType(ctx context.Context, auditID, con
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
