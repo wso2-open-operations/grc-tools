@@ -98,7 +98,7 @@ func TestEnrichDeadlinesFillsDesignControls(t *testing.T) {
 		{ID: 2, RequirementType: "DESIGN"}, // no stages: predates the feature
 		{ID: 3, RequirementType: "OE"},     // never tracked
 	}
-	svc.enrichDeadlines(context.Background(), controls)
+	_ = svc.enrichDeadlines(context.Background(), controls)
 
 	c := controls[0]
 	if !c.DeadlineTracked || c.CurrentHandler == nil || *c.CurrentHandler != "AUDITOR" {
@@ -125,7 +125,7 @@ func TestEnrichDeadlinesFillsDesignControls(t *testing.T) {
 func TestEnrichDeadlinesOnlyQueriesDesignControls(t *testing.T) {
 	repo := &fakeStageRepo{}
 	svc := &controlService{stageRepo: repo, now: time.Now}
-	svc.enrichDeadlines(context.Background(), []domain.AuditControl{{ID: 1, RequirementType: "OE"}})
+	_ = svc.enrichDeadlines(context.Background(), []domain.AuditControl{{ID: 1, RequirementType: "OE"}})
 	if repo.listed != 0 {
 		t.Fatal("no stage query is needed when there are no DESIGN controls")
 	}
@@ -134,17 +134,28 @@ func TestEnrichDeadlinesOnlyQueriesDesignControls(t *testing.T) {
 func TestEnrichDeadlinesOffDoesNothing(t *testing.T) {
 	svc := &controlService{now: time.Now}
 	controls := []domain.AuditControl{{ID: 1, RequirementType: "DESIGN"}}
-	svc.enrichDeadlines(context.Background(), controls)
+	_ = svc.enrichDeadlines(context.Background(), controls)
 	if controls[0].DeadlineTracked {
 		t.Fatal("with no stage repository the fields stay empty")
 	}
 }
 
-func TestEnrichDeadlinesLoadFailureDoesNotFailTheRequest(t *testing.T) {
+func TestEnrichDeadlinesLoadFailureIsReturned(t *testing.T) {
 	svc := &controlService{stageRepo: &fakeStageRepo{listErr: errors.New("boom")}, now: time.Now}
 	controls := []domain.AuditControl{{ID: 1, RequirementType: "DESIGN"}}
-	svc.enrichDeadlines(context.Background(), controls)
+	if err := svc.enrichDeadlines(context.Background(), controls); err == nil {
+		t.Fatal("a failed stage load must be returned, not shown as an untracked control")
+	}
 	if controls[0].DeadlineTracked {
+		t.Fatal("fields stay empty when stages cannot be loaded")
+	}
+}
+
+func TestEnrichAfterWriteLoadFailureDoesNotFailTheWrite(t *testing.T) {
+	svc := &controlService{stageRepo: &fakeStageRepo{listErr: errors.New("boom")}, now: time.Now}
+	c := &domain.AuditControl{ID: 1, RequirementType: "DESIGN"}
+	svc.enrichAfterWrite(context.Background(), c)
+	if c.DeadlineTracked {
 		t.Fatal("fields stay empty when stages cannot be loaded")
 	}
 }

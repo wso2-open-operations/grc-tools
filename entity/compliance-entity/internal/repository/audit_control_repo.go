@@ -847,6 +847,12 @@ func (r *controlRepo) ChangeRequirementType(ctx context.Context, auditID, contro
 		if err := applyFields(); err != nil {
 			return nil, err
 		}
+		// A due date edited here must move the open first stage like UpdateControl does.
+		if req.Control != nil && req.Control.DueDate != nil {
+			if err := syncFirstStageDueDate(ctx, tx, auditID, controlID, *req.Control.DueDate); err != nil {
+				return nil, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("control.ChangeRequirementType commit: %w", err)
 		}

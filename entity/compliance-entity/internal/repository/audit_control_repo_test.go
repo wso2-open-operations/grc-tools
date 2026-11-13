@@ -105,6 +105,46 @@ func requireValidation(t *testing.T, err error, wantMsg string) {
 	}
 }
 
+// A due date sent with an unchanged requirement type must still move the
+// owner's open first stage and replan the GRC and EY dates.
+func TestChangeRequirementType_SameType_DueDateSyncsFirstStage(t *testing.T) {
+	repo, mock := newControlRepoMock(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(re("SELECT requirement_type, status FROM audit_control WHERE audit_id = ? AND id = ? FOR UPDATE")).
+		WithArgs(1, 2).
+		WillReturnRows(sqlmock.NewRows([]string{"requirement_type", "status"}).AddRow("DESIGN", "EVIDENCE_PENDING"))
+	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
+	mock.ExpectExec(re("UPDATE audit_control SET")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(re("SELECT id FROM audit_control_stage")).
+		WithArgs(2).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectQuery(re("SELECT cycle_type, handled_by, allowed_days FROM audit_deadline_days")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+	// Defaults are 30/10/10: owner due 2026-12-01, so 2026-12-11 and 2026-12-21.
+	mock.ExpectExec(re("UPDATE audit_control_stage SET due_date = ?, planned_compliance_date = ?, planned_auditor_date = ? WHERE id = ?")).
+		WithArgs("2026-12-01", "2026-12-11", "2026-12-21", 7).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectQuery(re("WHERE c.audit_id = ? AND c.id = ?")).
+		WithArgs(1, 2).
+		WillReturnRows(controlRow(2, 1, "DESIGN", "EVIDENCE_PENDING"))
+
+	_, err := repo.ChangeRequirementType(context.Background(), 1, 2,
+		domain.ChangeRequirementTypeRequest{RequirementType: "DESIGN", UpdatedBy: "actor",
+			Control: &domain.UpdateControlRequest{DueDate: strPtr("2026-12-01")}})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestChangeRequirementType_ControlNotFound(t *testing.T) {
 	repo, mock := newControlRepoMock(t)
 	mock.ExpectBegin()

@@ -83,11 +83,11 @@ func normalizeCurrentHandlers(req *domain.SearchControlsRequest) error {
 // enrichDeadlines fills each DESIGN control's deadline fields (current holder
 // and deadline, planned dates, Delayed, delay log) from its recorded hand-offs
 // in one query. Everything is worked out as of now and nothing is stored. A
-// failure to load them is logged and leaves the fields empty rather than
-// failing the request, since they are additive to the control.
-func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.AuditControl) {
+// failure to load them is returned, so a read never shows a tracked control as
+// untracked; writes that already committed use enrichAfterWrite instead.
+func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.AuditControl) error {
 	if s.stageRepo == nil || len(controls) == 0 {
-		return
+		return nil
 	}
 	ids := make([]int, 0, len(controls))
 	for _, c := range controls {
@@ -96,12 +96,11 @@ func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.
 		}
 	}
 	if len(ids) == 0 {
-		return
+		return nil
 	}
 	stages, err := s.stageRepo.ListStagesByControls(ctx, ids)
 	if err != nil {
-		log.Printf("control deadlines: load stages: %v", err)
-		return
+		return fmt.Errorf("control deadlines: load stages: %w", err)
 	}
 	now := s.now()
 	for i := range controls {
@@ -111,12 +110,25 @@ func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.
 		}
 		applyEvaluation(&controls[i], deadline.Evaluate(st, now))
 	}
+	return nil
 }
 
-func (s *controlService) enrichOne(ctx context.Context, c *domain.AuditControl) {
+func (s *controlService) enrichOne(ctx context.Context, c *domain.AuditControl) error {
 	one := []domain.AuditControl{*c}
-	s.enrichDeadlines(ctx, one)
+	if err := s.enrichDeadlines(ctx, one); err != nil {
+		return err
+	}
 	*c = one[0]
+	return nil
+}
+
+// enrichAfterWrite fills the deadline fields on the response of a write that has
+// already committed. Failing here would tell the client the write failed when it
+// did not, so the error is logged and the fields are left empty.
+func (s *controlService) enrichAfterWrite(ctx context.Context, c *domain.AuditControl) {
+	if err := s.enrichOne(ctx, c); err != nil {
+		log.Printf("%v", err)
+	}
 }
 
 func applyEvaluation(c *domain.AuditControl, ev deadline.Evaluation) {
@@ -276,7 +288,9 @@ func (s *controlService) SearchControls(ctx context.Context, auditID int, req do
 	if controls == nil {
 		controls = []domain.AuditControl{}
 	}
-	s.enrichDeadlines(ctx, controls)
+	if err := s.enrichDeadlines(ctx, controls); err != nil {
+		return domain.SearchControlsResponse{}, err
+	}
 	return domain.SearchControlsResponse{Controls: controls, Total: total, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
 }
 
@@ -302,7 +316,9 @@ func (s *controlService) SearchControlsGlobal(ctx context.Context, req domain.Se
 	if controls == nil {
 		controls = []domain.AuditControl{}
 	}
-	s.enrichDeadlines(ctx, controls)
+	if err := s.enrichDeadlines(ctx, controls); err != nil {
+		return domain.SearchControlsResponse{}, err
+	}
 	return domain.SearchControlsResponse{Controls: controls, Total: total, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
 }
 
@@ -346,7 +362,9 @@ func (s *controlService) BulkCreateControls(ctx context.Context, auditID int, re
 	if err := s.applyFrameworkPushBacks(ctx, auditID, req.Controls); err != nil {
 		return domain.BulkCreateControlsResponse{}, err
 	}
-	s.enrichDeadlines(ctx, controls)
+	if err := s.enrichDeadlines(ctx, controls); err != nil {
+		log.Printf("%v", err)
+	}
 	return domain.BulkCreateControlsResponse{Controls: controls, Created: len(controls)}, nil
 }
 
@@ -475,7 +493,9 @@ func (s *controlService) GetControlByID(ctx context.Context, auditID, controlID 
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
-	s.enrichOne(ctx, c)
+	if err := s.enrichOne(ctx, c); err != nil {
+		return domain.AuditControl{}, err
+	}
 	return *c, nil
 }
 
@@ -532,7 +552,7 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 			return domain.AuditControl{}, err
 		}
 	}
-	s.enrichOne(ctx, c)
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
 
@@ -603,7 +623,7 @@ func (s *controlService) UpdateControl(ctx context.Context, auditID, controlID i
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
-	s.enrichOne(ctx, c)
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
 
@@ -680,7 +700,7 @@ func (s *controlService) OverrideControlStatus(ctx context.Context, auditID, con
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
-	s.enrichOne(ctx, c)
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
 
@@ -719,6 +739,6 @@ func (s *controlService) ChangeRequirementType(ctx context.Context, auditID, con
 	if err != nil {
 		return domain.AuditControl{}, err
 	}
-	s.enrichOne(ctx, c)
+	s.enrichAfterWrite(ctx, c)
 	return *c, nil
 }
