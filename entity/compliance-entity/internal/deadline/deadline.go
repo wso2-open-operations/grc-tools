@@ -193,8 +193,10 @@ func PlanTransition(in TransitionInput) Change {
 	if in.OpenStage != nil && in.OpenStage.HandledBy == handler {
 		return Change{}
 	}
+	// EVIDENCE_NEED_CLARIFICATION is only reached by an auditor rejection, so the
+	// way out of it is a revision even for a control that has no stage history.
 	cycle := Initial
-	if IsRejection(in.From, in.To) || in.Override || in.PrevCycle == Revision {
+	if IsRejection(in.From, in.To) || in.From == "EVIDENCE_NEED_CLARIFICATION" || in.Override || in.PrevCycle == Revision {
 		cycle = Revision
 	}
 	return Change{

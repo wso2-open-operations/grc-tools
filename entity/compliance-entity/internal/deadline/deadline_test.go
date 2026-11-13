@@ -175,6 +175,19 @@ func TestPlanTransition(t *testing.T) {
 	}
 }
 
+// A control that was already waiting on the owner after an auditor rejection when
+// tracking began has no stage history, but its resubmission is still a revision.
+func TestPlanTransitionResubmitWithoutHistoryIsRevision(t *testing.T) {
+	now := at(time.November, 6, 10, 0)
+	got := PlanTransition(TransitionInput{
+		From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_INTERNAL_REVIEW", Now: now, Days: DefaultDays(),
+	})
+	want := &NewStage{HandledBy: Compliance, CycleType: Revision, StartedAt: now, DueDate: day(time.November, 11)}
+	if got.Open == nil || *got.Open != *want {
+		t.Fatalf("got %+v, want %+v", got.Open, want)
+	}
+}
+
 // The deadline is counted from the calendar day in Asia/Colombo, not from UTC:
 // 23:30 UTC on 9 Nov is already 05:00 on 10 Nov in Sri Lanka.
 func TestPlanTransitionUsesColomboDay(t *testing.T) {

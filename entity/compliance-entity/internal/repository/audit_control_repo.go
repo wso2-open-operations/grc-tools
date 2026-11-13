@@ -667,13 +667,14 @@ func (r *controlRepo) UpdateControl(ctx context.Context, auditID, controlID int,
 		}
 	}
 
-	if req.Status != nil && req.ExpectedStatus != "" {
-		if err := applyStageTransition(ctx, tx, auditID, controlID, req.ExpectedStatus, *req.Status, req.UpdatedBy, false, r.clock()); err != nil {
+	// The due date moves the owner's open stage, so it goes before a hand-off closes it.
+	if req.DueDate != nil {
+		if err := syncFirstStageDueDate(ctx, tx, auditID, controlID, *req.DueDate); err != nil {
 			return nil, err
 		}
 	}
-	if req.DueDate != nil {
-		if err := syncFirstStageDueDate(ctx, tx, auditID, controlID, *req.DueDate); err != nil {
+	if req.Status != nil && req.ExpectedStatus != "" {
+		if err := applyStageTransition(ctx, tx, auditID, controlID, req.ExpectedStatus, *req.Status, req.UpdatedBy, false, r.clock()); err != nil {
 			return nil, err
 		}
 	}

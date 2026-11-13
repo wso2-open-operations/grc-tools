@@ -262,14 +262,18 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 // syncFirstStageDueDate follows an edit of the control's due date while the
 // owner is still on their first stage: the stage deadline moves and the
 // planned GRC and EY dates are replanned. Once the control has moved on the
-// first stage is closed and never changes, so this finds nothing.
+// first stage is closed and never changes, so this finds nothing. The same
+// date as the stored one changes nothing.
 func syncFirstStageDueDate(ctx context.Context, tx stageDB, auditID, controlID int, dueDate string) error {
-	var stageID int64
+	var (
+		stageID   int64
+		storedDue string
+	)
 	err := tx.QueryRowContext(ctx,
-		`SELECT id FROM audit_control_stage
+		`SELECT id, DATE_FORMAT(due_date, '%Y-%m-%d') FROM audit_control_stage
 		 WHERE control_id = ? AND phase = 'EVIDENCE' AND ended_at IS NULL
 		   AND handled_by = 'OWNER' AND cycle_type = 'INITIAL' AND planned_compliance_date IS NOT NULL
-		 ORDER BY started_at, id LIMIT 1 FOR UPDATE`, controlID).Scan(&stageID)
+		 ORDER BY started_at, id LIMIT 1 FOR UPDATE`, controlID).Scan(&stageID, &storedDue)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -279,6 +283,11 @@ func syncFirstStageDueDate(ctx context.Context, tx stageDB, auditID, controlID i
 	ownerDue, err := deadline.ParseDay(dayString(dueDate))
 	if err != nil {
 		return fmt.Errorf("stage.syncDue: bad due date %q: %w", dueDate, err)
+	}
+	// A save that resends the same date is not an edit: the plan stays as frozen
+	// when the stage opened, even if the allowed days have changed since.
+	if deadline.FormatDay(ownerDue) == storedDue {
+		return nil
 	}
 	days, err := loadDeadlineDays(ctx, tx, auditID)
 	if err != nil {
