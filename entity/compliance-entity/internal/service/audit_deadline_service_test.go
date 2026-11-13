@@ -252,3 +252,68 @@ func TestUpdateDeadlineDaysRejectsRemovedAudit(t *testing.T) {
 		t.Fatalf("expected a conflict, got %v", err)
 	}
 }
+
+type fakeCreateRepo struct {
+	repository.ControlRepository
+	created *domain.CreateControlRequest
+}
+
+func (f *fakeCreateRepo) CreateControl(_ context.Context, _ int, req domain.CreateControlRequest) (*domain.AuditControl, error) {
+	f.created = &req
+	return &domain.AuditControl{ID: 1, RequirementType: req.RequirementType}, nil
+}
+
+func newCreateReq(requirementType string) domain.CreateControlRequest {
+	ev := "evidence"
+	return domain.CreateControlRequest{
+		ControlNumber: "CA-1", Description: "d", EvidenceRequirement: &ev, RequirementType: requirementType,
+		ControlType: "CONFIG", Scope: "COMMON", CreatedBy: "admin",
+	}
+}
+
+// 9 Nov 23:30 UTC is already 10 Nov in Sri Lanka.
+var createNow = func() time.Time { return time.Date(2026, time.November, 9, 23, 30, 0, 0, time.UTC) }
+
+func TestCreateDesignControlWithoutDueDateUsesOwnerInitialDays(t *testing.T) {
+	cases := map[string]struct {
+		days deadline.Days
+		want string
+	}{
+		"audit has no saved days: default 30": {nil, "2026-12-10"},
+		"audit saved 20 days for the owner":   {deadline.Days{"INITIAL": {"OWNER": 20}}, "2026-11-30"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := &fakeCreateRepo{}
+			svc := &controlService{repo: repo, stageRepo: &fakeStageRepo{days: tc.days}, now: createNow}
+			if _, err := svc.CreateControl(context.Background(), 7, newCreateReq("DESIGN")); err != nil {
+				t.Fatal(err)
+			}
+			if repo.created.DueDate == nil || *repo.created.DueDate != tc.want {
+				t.Fatalf("due date = %v, want %s", repo.created.DueDate, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateDesignControlKeepsTheDueDateItWasGiven(t *testing.T) {
+	repo := &fakeCreateRepo{}
+	svc := &controlService{repo: repo, stageRepo: &fakeStageRepo{}, now: createNow}
+	req := newCreateReq("DESIGN")
+	given := "2026-12-31"
+	req.DueDate = &given
+	if _, err := svc.CreateControl(context.Background(), 7, req); err != nil {
+		t.Fatal(err)
+	}
+	if *repo.created.DueDate != given {
+		t.Fatalf("due date = %s, want %s", *repo.created.DueDate, given)
+	}
+}
+
+func TestCreateOEControlStillNeedsADueDate(t *testing.T) {
+	svc := &controlService{repo: &fakeCreateRepo{}, stageRepo: &fakeStageRepo{}, now: createNow}
+	var ve *apierror.ValidationError
+	if _, err := svc.CreateControl(context.Background(), 7, newCreateReq("OE")); !errors.As(err, &ve) {
+		t.Fatalf("expected a validation error, got %v", err)
+	}
+}

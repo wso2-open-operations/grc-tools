@@ -5023,6 +5023,7 @@ components:
         dueDate:
           type: string
           nullable: true
+          description: Optional for a DESIGN control, which then gets today (Asia/Colombo) plus the audit's INITIAL/OWNER allowed days. Required for OE controls.
         population:
           allOf:
           - $ref: '#/components/schemas/InlinePopulationRequest'

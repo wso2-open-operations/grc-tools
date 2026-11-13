@@ -5321,6 +5321,7 @@ components:
           type: string
           format: date
           nullable: true
+          description: Optional for a single DESIGN control, which then gets today plus the audit's initial Owner days (see Deadline Days). Required for OE controls and for every row of a bulk add.
         population:
           nullable: true
           anyOf:

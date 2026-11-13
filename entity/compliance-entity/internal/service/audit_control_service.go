@@ -499,6 +499,22 @@ func (s *controlService) GetControlByID(ctx context.Context, auditID, controlID 
 	return *c, nil
 }
 
+// defaultOwnerDueDate is the owner's first deadline for a new Design control
+// that came without one: today (Asia/Colombo) plus the audit's Owner initial
+// days, or the default 30 when the audit has not saved its own.
+func (s *controlService) defaultOwnerDueDate(ctx context.Context, auditID int) (string, error) {
+	days := deadline.DefaultDays()
+	if s.stageRepo != nil {
+		saved, err := s.stageRepo.GetDeadlineDays(ctx, auditID)
+		if err != nil {
+			return "", err
+		}
+		days = saved
+	}
+	due := deadline.AddDays(deadline.DayOf(s.now()), days.For(deadline.Initial, deadline.Owner))
+	return deadline.FormatDay(due), nil
+}
+
 func (s *controlService) CreateControl(ctx context.Context, auditID int, req domain.CreateControlRequest) (domain.AuditControl, error) {
 	if auditID <= 0 {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "auditId must be a positive integer"}
@@ -527,7 +543,16 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 	// Population block on control creation went completely unvalidated, letting
 	// an OE control end up with no due date anywhere.
 	if req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "" {
-		return domain.AuditControl{}, &apierror.ValidationError{Msg: "dueDate is required"}
+		// A Design control may leave it out: the owner's first deadline then
+		// follows the audit's Owner initial days, counted from today.
+		if !strings.EqualFold(req.RequirementType, "DESIGN") {
+			return domain.AuditControl{}, &apierror.ValidationError{Msg: "dueDate is required"}
+		}
+		def, err := s.defaultOwnerDueDate(ctx, auditID)
+		if err != nil {
+			return domain.AuditControl{}, err
+		}
+		req.DueDate = &def
 	}
 	if strings.EqualFold(req.RequirementType, "OE") {
 		if req.Population == nil || req.Population.DueDate == nil || strings.TrimSpace(*req.Population.DueDate) == "" {
