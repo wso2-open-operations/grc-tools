@@ -608,7 +608,7 @@ paths:
       tags:
       - Audit Controls
       summary: Get an audit's allowed days
-      description: How many calendar days each group (OWNER, COMPLIANCE, AUDITOR) may hold a DESIGN control before passing it on, per cycle (INITIAL or REVISION). Always lists all six combinations; isDefault is true where no saved value overrides the default. Not available to external auditors.
+      description: How many calendar days each group (OWNER, COMPLIANCE, AUDITOR) may hold a DESIGN control before passing it on, per cycle (INITIAL or REVISION). Always lists all six combinations; isDefault is true where no saved value overrides the default. Requires the manage-controls privilege.
       operationId: getAuditDeadlineDays
       parameters:
       - $ref: '#/components/parameters/AuditId'

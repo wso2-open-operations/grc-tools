@@ -31,8 +31,11 @@ type deadlineDaysHandler struct {
 }
 
 // getDeadlineDays handles GET /api/v1/audits/{id}/settings/deadline-days.
+// Gated on ManageControls like the PUT: only the people who can change the
+// allowed days can read them. ManageControls is never scoped to one audit, so
+// no per-audit scope check applies.
 func (h *deadlineDaysHandler) getDeadlineDays(w http.ResponseWriter, r *http.Request) {
-	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageControls) {
 		return
 	}
 	auditID, ok := parseIntParam(w, r, "id")
