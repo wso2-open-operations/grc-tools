@@ -213,6 +213,7 @@ func main() {
 		auditHRClient = hrClient
 	}
 	auditDeps := buildAuditDeps(fileSvc, entityCli, cfg.AIValidation, cfg.Email, grantRepo, dirSvc, auditHRClient, activityLog)
+	wireAuditAssistant(&auditDeps, entityCli, dirSvc, cfg.AIGateway)
 	reminderJob := auditjob.NewReminderJob(auditDeps.Audit, auditDeps.Control, auditDeps.Notification, auditDeps.SendReminderDigestSync).
 		WithAdminAlerts(auditDeps.ReminderAdminIDs, auditDeps.SendOverdueAdminDigestSync, auditDeps.ResolveUserNames)
 	if cfg.LeadEscalationEmailsEnabled {
