@@ -20,9 +20,11 @@ package handler
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/dashboardagent"
 	riskservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/routeguard"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/scim"
@@ -68,6 +70,14 @@ type Deps struct {
 	// for why).
 	ActionPlanSuggestion        riskservice.ActionPlanSuggestionService
 	ActionPlanSuggestionEnabled bool
+	// DashboardAgent runs validated dashboard widget specs; DashboardAgentEnabled
+	// gates the HTTP endpoint only (404 when off). dashboardAgentLimiter is the
+	// per-user request cap, created by RegisterRoutes.
+	DashboardAgent        riskservice.DashboardAgentService
+	DashboardAgentEnabled bool
+	dashboardAgentLimiter *dashboardagent.Limiter
+	// dashboardAgentInterpretLimiter caps the model calls, tighter than the queries.
+	dashboardAgentInterpretLimiter *dashboardagent.Limiter
 	// Register-template lookups (RISK_MODULE_DESIGN.md §14), served by the
 	// generic handlers in lookup.go.
 	Platforms       riskservice.LookupService
@@ -152,6 +162,12 @@ type Deps struct {
 // precedence over the {id} wildcard, so the two groups never collide.
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	d := &deps
+	if d.dashboardAgentLimiter == nil {
+		d.dashboardAgentLimiter = dashboardagent.NewLimiter(dashboardAgentRatePerMinute, time.Minute)
+	}
+	if d.dashboardAgentInterpretLimiter == nil {
+		d.dashboardAgentInterpretLimiter = dashboardagent.NewLimiter(dashboardAgentInterpretRatePerMinute, time.Minute)
+	}
 	ejh := &escalationJobHandler{trigger: deps.TriggerEscalationJob}
 	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
 	lrjh := &likelihoodRecheckJobHandler{trigger: deps.TriggerLikelihoodRecheckJob}
@@ -240,6 +256,12 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// Dashboard — a module-level aggregate view, not a sub-resource of one
 	// risk, so it sits under /api/v1/risks/ (cf. GET /api/v1/audits/dashboard).
 	mux.HandleFunc("GET /api/v1/risks/dashboard", d.handleDashboard)
+
+	// Dashboard agent: runs one validated widget spec. Internal users only — the
+	// route is not external-visible, and a caller with no risk visibility gets a 404.
+	mux.HandleFunc("GET /api/v1/risks/dashboard-agent/starters", d.handleDashboardAgentStarters)
+	mux.HandleFunc("POST /api/v1/risks/dashboard-agent/interpret", d.handleDashboardAgentInterpret)
+	mux.HandleFunc("POST /api/v1/risks/dashboard-agent/query", d.handleDashboardAgentQuery)
 
 	// Analytics — module-level aggregate view, same rationale as dashboard.
 	mux.HandleFunc("GET /api/v1/risks/analytics/summary", d.handleAnalyticsSummary)

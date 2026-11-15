@@ -96,6 +96,8 @@ func buildRiskDeps(
 		Category:                    riskservice.NewRiskCategoryService(riskCategoryRepo),
 		CategorySuggestion:          categorySuggestionSvc,
 		CategorySuggestionEnabled:   aiGatewayCfg.CategorizationEnabled,
+		DashboardAgent:              riskservice.NewDashboardAgentService(riskentity.NewWidgetQueryRepository(ec), gatewayClient, riskservice.NewDirectoryPeople(dirSvc)),
+		DashboardAgentEnabled:       aiGatewayCfg.RiskDashboardAgentEnabled,
 		LikelihoodSuggestion:        likelihoodSuggestionSvc,
 		LikelihoodSuggestionEnabled: aiGatewayCfg.LikelihoodEnabled,
 		ActionPlanSuggestion:        actionPlanSuggestionSvc,
