@@ -69,6 +69,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	grantRepo := repository.NewGrantRepository(db)
 	riskDashboardRepo := repository.NewRiskDashboardRepository(db)
 	riskAnalyticsRepo := repository.NewRiskAnalyticsRepository(db)
+	widgetQueryRepo := repository.NewWidgetQueryRepository(db)
 	adminActivityLogRepo := repository.NewAdminActivityLogRepository(db)
 
 	// ── Services ─────────────────────────────────────────────────────────────
@@ -113,6 +114,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	grantSvc := service.NewGrantService(grantRepo)
 	riskDashboardSvc := service.NewRiskDashboardService(riskDashboardRepo)
 	riskAnalyticsSvc := service.NewRiskAnalyticsService(riskAnalyticsRepo)
+	widgetQuerySvc := service.NewWidgetQueryService(widgetQueryRepo)
 	adminActivityLogSvc := service.NewAdminActivityLogService(adminActivityLogRepo)
 
 	// ── Handlers ─────────────────────────────────────────────────────────────
@@ -149,6 +151,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	grantH := handler.NewGrantHandler(grantSvc)
 	riskDashboardH := handler.NewRiskDashboardHandler(riskDashboardSvc)
 	riskAnalyticsH := handler.NewRiskAnalyticsHandler(riskAnalyticsSvc)
+	widgetQueryH := handler.NewWidgetQueryHandler(widgetQuerySvc)
 	adminActivityLogH := handler.NewAdminActivityLogHandler(adminActivityLogSvc)
 
 	// ── Routes ───────────────────────────────────────────────────────────────
@@ -358,6 +361,8 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	mux.HandleFunc("GET /risks/next-sequence-number", riskH.NextSequenceNumber)
 	mux.HandleFunc("GET /role-privileges", privilegeH.RolePrivilegeMap)
 	mux.HandleFunc("POST /risk/dashboard/search", riskDashboardH.Summary)
+	mux.HandleFunc("POST /risk/widgets/query", widgetQueryH.Run)
+	mux.HandleFunc("POST /audit/widgets/query", widgetQueryH.RunAudit)
 	mux.HandleFunc("POST /risk/analytics/search", riskAnalyticsH.Summary)
 	mux.HandleFunc("POST /risks/search", riskH.SearchRisks)
 	mux.HandleFunc("GET /risks/{id}", riskH.GetRiskByID)
