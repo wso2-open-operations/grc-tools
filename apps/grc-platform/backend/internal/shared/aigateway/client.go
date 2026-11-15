@@ -38,6 +38,9 @@ import (
 // one model, confirmed working by smoke test. There is nothing to choose.
 const model = "claude-haiku-4-5-20251001"
 
+// ModelName is the model every call uses, for the audit log.
+const ModelName = model
+
 const anthropicVersion = "2023-06-01"
 
 // Client calls the AI Gateway's Messages API.

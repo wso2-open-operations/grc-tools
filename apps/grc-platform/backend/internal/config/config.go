@@ -332,6 +332,12 @@ type AIGatewayConfig struct {
 	CategorizationEnabled bool
 	LikelihoodEnabled     bool
 	ActionPlanEnabled     bool
+	// RiskDashboardAgentEnabled is AI_RISK_DASHBOARD_AGENT_ENABLED: the Risk Hub
+	// dashboard agent endpoint. Off by default; the endpoint answers 404 when off.
+	RiskDashboardAgentEnabled bool
+	// AuditDashboardAgentEnabled is AI_AUDIT_DASHBOARD_AGENT_ENABLED: the Audit
+	// Hub assistant endpoints. Off by default; they answer 404 when off.
+	AuditDashboardAgentEnabled bool
 }
 
 // IdPConfig describes one trusted identity provider (Asgardeo organization).
@@ -649,11 +655,13 @@ func Load() (Config, error) {
 			BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
 		},
 		AIGateway: AIGatewayConfig{
-			BaseURL:               os.Getenv("ANTHROPIC_BASE_URL"),
-			APIKey:                os.Getenv("ANTHROPIC_API_KEY"),
-			CategorizationEnabled: os.Getenv("AI_CATEGORIZATION_ENABLED") == "true",
-			LikelihoodEnabled:     os.Getenv("AI_LIKELIHOOD_ENABLED") == "true",
-			ActionPlanEnabled:     os.Getenv("AI_ACTION_PLAN_ENABLED") == "true",
+			BaseURL:                    os.Getenv("ANTHROPIC_BASE_URL"),
+			APIKey:                     os.Getenv("ANTHROPIC_API_KEY"),
+			CategorizationEnabled:      os.Getenv("AI_CATEGORIZATION_ENABLED") == "true",
+			LikelihoodEnabled:          os.Getenv("AI_LIKELIHOOD_ENABLED") == "true",
+			ActionPlanEnabled:          os.Getenv("AI_ACTION_PLAN_ENABLED") == "true",
+			RiskDashboardAgentEnabled:  os.Getenv("AI_RISK_DASHBOARD_AGENT_ENABLED") == "true",
+			AuditDashboardAgentEnabled: os.Getenv("AI_AUDIT_DASHBOARD_AGENT_ENABLED") == "true",
 		},
 		Email: EmailConfig{
 			ServiceURL:       emailServiceURL,
