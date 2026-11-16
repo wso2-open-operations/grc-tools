@@ -48,10 +48,10 @@ const (
 // picker is a per-browser preference the server never sees.
 var controlExportHeader = []string{
 	"Control No.", "Description", "Evidence Requirement", "Req. Type", "Control Type",
-	"Status", "Overdue", "Scope", "Team", "Process Owner", "Auditor POC", "Due Date",
+	"Status", "Overdue", "Scope", "Team", "Process Owner", "Auditor POC", "Ultimate Deadline",
 	"Population Due Date", "Population Owner", "Population Team",
 	"Current Holder", "Current Deadline", "Planned Owner Date", "Planned Compliance Date", "Planned Auditor Date",
-	"Delayed", "Delay Log",
+	"Delayed", "Ultimate Status", "Delay Log",
 }
 
 // controlExportParams is what the audit detail page is currently showing:
@@ -218,6 +218,7 @@ func controlExportRecord(c *model.AuditControl) []string {
 		csvexport.Date(csvexport.Deref(c.PlannedComplianceDate)),
 		csvexport.Date(csvexport.Deref(c.PlannedAuditorDate)),
 		delayedCell(c),
+		ultimateStatusCell(c),
 		csvexport.SafeCell(delayLogText(c.DelayLog)),
 	}
 }
@@ -232,6 +233,17 @@ func delayedCell(c *model.AuditControl) string {
 		return "Yes"
 	}
 	return "No"
+}
+
+// ultimateStatusCell is blank when it cannot be known (see AuditControl.UltimateDelayed).
+func ultimateStatusCell(c *model.AuditControl) string {
+	switch {
+	case c.UltimateDelayed == nil:
+		return ""
+	case *c.UltimateDelayed:
+		return "Delayed"
+	}
+	return "On track"
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)

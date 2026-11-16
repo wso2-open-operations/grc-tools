@@ -69,14 +69,15 @@ func TestExportRecordForTrackedControl(t *testing.T) {
 		PlannedComplianceDate: strPtr("2026-11-17"),
 		PlannedAuditorDate:    strPtr("2026-11-27"),
 		Delayed:               boolPtr(true),
+		UltimateDelayed:       boolPtr(false),
 		DelayLog:              []model.DelayLogEntry{{HandledBy: "OWNER", Date: "2026-11-08"}, {HandledBy: "OWNER", Date: "2026-11-09"}},
 	}
 	rec := controlExportRecord(c)
 	if len(rec) != len(controlExportHeader) {
 		t.Fatalf("record has %d cells, header has %d", len(rec), len(controlExportHeader))
 	}
-	tail := strings.Join(rec[len(rec)-7:], "|")
-	if tail != "Auditor|2026-12-03|2026-11-07|2026-11-17|2026-11-27|Yes|Owner - 11/08; Owner - 11/09" {
+	tail := strings.Join(rec[len(rec)-8:], "|")
+	if tail != "Auditor|2026-12-03|2026-11-07|2026-11-17|2026-11-27|Yes|On track|Owner - 11/08; Owner - 11/09" {
 		t.Fatalf("tail = %q", tail)
 	}
 }
@@ -86,7 +87,7 @@ func TestExportRecordForUntrackedControlIsBlank(t *testing.T) {
 	if len(rec) != len(controlExportHeader) {
 		t.Fatalf("record has %d cells, header has %d", len(rec), len(controlExportHeader))
 	}
-	for i, cell := range rec[len(rec)-7:] {
+	for i, cell := range rec[len(rec)-8:] {
 		if cell != "" {
 			t.Errorf("deadline column %d should be blank for an untracked control, got %q", i, cell)
 		}

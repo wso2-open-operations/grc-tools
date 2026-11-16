@@ -39,15 +39,14 @@ func addReq(requirementType string, dueDate *string) model.AddControlRequest {
 	return req
 }
 
-// A single Design control may omit its due date, so the entity can default it
-// from the audit's Owner initial days. OE controls always need one.
+// The due date is the ultimate deadline, so every control needs one.
 func TestValidateAddRequestDueDate(t *testing.T) {
 	date := "2026-12-31"
 	cases := map[string]struct {
 		req     model.AddControlRequest
 		wantErr bool
 	}{
-		"design without a date": {addReq("DESIGN", nil), false},
+		"design without a date": {addReq("DESIGN", nil), true},
 		"design with a date":    {addReq("DESIGN", &date), false},
 		"oe without a date":     {addReq("OE", nil), true},
 		"oe with a date":        {addReq("OE", &date), false},

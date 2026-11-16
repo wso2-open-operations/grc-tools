@@ -569,9 +569,8 @@ func validateAddRequest(req model.AddControlRequest) error {
 	if req.EvidenceRequirement == nil || strings.TrimSpace(*req.EvidenceRequirement) == "" {
 		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "evidenceRequirement is required"}
 	}
-	// A Design control may leave the due date out: the entity then sets it from
-	// the audit's Owner initial days. OE controls still need one.
-	if req.RequirementType == "OE" && (req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "") {
+	// The due date is the ultimate deadline and is required for every control.
+	if (req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "") {
 		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "dueDate is required"}
 	}
 	if req.RequirementType != "DESIGN" && req.RequirementType != "OE" {

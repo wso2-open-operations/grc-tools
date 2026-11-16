@@ -71,6 +71,9 @@ type AuditControl struct {
 	PlannedComplianceDate *string         `json:"plannedComplianceDate"`
 	PlannedAuditorDate    *string         `json:"plannedAuditorDate"`
 	Delayed               *bool           `json:"delayed"`
+	// UltimateDelayed: finished after, or still open past, DueDate (the
+	// ultimate deadline). Empty when it cannot be known.
+	UltimateDelayed *bool `json:"ultimateDelayed"`
 	DelayLog              []DelayLogEntry `json:"delayLog,omitempty"`
 	// Population-phase fields (OE controls), joined from the initial audit_population record.
 	PopulationDescription *string `json:"populationDescription"`

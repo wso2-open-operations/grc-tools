@@ -5321,7 +5321,7 @@ components:
           type: string
           format: date
           nullable: true
-          description: Optional for a single DESIGN control, which then gets today plus the audit's initial Owner days (see Deadline Days). Required for OE controls and for every row of a bulk add.
+          description: The control's ultimate deadline, the final date for it to be completed. Required, including for every row of a bulk add.
         population:
           nullable: true
           anyOf:
@@ -5490,6 +5490,10 @@ components:
         delayed:
           type: boolean
           nullable: true
+        ultimateDelayed:
+          type: boolean
+          nullable: true
+          description: True when the control finished after, or is still open past, its dueDate (the ultimate deadline). Null when it cannot be known, such as a control completed before tracking started.
         delayLog:
           type: array
           description: One entry per late day per group. Only returned to org-wide GRC viewers; omitted for everyone else.
