@@ -224,6 +224,17 @@ func FirstStage(ownerDue, now time.Time) NewStage {
 	return NewStage{HandledBy: Owner, CycleType: Initial, StartedAt: now, DueDate: ownerDue}
 }
 
+// UltimateDelayed reports whether a control missed its ultimate deadline (the
+// control's own due date). finishedAt is when it was completed, nil while it is
+// still open, in which case today is what is compared.
+func UltimateDelayed(ultimate, now time.Time, finishedAt *time.Time) bool {
+	end := DayOf(now)
+	if finishedAt != nil {
+		end = DayOf(*finishedAt)
+	}
+	return end.After(DayOf(ultimate))
+}
+
 // LogEntry is one late day for one group.
 type LogEntry struct {
 	HandledBy string

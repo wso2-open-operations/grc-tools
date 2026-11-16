@@ -105,12 +105,45 @@ func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.
 	now := s.now()
 	for i := range controls {
 		st := stages[controls[i].ID]
-		if len(st) == 0 {
-			continue
+		if len(st) > 0 {
+			applyEvaluation(&controls[i], deadline.Evaluate(st, now))
 		}
-		applyEvaluation(&controls[i], deadline.Evaluate(st, now))
+		applyUltimate(&controls[i], st, now)
 	}
 	return nil
+}
+
+// applyUltimate sets UltimateDelayed from the control's due date (its ultimate
+// deadline). A completed control needs its last hand-off to know when it
+// finished; without one the answer is unknown and the field stays empty.
+func applyUltimate(c *domain.AuditControl, stages []deadline.Stage, now time.Time) {
+	if c.DueDate == nil || *c.DueDate == "" {
+		return
+	}
+	ultimate, err := deadline.ParseDay(dayOnly(*c.DueDate))
+	if err != nil {
+		return
+	}
+	var finished *time.Time
+	if c.Status == "COMPLETE" {
+		if len(stages) == 0 {
+			return
+		}
+		last := stages[len(stages)-1]
+		if last.EndedAt == nil {
+			return
+		}
+		finished = last.EndedAt
+	}
+	v := deadline.UltimateDelayed(ultimate, now, finished)
+	c.UltimateDelayed = &v
+}
+
+func dayOnly(s string) string {
+	if len(s) > 10 {
+		return s[:10]
+	}
+	return s
 }
 
 func (s *controlService) enrichOne(ctx context.Context, c *domain.AuditControl) error {
@@ -499,22 +532,6 @@ func (s *controlService) GetControlByID(ctx context.Context, auditID, controlID 
 	return *c, nil
 }
 
-// defaultOwnerDueDate is the owner's first deadline for a new Design control
-// that came without one: today (Asia/Colombo) plus the audit's Owner initial
-// days, or the default 30 when the audit has not saved its own.
-func (s *controlService) defaultOwnerDueDate(ctx context.Context, auditID int) (string, error) {
-	days := deadline.DefaultDays()
-	if s.stageRepo != nil {
-		saved, err := s.stageRepo.GetDeadlineDays(ctx, auditID)
-		if err != nil {
-			return "", err
-		}
-		days = saved
-	}
-	due := deadline.AddDays(deadline.DayOf(s.now()), days.For(deadline.Initial, deadline.Owner))
-	return deadline.FormatDay(due), nil
-}
-
 func (s *controlService) CreateControl(ctx context.Context, auditID int, req domain.CreateControlRequest) (domain.AuditControl, error) {
 	if auditID <= 0 {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "auditId must be a positive integer"}
@@ -537,22 +554,13 @@ func (s *controlService) CreateControl(ctx context.Context, auditID int, req dom
 	if req.CreatedBy == "" {
 		return domain.AuditControl{}, &apierror.ValidationError{Msg: "createdBy is required"}
 	}
-	// dueDate is required for every control. OE controls additionally need a
+	// dueDate is the ultimate deadline and is required for every control. OE controls additionally need a
 	// population due date — this was previously only enforced by the standalone
 	// population-create endpoint, which the webapp never calls; the inline
 	// Population block on control creation went completely unvalidated, letting
 	// an OE control end up with no due date anywhere.
 	if req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "" {
-		// A Design control may leave it out: the owner's first deadline then
-		// follows the audit's Owner initial days, counted from today.
-		if !strings.EqualFold(req.RequirementType, "DESIGN") {
-			return domain.AuditControl{}, &apierror.ValidationError{Msg: "dueDate is required"}
-		}
-		def, err := s.defaultOwnerDueDate(ctx, auditID)
-		if err != nil {
-			return domain.AuditControl{}, err
-		}
-		req.DueDate = &def
+		return domain.AuditControl{}, &apierror.ValidationError{Msg: "dueDate is required"}
 	}
 	if strings.EqualFold(req.RequirementType, "OE") {
 		if req.Population == nil || req.Population.DueDate == nil || strings.TrimSpace(*req.Population.DueDate) == "" {

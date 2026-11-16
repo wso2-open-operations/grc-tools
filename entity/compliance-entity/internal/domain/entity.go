@@ -359,14 +359,18 @@ type AuditControl struct {
 	// stored on audit_control. DeadlineTracked is false for a control with no
 	// hand-offs recorded yet, in which case the rest stay empty and DueDate is
 	// the only date that applies.
-	DeadlineTracked       bool            `json:"deadlineTracked"`
-	CurrentHandler        *string         `json:"currentHandler"` // OWNER | COMPLIANCE | AUDITOR; empty once complete
-	CurrentDueDate        *string         `json:"currentDueDate"` // YYYY-MM-DD
-	PlannedOwnerDate      *string         `json:"plannedOwnerDate"`
-	PlannedComplianceDate *string         `json:"plannedComplianceDate"`
-	PlannedAuditorDate    *string         `json:"plannedAuditorDate"`
-	Delayed               *bool           `json:"delayed"`
-	DelayLog              []DelayLogEntry `json:"delayLog,omitempty"`
+	DeadlineTracked       bool    `json:"deadlineTracked"`
+	CurrentHandler        *string `json:"currentHandler"` // OWNER | COMPLIANCE | AUDITOR; empty once complete
+	CurrentDueDate        *string `json:"currentDueDate"` // YYYY-MM-DD
+	PlannedOwnerDate      *string `json:"plannedOwnerDate"`
+	PlannedComplianceDate *string `json:"plannedComplianceDate"`
+	PlannedAuditorDate    *string `json:"plannedAuditorDate"`
+	Delayed               *bool   `json:"delayed"`
+	// UltimateDelayed is true when the control finished after, or is still open
+	// past, its DueDate (the ultimate deadline). Empty when it cannot be known,
+	// such as a control completed before tracking started.
+	UltimateDelayed *bool           `json:"ultimateDelayed"`
+	DelayLog        []DelayLogEntry `json:"delayLog,omitempty"`
 	// Population-phase fields (OE controls only), from the initial audit_population record.
 	PopulationDescription *string `json:"populationDescription"`
 	PopulationComments    *string `json:"populationComments"`

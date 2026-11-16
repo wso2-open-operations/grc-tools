@@ -274,23 +274,13 @@ func newCreateReq(requirementType string) domain.CreateControlRequest {
 // 9 Nov 23:30 UTC is already 10 Nov in Sri Lanka.
 var createNow = func() time.Time { return time.Date(2026, time.November, 9, 23, 30, 0, 0, time.UTC) }
 
-func TestCreateDesignControlWithoutDueDateUsesOwnerInitialDays(t *testing.T) {
-	cases := map[string]struct {
-		days deadline.Days
-		want string
-	}{
-		"audit has no saved days: default 30": {nil, "2026-12-10"},
-		"audit saved 20 days for the owner":   {deadline.Days{"INITIAL": {"OWNER": 20}}, "2026-11-30"},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			repo := &fakeCreateRepo{}
-			svc := &controlService{repo: repo, stageRepo: &fakeStageRepo{days: tc.days}, now: createNow}
-			if _, err := svc.CreateControl(context.Background(), 7, newCreateReq("DESIGN")); err != nil {
-				t.Fatal(err)
-			}
-			if repo.created.DueDate == nil || *repo.created.DueDate != tc.want {
-				t.Fatalf("due date = %v, want %s", repo.created.DueDate, tc.want)
+func TestCreateControlRequiresTheUltimateDeadline(t *testing.T) {
+	for _, rt := range []string{"DESIGN", "OE"} {
+		t.Run(rt, func(t *testing.T) {
+			svc := &controlService{repo: &fakeCreateRepo{}, stageRepo: &fakeStageRepo{}, now: createNow}
+			var ve *apierror.ValidationError
+			if _, err := svc.CreateControl(context.Background(), 7, newCreateReq(rt)); !errors.As(err, &ve) || ve.Msg != "dueDate is required" {
+				t.Fatalf("expected the dueDate validation error, got %v", err)
 			}
 		})
 	}
@@ -310,10 +300,33 @@ func TestCreateDesignControlKeepsTheDueDateItWasGiven(t *testing.T) {
 	}
 }
 
-func TestCreateOEControlStillNeedsADueDate(t *testing.T) {
-	svc := &controlService{repo: &fakeCreateRepo{}, stageRepo: &fakeStageRepo{}, now: createNow}
-	var ve *apierror.ValidationError
-	if _, err := svc.CreateControl(context.Background(), 7, newCreateReq("OE")); !errors.As(err, &ve) {
-		t.Fatalf("expected a validation error, got %v", err)
+func TestApplyUltimate(t *testing.T) {
+	now := dayAt(time.December, 5, 9)
+	end := func(m time.Month, d int) *time.Time { v := dayAt(m, d, 15); return &v }
+	closed := func(e *time.Time) []deadline.Stage { return []deadline.Stage{{EndedAt: e}} }
+	due := func(s string) *string { return &s }
+	cases := map[string]struct {
+		c      domain.AuditControl
+		stages []deadline.Stage
+		want   *bool
+	}{
+		"open, before the ultimate date":     {domain.AuditControl{DueDate: due("2026-12-20"), Status: "EVIDENCE_PENDING"}, nil, boolPtr(false)},
+		"open, on the ultimate date":         {domain.AuditControl{DueDate: due("2026-12-05"), Status: "EVIDENCE_PENDING"}, nil, boolPtr(false)},
+		"open, past the ultimate date":       {domain.AuditControl{DueDate: due("2026-12-01"), Status: "EVIDENCE_PENDING"}, nil, boolPtr(true)},
+		"completed on time":                  {domain.AuditControl{DueDate: due("2026-12-01"), Status: "COMPLETE"}, closed(end(time.December, 1)), boolPtr(false)},
+		"completed late stays delayed":       {domain.AuditControl{DueDate: due("2026-12-01"), Status: "COMPLETE"}, closed(end(time.December, 3)), boolPtr(true)},
+		"completed before tracking: unknown": {domain.AuditControl{DueDate: due("2026-12-01"), Status: "COMPLETE"}, nil, nil},
+		"no due date: unknown":               {domain.AuditControl{Status: "EVIDENCE_PENDING"}, nil, nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := tc.c
+			applyUltimate(&c, tc.stages, now)
+			if (c.UltimateDelayed == nil) != (tc.want == nil) || (tc.want != nil && *c.UltimateDelayed != *tc.want) {
+				t.Fatalf("ultimateDelayed = %v, want %v", c.UltimateDelayed, tc.want)
+			}
+		})
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }

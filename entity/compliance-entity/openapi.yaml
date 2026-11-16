@@ -4804,6 +4804,10 @@ components:
         delayed:
           type: boolean
           nullable: true
+        ultimateDelayed:
+          type: boolean
+          nullable: true
+          description: True when the control finished after, or is still open past, its dueDate (the ultimate deadline). Null when it cannot be known.
         delayLog:
           type: array
           items:
@@ -5023,7 +5027,7 @@ components:
         dueDate:
           type: string
           nullable: true
-          description: Optional for a DESIGN control, which then gets today (Asia/Colombo) plus the audit's INITIAL/OWNER allowed days. Required for OE controls.
+          description: The control's ultimate deadline, the final date for it to be completed. Required.
         population:
           allOf:
           - $ref: '#/components/schemas/InlinePopulationRequest'
