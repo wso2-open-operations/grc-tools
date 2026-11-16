@@ -164,17 +164,16 @@ func dayString(s string) string {
 	return s
 }
 
-// openFirstStage records the owner's opening stage for a new DESIGN control and
-// freezes the original planned GRC and EY dates on it.
-func openFirstStage(ctx context.Context, tx stageDB, auditID, controlID int, dueDate string, now time.Time) error {
-	ownerDue, err := deadline.ParseDay(dayString(dueDate))
-	if err != nil {
-		return fmt.Errorf("stage.openFirst: bad due date %q: %w", dueDate, err)
-	}
+// openFirstStage records the owner's opening stage for a new DESIGN control. The
+// owner's deadline is the creation day plus the audit's Owner initial days; the
+// control's own due date is the ultimate deadline and plays no part in the plan.
+// The original planned GRC and EY dates are frozen on the row.
+func openFirstStage(ctx context.Context, tx stageDB, auditID, controlID int, now time.Time) error {
 	days, err := loadDeadlineDays(ctx, tx, auditID)
 	if err != nil {
 		return err
 	}
+	ownerDue := deadline.AddDays(deadline.DayOf(now), days.For(deadline.Initial, deadline.Owner))
 	compliance, auditor := deadline.PlannedDates(ownerDue, days)
 	first := deadline.FirstStage(ownerDue, now)
 	if _, err := tx.ExecContext(ctx,
@@ -259,49 +258,6 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 	return nil
 }
 
-// syncFirstStageDueDate follows an edit of the control's due date while the
-// owner is still on their first stage: the stage deadline moves and the
-// planned GRC and EY dates are replanned. Once the control has moved on the
-// first stage is closed and never changes, so this finds nothing. The same
-// date as the stored one changes nothing.
-func syncFirstStageDueDate(ctx context.Context, tx stageDB, auditID, controlID int, dueDate string) error {
-	var (
-		stageID   int64
-		storedDue string
-	)
-	err := tx.QueryRowContext(ctx,
-		`SELECT id, DATE_FORMAT(due_date, '%Y-%m-%d') FROM audit_control_stage
-		 WHERE control_id = ? AND phase = 'EVIDENCE' AND ended_at IS NULL
-		   AND handled_by = 'OWNER' AND cycle_type = 'INITIAL' AND planned_compliance_date IS NOT NULL
-		 ORDER BY started_at, id LIMIT 1 FOR UPDATE`, controlID).Scan(&stageID, &storedDue)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("stage.syncDue(%d): %w", controlID, err)
-	}
-	ownerDue, err := deadline.ParseDay(dayString(dueDate))
-	if err != nil {
-		return fmt.Errorf("stage.syncDue: bad due date %q: %w", dueDate, err)
-	}
-	// A save that resends the same date is not an edit: the plan stays as frozen
-	// when the stage opened, even if the allowed days have changed since.
-	if deadline.FormatDay(ownerDue) == storedDue {
-		return nil
-	}
-	days, err := loadDeadlineDays(ctx, tx, auditID)
-	if err != nil {
-		return err
-	}
-	compliance, auditor := deadline.PlannedDates(ownerDue, days)
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE audit_control_stage SET due_date = ?, planned_compliance_date = ?, planned_auditor_date = ? WHERE id = ?`,
-		deadline.FormatDay(ownerDue), deadline.FormatDay(compliance), deadline.FormatDay(auditor), stageID); err != nil {
-		return fmt.Errorf("stage.syncDue(%d) update: %w", controlID, err)
-	}
-	return nil
-}
-
 // resetStagesForRequirementType rebuilds a control's stages after it switches
 // between DESIGN and OE (only possible before work has started): OE controls
 // are not tracked, a DESIGN control starts a fresh first stage.
@@ -312,13 +268,5 @@ func resetStagesForRequirementType(ctx context.Context, tx stageDB, auditID, con
 	if newType != "DESIGN" {
 		return nil
 	}
-	var due sql.NullString
-	if err := tx.QueryRowContext(ctx,
-		"SELECT DATE_FORMAT(due_date, '%Y-%m-%d') FROM audit_control WHERE id = ?", controlID).Scan(&due); err != nil {
-		return fmt.Errorf("stage.reset(%d) due date: %w", controlID, err)
-	}
-	if !due.Valid || due.String == "" {
-		return nil
-	}
-	return openFirstStage(ctx, tx, auditID, controlID, due.String, now)
+	return openFirstStage(ctx, tx, auditID, controlID, now)
 }

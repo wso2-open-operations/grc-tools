@@ -396,8 +396,8 @@ func (r *controlRepo) CreateControl(ctx context.Context, auditID int, req domain
 			return nil, fmt.Errorf("control.Create population: %w", err)
 		}
 	}
-	if strings.EqualFold(defCols.requirementType, "DESIGN") && req.DueDate != nil && *req.DueDate != "" {
-		if err := openFirstStage(ctx, tx, auditID, int(id), *req.DueDate, r.clock()); err != nil {
+	if strings.EqualFold(defCols.requirementType, "DESIGN") {
+		if err := openFirstStage(ctx, tx, auditID, int(id), r.clock()); err != nil {
 			return nil, fmt.Errorf("control.Create stage: %w", err)
 		}
 	}
@@ -453,8 +453,8 @@ func (r *controlRepo) BulkCreateControls(ctx context.Context, auditID int, reqs 
 				return nil, fmt.Errorf("control.BulkCreate population %q: %w", req.ControlNumber, err)
 			}
 		}
-		if strings.EqualFold(defCols.requirementType, "DESIGN") && req.DueDate != nil && *req.DueDate != "" {
-			if err := openFirstStage(ctx, tx, auditID, int(id), *req.DueDate, r.clock()); err != nil {
+		if strings.EqualFold(defCols.requirementType, "DESIGN") {
+			if err := openFirstStage(ctx, tx, auditID, int(id), r.clock()); err != nil {
 				return nil, fmt.Errorf("control.BulkCreate stage %q: %w", req.ControlNumber, err)
 			}
 		}
@@ -667,12 +667,6 @@ func (r *controlRepo) UpdateControl(ctx context.Context, auditID, controlID int,
 		}
 	}
 
-	// The due date moves the owner's open stage, so it goes before a hand-off closes it.
-	if req.DueDate != nil {
-		if err := syncFirstStageDueDate(ctx, tx, auditID, controlID, *req.DueDate); err != nil {
-			return nil, err
-		}
-	}
 	if req.Status != nil && req.ExpectedStatus != "" {
 		if err := applyStageTransition(ctx, tx, auditID, controlID, req.ExpectedStatus, *req.Status, req.UpdatedBy, false, r.clock()); err != nil {
 			return nil, err
@@ -847,12 +841,6 @@ func (r *controlRepo) ChangeRequirementType(ctx context.Context, auditID, contro
 	if currentType == req.RequirementType {
 		if err := applyFields(); err != nil {
 			return nil, err
-		}
-		// A due date edited here must move the open first stage like UpdateControl does.
-		if req.Control != nil && req.Control.DueDate != nil {
-			if err := syncFirstStageDueDate(ctx, tx, auditID, controlID, *req.Control.DueDate); err != nil {
-				return nil, err
-			}
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("control.ChangeRequirementType commit: %w", err)

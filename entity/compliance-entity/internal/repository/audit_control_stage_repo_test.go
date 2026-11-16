@@ -40,12 +40,12 @@ func TestOpenFirstStageFreezesPlannedDates(t *testing.T) {
 		WithArgs(7).
 		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
-		WithArgs(42, "OWNER", "INITIAL", stageNow(), "2026-11-07", "2026-11-17", "2026-11-27").
+		WithArgs(42, "OWNER", "INITIAL", stageNow(), "2026-12-10", "2026-12-20", "2026-12-30").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()
-	if err := openFirstStage(context.Background(), tx, 7, 42, "2026-11-07", stageNow()); err != nil {
+	if err := openFirstStage(context.Background(), tx, 7, 42, stageNow()); err != nil {
 		t.Fatal(err)
 	}
 	_ = tx.Commit()
@@ -66,12 +66,12 @@ func TestOpenFirstStageUsesSavedAuditDays(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}).
 			AddRow("INITIAL", "COMPLIANCE", 12).AddRow("INITIAL", "AUDITOR", 5))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
-		WithArgs(42, "OWNER", "INITIAL", stageNow(), "2026-11-07", "2026-11-19", "2026-11-24").
+		WithArgs(42, "OWNER", "INITIAL", stageNow(), "2026-12-10", "2026-12-22", "2026-12-27").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()
-	if err := openFirstStage(context.Background(), tx, 7, 42, "2026-11-07", stageNow()); err != nil {
+	if err := openFirstStage(context.Background(), tx, 7, 42, stageNow()); err != nil {
 		t.Fatal(err)
 	}
 	_ = tx.Commit()
