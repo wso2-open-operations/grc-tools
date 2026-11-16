@@ -216,6 +216,10 @@ func main() {
 		reminderJob = reminderJob.WithDailyReminders()
 		slog.Info("audit daily reminders enabled (review, validation and sample statuses remind every day)")
 	}
+	if cfg.AuditWorkflowRemindersEnabled {
+		reminderJob = reminderJob.WithWorkflowReminders(auditDeps.SendUltimateLeadDigestSync)
+		slog.Info("audit workflow reminders enabled (Design controls: ultimate and individual deadlines)")
+	}
 	auditDeps.TriggerReminderJob = reminderJob.RunOnce
 	audithandler.RegisterRoutes(mux, auditDeps)
 	// Constructed regardless of SCHEDULER_ENABLED, like the two sweeps above: the
