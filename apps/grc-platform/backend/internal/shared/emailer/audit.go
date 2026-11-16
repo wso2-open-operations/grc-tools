@@ -38,10 +38,13 @@ const (
 	// AuditEventInfo.Items and sends one email, so a person who is both a
 	// control's and its population's owner in the same request gets exactly
 	// one email, not two.
-	AuditEventOwnerAssigned    AuditEvent = "AUDIT_OWNER_ASSIGNED"
-	AuditEventAuditorAssigned  AuditEvent = "AUDIT_AUDITOR_ASSIGNED"
-	AuditEventReminderDue10    AuditEvent = "AUDIT_REMINDER_DUE_10"
-	AuditEventReminderDue5     AuditEvent = "AUDIT_REMINDER_DUE_5"
+	AuditEventOwnerAssigned   AuditEvent = "AUDIT_OWNER_ASSIGNED"
+	AuditEventAuditorAssigned AuditEvent = "AUDIT_AUDITOR_ASSIGNED"
+	AuditEventReminderDue10   AuditEvent = "AUDIT_REMINDER_DUE_10"
+	AuditEventReminderDue5    AuditEvent = "AUDIT_REMINDER_DUE_5"
+	// AuditEventReminderDue1 is the "due tomorrow" digest of the workflow-aware
+	// reminders. It is logged under the due-today type (see model.ReminderItem.OneDayBefore).
+	AuditEventReminderDue1     AuditEvent = "AUDIT_REMINDER_DUE_1"
 	AuditEventReminderDueToday AuditEvent = "AUDIT_REMINDER_DUE_TODAY"
 	AuditEventReminderOverdue  AuditEvent = "AUDIT_REMINDER_OVERDUE"
 	// AuditEventReminderDaily is the digest for items that are waiting but sit
@@ -61,6 +64,13 @@ const (
 	// audits, so each row names its own (ShowAudit) and the header names none.
 	// Carries no links: a lead holds no audit privileges.
 	AuditEventReminderOverdueLead AuditEvent = "AUDIT_REMINDER_OVERDUE_LEAD"
+
+	// AuditEventReminderUltimateLead tells an owner's lead which of that
+	// owner's Design controls are approaching, at or past their ultimate
+	// deadline (5 days before and later). Same shape as the overdue lead
+	// digest: no links, one digest per owner per day, but the Status column
+	// carries the timing because the rows mix tiers.
+	AuditEventReminderUltimateLead AuditEvent = "AUDIT_REMINDER_ULTIMATE_LEAD"
 
 	// The six below notify admin/auditor recipients when a control reaches a
 	// given status, regardless of which endpoint produced the transition —
@@ -262,6 +272,16 @@ func reminderSubject(tier string) func(AuditEventInfo) string {
 	}
 }
 
+// ultimateLeadSubject names the owner, like overdueLeadSubject, and stays the
+// same each day so the digests thread.
+func ultimateLeadSubject(i AuditEventInfo) string {
+	name := strings.TrimSpace(i.OwnerName)
+	if name == "" {
+		return "[GRC Platform] Ultimate deadline"
+	}
+	return fmt.Sprintf("[GRC Platform] Ultimate deadline - %s", name)
+}
+
 // overdueAdminSubject is the admin escalation digest's subject: one per
 // (admin, audit) per day. Deliberately NOT controlThreadSubject and
 // deliberately not per-control: it re-sends every day and can cover several
@@ -318,6 +338,16 @@ var auditEventTemplates = map[AuditEvent]auditEventTemplate{
 		subject:    reminderSubject("Due in 10 days"),
 		lead:       "The following item(s) are waiting on you and are due in 10 days.",
 		actorLabel: "",
+	},
+	AuditEventReminderDue1: {
+		subject:    reminderSubject("Due tomorrow"),
+		lead:       "The following item(s) are due tomorrow.",
+		actorLabel: "",
+	},
+	AuditEventReminderUltimateLead: {
+		subject:    ultimateLeadSubject,
+		lead:       "The ultimate deadline of the following control(s) owned by a member of your team is approaching or has passed, and they have not been completed.",
+		actorLabel: "Owned by",
 	},
 	AuditEventReminderDue5: {
 		subject:    reminderSubject("Due in 5 days"),

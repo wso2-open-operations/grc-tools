@@ -201,3 +201,50 @@ func TestSendReminderDigestCCSyncReportsDelivery(t *testing.T) {
 		})
 	}
 }
+
+// "Due tomorrow" is logged under the due-today type, so the wording and subject
+// come from the item's own flag, and the ultimate row says where the control is.
+func TestReminderDigestWordsDueTomorrowAndNamesWhereTheControlIs(t *testing.T) {
+	s := newLinkTestServer(t)
+	err := s.deps().SendReminderDigestSync(context.Background(), 1, []model.ReminderItem{
+		{AuditID: 7, Type: "REMINDER_DUE_TODAY", OneDayBefore: true, Kind: "ULTIMATE", CurrentlyWith: "Auditor",
+			Tier: "Ultimate deadline - Due tomorrow", ControlNumber: "C-1", DueDate: "2026-12-31", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+	})
+	if err != nil {
+		t.Fatalf("SendReminderDigestSync: %v", err)
+	}
+	mustContain(t, onlyEmail(t, s), "are due tomorrow", "Ultimate deadline - Due tomorrow", "Currently with Auditor")
+}
+
+// An ultimate and an individual deadline on the same day arrive as one item
+// with the second folded in: both rows are listed.
+func TestReminderDigestListsFoldedRows(t *testing.T) {
+	s := newLinkTestServer(t)
+	item := model.ReminderItem{AuditID: 7, Type: "REMINDER_DUE_TODAY", OneDayBefore: true, Kind: "ULTIMATE", CurrentlyWith: "Owner",
+		Tier: "Ultimate deadline - Due tomorrow", ControlNumber: "C-1", DueDate: "2026-12-11", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"}
+	item.Extras = []model.ReminderItem{{AuditID: 7, Type: "REMINDER_DUE_TODAY", OneDayBefore: true, Kind: "INDIVIDUAL",
+		Tier: "Your deadline - Due tomorrow", ControlNumber: "C-1", DueDate: "2026-12-11", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"}}
+	if err := s.deps().SendReminderDigestSync(context.Background(), 1, []model.ReminderItem{item}); err != nil {
+		t.Fatalf("SendReminderDigestSync: %v", err)
+	}
+	mustContain(t, onlyEmail(t, s), "Ultimate deadline - Due tomorrow", "Your deadline - Due tomorrow")
+}
+
+// The lead's ultimate-deadline digest names the owner, the timing and where each
+// control is, and carries no link.
+func TestUltimateLeadDigestNamesOwnerAndTimingWithoutLinks(t *testing.T) {
+	s := newLinkTestServer(t)
+	err := s.deps().SendUltimateLeadDigestSync(context.Background(), 1, "lead@x.com", []model.ReminderItem{
+		{AuditID: 7, Type: "REMINDER_DUE_5", Kind: "ULTIMATE", ToLead: true, CurrentlyWith: "Compliance",
+			Tier: "Ultimate deadline - Due in 5 days", ControlNumber: "C-1", DueDate: "2026-12-31", RequirementType: "Evidence Requirement", AuditName: "SOC 2 2026"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("SendUltimateLeadDigestSync: %v", err)
+	}
+	body := onlyEmail(t, s)
+	mustContain(t, body, "ultimate deadline of the following control(s)", "Test User (insider@wso2.com)",
+		"C-1", "SOC 2 2026", "Due in 5 days", "Currently with Compliance")
+	if strings.Contains(body, "<a href") {
+		t.Error("lead digest must contain no links")
+	}
+}
