@@ -19,7 +19,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -208,28 +207,39 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 		return nil
 	}
 
-	var (
-		open      *deadline.Stage
-		prevCycle string
-		stageID   int64
-		handler   string
-		cycle     string
-		ended     sql.NullTime
-	)
-	err := tx.QueryRowContext(ctx,
+	// Every stage the control has had, newest first: the latest says who holds it
+	// now, and the handlers seen anywhere in the list have held it before.
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, handled_by, cycle_type, ended_at FROM audit_control_stage
 		 WHERE control_id = ? AND phase = 'EVIDENCE'
-		 ORDER BY started_at DESC, id DESC LIMIT 1 FOR UPDATE`, controlID).Scan(&stageID, &handler, &cycle, &ended)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-	case err != nil:
-		return fmt.Errorf("stage.transition(%d) latest: %w", controlID, err)
-	default:
-		prevCycle = cycle
-		if !ended.Valid {
+		 ORDER BY started_at DESC, id DESC FOR UPDATE`, controlID)
+	if err != nil {
+		return fmt.Errorf("stage.transition(%d) history: %w", controlID, err)
+	}
+	var open *deadline.Stage
+	heldBefore := map[string]bool{}
+	first := true
+	for rows.Next() {
+		var (
+			stageID        int64
+			handler, cycle string
+			ended          sql.NullTime
+		)
+		if err := rows.Scan(&stageID, &handler, &cycle, &ended); err != nil {
+			rows.Close()
+			return fmt.Errorf("stage.transition(%d) history scan: %w", controlID, err)
+		}
+		heldBefore[handler] = true
+		if first && !ended.Valid {
 			open = &deadline.Stage{ID: stageID, HandledBy: handler, CycleType: cycle}
 		}
+		first = false
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("stage.transition(%d) history: %w", controlID, err)
+	}
+	rows.Close()
 
 	days := deadline.Days{}
 	if to != "COMPLETE" {
@@ -238,7 +248,7 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 		}
 	}
 	change := deadline.PlanTransition(deadline.TransitionInput{
-		From: from, To: to, Override: override, Now: now, OpenStage: open, PrevCycle: prevCycle, Days: days,
+		From: from, To: to, Override: override, Now: now, OpenStage: open, HeldBefore: heldBefore, Days: days,
 	})
 	if change.CloseOpen && open != nil {
 		if _, err := tx.ExecContext(ctx,

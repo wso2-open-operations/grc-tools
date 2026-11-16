@@ -89,6 +89,14 @@ func TestDaysFallBackToDefaults(t *testing.T) {
 	}
 }
 
+func held(handlers ...string) map[string]bool {
+	m := map[string]bool{}
+	for _, h := range handlers {
+		m[h] = true
+	}
+	return m
+}
+
 func TestPlanTransition(t *testing.T) {
 	open := func(h, cycle string) *Stage { return &Stage{HandledBy: h, CycleType: cycle} }
 	now := at(time.November, 6, 10, 0)
@@ -100,42 +108,54 @@ func TestPlanTransition(t *testing.T) {
 	}{
 		{
 			name:      "owner submits, initial cycle: GRC gets 10 days from submit day",
-			in:        TransitionInput{From: "EVIDENCE_PENDING", To: "EVIDENCE_INTERNAL_REVIEW", OpenStage: open(Owner, Initial), PrevCycle: Initial},
+			in:        TransitionInput{From: "EVIDENCE_PENDING", To: "EVIDENCE_INTERNAL_REVIEW", OpenStage: open(Owner, Initial), HeldBefore: held(Owner)},
 			wantClose: true,
 			wantOpen:  &NewStage{HandledBy: Compliance, CycleType: Initial, StartedAt: now, DueDate: day(time.November, 16)},
 		},
 		{
 			name:      "GRC approves: EY gets 10 days",
-			in:        TransitionInput{From: "EVIDENCE_INTERNAL_REVIEW", To: "EVIDENCE_UNDER_VALIDATION", OpenStage: open(Compliance, Initial), PrevCycle: Initial},
+			in:        TransitionInput{From: "EVIDENCE_INTERNAL_REVIEW", To: "EVIDENCE_UNDER_VALIDATION", OpenStage: open(Compliance, Initial), HeldBefore: held(Owner, Compliance)},
 			wantClose: true,
 			wantOpen:  &NewStage{HandledBy: Auditor, CycleType: Initial, StartedAt: now, DueDate: day(time.November, 16)},
 		},
 		{
 			name:      "EY completes: stage closes, nothing opens",
-			in:        TransitionInput{From: "EVIDENCE_UNDER_VALIDATION", To: "COMPLETE", OpenStage: open(Auditor, Initial), PrevCycle: Initial},
+			in:        TransitionInput{From: "EVIDENCE_UNDER_VALIDATION", To: "COMPLETE", OpenStage: open(Auditor, Initial), HeldBefore: held(Owner, Compliance, Auditor)},
 			wantClose: true,
 		},
 		{
 			name:      "GRC rejects: owner gets 15 days, revision",
-			in:        TransitionInput{From: "EVIDENCE_INTERNAL_REVIEW", To: "EVIDENCE_PENDING", OpenStage: open(Compliance, Initial), PrevCycle: Initial},
+			in:        TransitionInput{From: "EVIDENCE_INTERNAL_REVIEW", To: "EVIDENCE_PENDING", OpenStage: open(Compliance, Initial), HeldBefore: held(Owner, Compliance)},
 			wantClose: true,
 			wantOpen:  &NewStage{HandledBy: Owner, CycleType: Revision, StartedAt: now, DueDate: day(time.November, 21)},
 		},
 		{
 			name:      "EY rejects: owner gets 15 days, revision",
-			in:        TransitionInput{From: "EVIDENCE_UNDER_VALIDATION", To: "EVIDENCE_NEED_CLARIFICATION", OpenStage: open(Auditor, Initial), PrevCycle: Initial},
+			in:        TransitionInput{From: "EVIDENCE_UNDER_VALIDATION", To: "EVIDENCE_NEED_CLARIFICATION", OpenStage: open(Auditor, Initial), HeldBefore: held(Owner, Compliance, Auditor)},
 			wantClose: true,
 			wantOpen:  &NewStage{HandledBy: Owner, CycleType: Revision, StartedAt: now, DueDate: day(time.November, 21)},
 		},
 		{
 			name:      "owner resubmits after a rejection: GRC gets 5 days (stays revision)",
-			in:        TransitionInput{From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_INTERNAL_REVIEW", OpenStage: open(Owner, Revision), PrevCycle: Revision},
+			in:        TransitionInput{From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_INTERNAL_REVIEW", OpenStage: open(Owner, Revision), HeldBefore: held(Owner, Compliance, Auditor)},
 			wantClose: true,
 			wantOpen:  &NewStage{HandledBy: Compliance, CycleType: Revision, StartedAt: now, DueDate: day(time.November, 11)},
 		},
 		{
+			name:      "GRC passes it on after a revision: EY has never held it, so 10 initial days",
+			in:        TransitionInput{From: "EVIDENCE_INTERNAL_REVIEW", To: "EVIDENCE_UNDER_VALIDATION", OpenStage: open(Compliance, Revision), HeldBefore: held(Owner, Compliance)},
+			wantClose: true,
+			wantOpen:  &NewStage{HandledBy: Auditor, CycleType: Initial, StartedAt: now, DueDate: day(time.November, 16)},
+		},
+		{
+			name:      "GRC passes it on again after EY already had it: 5 revision days",
+			in:        TransitionInput{From: "EVIDENCE_INTERNAL_REVIEW", To: "EVIDENCE_UNDER_VALIDATION", OpenStage: open(Compliance, Revision), HeldBefore: held(Owner, Compliance, Auditor)},
+			wantClose: true,
+			wantOpen:  &NewStage{HandledBy: Auditor, CycleType: Revision, StartedAt: now, DueDate: day(time.November, 11)},
+		},
+		{
 			name:      "admin override from COMPLETE opens a revision stage, nothing to close",
-			in:        TransitionInput{From: "COMPLETE", To: "EVIDENCE_UNDER_VALIDATION", Override: true, PrevCycle: Initial},
+			in:        TransitionInput{From: "COMPLETE", To: "EVIDENCE_UNDER_VALIDATION", Override: true, HeldBefore: held(Owner, Compliance, Auditor)},
 			wantClose: false,
 			wantOpen:  &NewStage{HandledBy: Auditor, CycleType: Revision, StartedAt: now, DueDate: day(time.November, 11)},
 		},
@@ -149,7 +169,7 @@ func TestPlanTransition(t *testing.T) {
 		},
 		{
 			name: "same handler already holds it: nothing changes",
-			in:   TransitionInput{From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_PENDING", OpenStage: open(Owner, Revision), PrevCycle: Revision},
+			in:   TransitionInput{From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_PENDING", OpenStage: open(Owner, Revision), HeldBefore: held(Owner, Compliance, Auditor)},
 		},
 	}
 	for _, tc := range cases {
@@ -194,7 +214,7 @@ func TestPlanTransitionUsesColomboDay(t *testing.T) {
 	now := time.Date(2026, time.November, 9, 23, 30, 0, 0, time.UTC)
 	got := PlanTransition(TransitionInput{
 		From: "EVIDENCE_PENDING", To: "EVIDENCE_INTERNAL_REVIEW", Now: now,
-		OpenStage: &Stage{HandledBy: Owner, CycleType: Initial}, PrevCycle: Initial, Days: DefaultDays(),
+		OpenStage: &Stage{HandledBy: Owner, CycleType: Initial}, HeldBefore: held(Owner), Days: DefaultDays(),
 	})
 	if got.Open == nil || FormatDay(got.Open.DueDate) != "2026-11-20" {
 		t.Fatalf("got %+v", got.Open)
@@ -204,7 +224,7 @@ func TestPlanTransitionUsesColomboDay(t *testing.T) {
 func TestRevisionDeadlineMonthBoundary(t *testing.T) {
 	got := PlanTransition(TransitionInput{
 		From: "EVIDENCE_UNDER_VALIDATION", To: "EVIDENCE_NEED_CLARIFICATION", Now: at(time.November, 24, 12, 0),
-		OpenStage: &Stage{HandledBy: Auditor, CycleType: Initial}, PrevCycle: Initial, Days: DefaultDays(),
+		OpenStage: &Stage{HandledBy: Auditor, CycleType: Initial}, HeldBefore: held(Owner, Compliance, Auditor), Days: DefaultDays(),
 	})
 	if FormatDay(got.Open.DueDate) != "2026-12-09" {
 		t.Fatalf("24 Nov + 15 days should be 9 Dec, got %s", FormatDay(got.Open.DueDate))

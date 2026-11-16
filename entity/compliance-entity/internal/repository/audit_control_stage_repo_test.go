@@ -199,3 +199,40 @@ func TestBuildControlFiltersCurrentHandlers(t *testing.T) {
 		t.Fatalf("args = %v", args)
 	}
 }
+
+// GRC passes a control on after a rejection round. EY has never held it, so EY
+// gets the initial 10 days, not the revision 5.
+func TestApplyStageTransitionFirstTimeAuditorAfterRevisionGetsInitialDays(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT requirement_type FROM audit_control")).
+		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("DESIGN"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage")).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "handled_by", "cycle_type", "ended_at"}).
+			AddRow(9, "COMPLIANCE", "REVISION", nil).
+			AddRow(8, "OWNER", "REVISION", stageNow()).
+			AddRow(7, "COMPLIANCE", "INITIAL", stageNow()).
+			AddRow(6, "OWNER", "INITIAL", stageNow()))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET ended_at")).
+		WithArgs(stageNow(), "grc@wso2.com", int64(9)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
+		WithArgs(42, "AUDITOR", "INITIAL", stageNow(), "2026-11-20").WillReturnResult(sqlmock.NewResult(10, 1))
+	mock.ExpectCommit()
+
+	tx, _ := db.Begin()
+	if err := applyStageTransition(context.Background(), tx, 7, 42,
+		"EVIDENCE_INTERNAL_REVIEW", "EVIDENCE_UNDER_VALIDATION", "grc@wso2.com", false, stageNow()); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx.Commit()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

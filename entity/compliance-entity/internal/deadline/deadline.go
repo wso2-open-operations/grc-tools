@@ -170,12 +170,12 @@ type Change struct {
 
 // TransitionInput is everything PlanTransition needs.
 type TransitionInput struct {
-	From, To  string
-	Override  bool // an admin backward override rather than the normal workflow
-	Now       time.Time
-	OpenStage *Stage // the control's open stage, nil when none
-	PrevCycle string // cycle of the control's latest stage, "" when it has none
-	Days      Days
+	From, To   string
+	Override   bool // an admin backward override rather than the normal workflow
+	Now        time.Time
+	OpenStage  *Stage          // the control's open stage, nil when none
+	HeldBefore map[string]bool // groups that have held this control in an earlier stage
+	Days       Days
 }
 
 // PlanTransition decides how a status change opens and closes stages.
@@ -193,10 +193,13 @@ func PlanTransition(in TransitionInput) Change {
 	if in.OpenStage != nil && in.OpenStage.HandledBy == handler {
 		return Change{}
 	}
-	// EVIDENCE_NEED_CLARIFICATION is only reached by an auditor rejection, so the
-	// way out of it is a revision even for a control that has no stage history.
+	// The cycle depends on the group, not on the control: a group that is getting
+	// the control for the first time has the initial days, even when others
+	// already went through a revision. One that held it before has the revision
+	// days. EVIDENCE_NEED_CLARIFICATION is only reached by an auditor rejection,
+	// so the way out of it is a revision even for a control with no stage history.
 	cycle := Initial
-	if IsRejection(in.From, in.To) || in.From == "EVIDENCE_NEED_CLARIFICATION" || in.Override || in.PrevCycle == Revision {
+	if in.HeldBefore[handler] || IsRejection(in.From, in.To) || in.From == "EVIDENCE_NEED_CLARIFICATION" || in.Override {
 		cycle = Revision
 	}
 	return Change{
