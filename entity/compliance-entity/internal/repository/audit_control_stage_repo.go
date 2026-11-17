@@ -147,22 +147,26 @@ func (r *stageRepo) PutDeadlineDays(ctx context.Context, auditID int, rows []dom
 			}
 		}
 	}
-	for _, row := range rows {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO audit_deadline_days (audit_id, phase, cycle_type, handled_by, allowed_days)
-			 VALUES (?, ?, ?, ?, ?)
-			 ON DUPLICATE KEY UPDATE allowed_days = VALUES(allowed_days)`,
-			auditID, rowPhase(row), row.CycleType, row.HandledBy, row.AllowedDays); err != nil {
-			return sum, fmt.Errorf("stage.PutDeadlineDays(%d): %w", auditID, err)
+	// A preview works the effect out from the changed values alone, so it
+	// writes (and locks) nothing in audit_deadline_days.
+	if !opts.DryRun {
+		for _, row := range rows {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO audit_deadline_days (audit_id, phase, cycle_type, handled_by, allowed_days)
+				 VALUES (?, ?, ?, ?, ?)
+				 ON DUPLICATE KEY UPDATE allowed_days = VALUES(allowed_days)`,
+				auditID, rowPhase(row), row.CycleType, row.HandledBy, row.AllowedDays); err != nil {
+				return sum, fmt.Errorf("stage.PutDeadlineDays(%d): %w", auditID, err)
+			}
 		}
 	}
 	if len(changed) > 0 {
-		if sum, err = recalcOpenStages(ctx, tx, auditID, changed, r.now()); err != nil {
+		if sum, err = recalcOpenStages(ctx, tx, auditID, changed, r.now(), !opts.DryRun); err != nil {
 			return sum, err
 		}
 	}
 	if opts.DryRun {
-		return sum, nil // the deferred rollback discards everything
+		return sum, nil // the deferred rollback ends the transaction
 	}
 	if err := tx.Commit(); err != nil {
 		return sum, fmt.Errorf("stage.PutDeadlineDays commit: %w", err)
@@ -177,13 +181,25 @@ func stageKey(phase, cycle, handler string) string { return phase + "|" + cycle 
 // own deadline moves: the control's ultimate deadline and the planned GRC and EY
 // dates frozen on a phase's first stage are never touched. The Owner's planned
 // date is that first stage's deadline, so it follows while the stage is open.
-func recalcOpenStages(ctx context.Context, tx stageDB, auditID int, changed map[string]int, now time.Time) (domain.RecalcSummary, error) {
+// Only the stages a changed value governs are read. With apply unset (a
+// preview) they are only read: not locked and not updated.
+func recalcOpenStages(ctx context.Context, tx stageDB, auditID int, changed map[string]int, now time.Time, apply bool) (domain.RecalcSummary, error) {
 	var sum domain.RecalcSummary
-	rows, err := tx.QueryContext(ctx,
-		`SELECT s.id, s.phase, s.cycle_type, s.handled_by, s.started_at, s.due_date
+	conds := make([]string, 0, len(changed))
+	args := []any{auditID}
+	for key := range changed {
+		parts := strings.SplitN(key, "|", 3)
+		conds = append(conds, "(s.phase = ? AND s.cycle_type = ? AND s.handled_by = ?)")
+		args = append(args, parts[0], parts[1], parts[2])
+	}
+	query := `SELECT s.id, s.phase, s.cycle_type, s.handled_by, s.started_at, s.due_date
 		 FROM audit_control_stage s
 		 WHERE s.ended_at IS NULL AND s.control_id IN (SELECT id FROM audit_control WHERE audit_id = ?)
-		 FOR UPDATE`, auditID)
+		   AND (` + strings.Join(conds, " OR ") + `)`
+	if apply {
+		query += " FOR UPDATE"
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return sum, fmt.Errorf("stage.recalc(%d) load: %w", auditID, err)
 	}
@@ -223,6 +239,9 @@ func recalcOpenStages(ctx context.Context, tx stageDB, auditID int, changed map[
 		return sum, fmt.Errorf("stage.recalc(%d): %w", auditID, err)
 	}
 	rows.Close()
+	if !apply {
+		return sum, nil
+	}
 	for _, m := range moves {
 		if _, err := tx.ExecContext(ctx,
 			"UPDATE audit_control_stage SET due_date = ? WHERE id = ?", deadline.FormatDay(m.newDue), m.id); err != nil {

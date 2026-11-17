@@ -51,24 +51,6 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-func TestHandlerForStatus(t *testing.T) {
-	cases := map[string]string{
-		"EVIDENCE_PENDING":            Owner,
-		"EVIDENCE_NEED_CLARIFICATION": Owner,
-		"EVIDENCE_INTERNAL_REVIEW":    Compliance,
-		"EVIDENCE_UNDER_VALIDATION":   Auditor,
-	}
-	for status, want := range cases {
-		got, ok := HandlerForStatus(status)
-		if !ok || got != want {
-			t.Errorf("%s: got %q,%v want %q", status, got, ok, want)
-		}
-	}
-	if _, ok := HandlerForStatus("COMPLETE"); ok {
-		t.Error("COMPLETE should not be tracked")
-	}
-}
-
 func TestStageFor(t *testing.T) {
 	cases := []struct {
 		status, phase, handler string

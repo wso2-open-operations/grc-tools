@@ -95,9 +95,6 @@ func DefaultDaysFor(phase string) Days {
 	}
 }
 
-// DefaultDays are the Design evidence defaults.
-func DefaultDays() Days { return DefaultDaysFor(PhaseEvidence) }
-
 // Set records one value, creating the inner map when needed.
 func (d Days) Set(cycle, handler string, days int) {
 	if d[cycle] == nil {
@@ -189,12 +186,6 @@ func StageFor(status string, oe bool) (phase, handler string, ok bool) {
 		return evidence, Auditor, true
 	}
 	return "", "", false
-}
-
-// HandlerForStatus maps a status to the group holding the control.
-func HandlerForStatus(status string) (handler string, ok bool) {
-	_, handler, ok = StageFor(status, false)
-	return handler, ok
 }
 
 // HeldKey is the HeldBefore key for a group in a phase: a group that held the

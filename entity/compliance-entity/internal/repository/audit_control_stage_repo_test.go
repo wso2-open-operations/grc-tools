@@ -331,10 +331,17 @@ func complianceRow(days int) domain.DeadlineDaysRow {
 	return domain.DeadlineDaysRow{Phase: "EVIDENCE", CycleType: "INITIAL", HandledBy: "COMPLIANCE", AllowedDays: days}
 }
 
-func expectOpenStages(mock sqlmock.Sqlmock) {
+// expectOpenStages expects the read of the open stages a change to Compliance
+// initial days governs; the mock also returns stages that change does not govern,
+// which the code must skip. locked says whether the read takes row locks (only a real apply does).
+func expectOpenStages(mock sqlmock.Sqlmock, locked bool) {
 	started := time.Date(2026, time.November, 1, 10, 0, 0, 0, deadline.Location)
-	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage s")).
-		WithArgs(7).
+	pattern := "FROM audit_control_stage s"
+	if locked {
+		pattern += `(?s).*FOR UPDATE`
+	}
+	mock.ExpectQuery(pattern).
+		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "cycle_type", "handled_by", "started_at", "due_date"}).
 			AddRow(10, "EVIDENCE", "INITIAL", "COMPLIANCE", started, utcDay(time.November, 11)).
 			AddRow(11, "EVIDENCE", "REVISION", "COMPLIANCE", started, utcDay(time.November, 6)).
@@ -371,7 +378,7 @@ func TestPutDeadlineDaysExtendsOpenStagesOfTheChangedCycleOnly(t *testing.T) {
 	emptyDays(mock)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
 		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 15).WillReturnResult(sqlmock.NewResult(0, 1))
-	expectOpenStages(mock)
+	expectOpenStages(mock, true)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET due_date")).
 		WithArgs("2026-11-16", int64(10)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -395,7 +402,7 @@ func TestPutDeadlineDaysShorteningCountsNewlyOverdue(t *testing.T) {
 	emptyDays(mock)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
 		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 5).WillReturnResult(sqlmock.NewResult(0, 1))
-	expectOpenStages(mock)
+	expectOpenStages(mock, true)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET due_date")).
 		WithArgs("2026-11-06", int64(10)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -426,17 +433,14 @@ func TestPutDeadlineDaysUnchangedValueMovesNothing(t *testing.T) {
 	}
 }
 
-// A dry run works everything out and then rolls back: nothing is committed.
+// A dry run reads the affected stages without locking or updating them, writes
+// nothing and rolls back.
 func TestPutDeadlineDaysDryRunRollsBack(t *testing.T) {
 	r, mock, done := recalcRepo(t)
 	defer done()
 	mock.ExpectBegin()
 	emptyDays(mock)
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
-		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 5).WillReturnResult(sqlmock.NewResult(0, 1))
-	expectOpenStages(mock)
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET due_date")).
-		WithArgs("2026-11-06", int64(10)).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectOpenStages(mock, false)
 	mock.ExpectRollback()
 	sum, err := r.PutDeadlineDays(context.Background(), 7, []domain.DeadlineDaysRow{complianceRow(5)}, DeadlineDaysOptions{DryRun: true})
 	if err != nil || sum.StagesUpdated != 1 || sum.NewlyOverdue != 1 {
