@@ -5278,6 +5278,7 @@ components:
       - requirementType
       - controlType
       - scope
+      - dueDate
       properties:
         controlSource:
           type: string
@@ -5320,7 +5321,6 @@ components:
         dueDate:
           type: string
           format: date
-          nullable: true
           description: The control's ultimate deadline, the final date for it to be completed. Required, including for every row of a bulk add.
         population:
           nullable: true
@@ -5500,7 +5500,7 @@ components:
         applyToOpenStages:
           type: boolean
           default: false
-          description: Also move the deadline of every open stage whose phase, cycle and group match a value that changed. Off, a change only affects later hand-offs. The control's ultimate deadline and the planned Compliance and Auditor dates never move.
+          description: Also move the deadline of every open stage whose phase, cycle and group match a value that changed. Off, a change only affects later hand-offs. The control's ultimate deadline and the planned Compliance and Auditor dates never move. Late days are worked out from stage deadlines, so extending a deadline can remove lateness that had already built up on that stage (and shortening one can add it); the delay log and delayed follow the new deadline.
         dryRun:
           type: boolean
           default: false
@@ -5551,7 +5551,7 @@ components:
         delayed:
           type: boolean
           nullable: true
-          description: True when any group held the control past its own deadline, i.e. the delay log has at least one entry. It stays true afterwards.
+          description: True when any group held the control past its own deadline, i.e. the delay log has at least one entry. It stays true afterwards. The one exception is that applying changed days to open stages (applyToOpenStages) moves their deadlines, and late days are worked out from the deadlines, so an extension can clear lateness that no longer holds.
         ultimateDelayed:
           type: boolean
           nullable: true
