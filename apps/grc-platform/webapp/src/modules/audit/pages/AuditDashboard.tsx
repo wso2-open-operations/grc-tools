@@ -211,10 +211,22 @@ export default function AuditDashboard(): JSX.Element {
 
   const access = { canViewAll, canApprove, canSubmit, canValidate };
   const neutral = theme.palette.grey[500];
+  // Cards follow the control workflow: open work, submission, lateness, review,
+  // urgency, validation, then done.
   const kpiDefs: (KpiItem & { tab: number })[] = [
     {
       tab: QUEUE_TAB_ALL_PENDING, key: "all-pending", icon: <ClipboardList size={22} />, iconColor: theme.palette.primary.main,
       value: allPendingCount, label: "All Pending", sub: `of ${stats.totalControls} total controls`,
+    },
+    {
+      tab: QUEUE_TAB_PENDING, key: "pending", icon: <Upload size={22} />, iconColor: theme.palette.warning.main,
+      value: pendingCount, label: "Pending Submission", sub: "awaiting owners",
+    },
+    {
+      tab: QUEUE_TAB_OVERDUE, key: "overdue", icon: <AlertTriangle size={22} />,
+      iconColor: stats.overdueControls > 0 ? theme.palette.error.main : neutral,
+      value: stats.overdueControls, label: "Overdue", sub: stats.overdueControls > 0 ? "needs attention" : "all on schedule",
+      valueColor: stats.overdueControls > 0 ? theme.palette.error.main : undefined,
     },
     {
       tab: QUEUE_TAB_AWAITING, key: "awaiting", icon: <Inbox size={22} />, iconColor: theme.palette.warning.main,
@@ -226,18 +238,8 @@ export default function AuditDashboard(): JSX.Element {
       value: dueSoonCount, label: "Due Soon", sub: "next 7 days",
     },
     {
-      tab: QUEUE_TAB_PENDING, key: "pending", icon: <Upload size={22} />, iconColor: theme.palette.warning.main,
-      value: pendingCount, label: "Pending Submission", sub: "awaiting owners",
-    },
-    {
       tab: QUEUE_TAB_VALIDATION, key: "validation", icon: <ShieldCheck size={22} />, iconColor: theme.palette.secondary.main,
       value: validationCount, label: "Under Validation", sub: "awaiting auditors",
-    },
-    {
-      tab: QUEUE_TAB_OVERDUE, key: "overdue", icon: <AlertTriangle size={22} />,
-      iconColor: stats.overdueControls > 0 ? theme.palette.error.main : neutral,
-      value: stats.overdueControls, label: "Overdue", sub: stats.overdueControls > 0 ? "needs attention" : "all on schedule",
-      valueColor: stats.overdueControls > 0 ? theme.palette.error.main : undefined,
     },
     {
       tab: QUEUE_TAB_COMPLETED, key: "completed", icon: <CheckCircle size={22} />, iconColor: theme.palette.success.main,
