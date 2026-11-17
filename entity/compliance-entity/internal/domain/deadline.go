@@ -45,7 +45,7 @@ type DeadlineDaysRow struct {
 // It always lists the six cycle/handler combinations of every phase.
 type DeadlineDaysResponse struct {
 	AuditID int               `json:"auditId"`
-	Phase   string            `json:"phase"` // EVIDENCE; kept for older clients, rows carry their own phase
+	Phase   string            `json:"phase"` // always EVIDENCE; rows carry their own phase, so read them, not this
 	Days    []DeadlineDaysRow `json:"days"`
 	// Recalculated is set when the request asked to apply the change to open
 	// stages (or to preview it); DryRun says nothing was saved.

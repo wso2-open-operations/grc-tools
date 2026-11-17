@@ -5469,7 +5469,7 @@ components:
         phase:
           type: string
           enum: [EVIDENCE]
-          description: Kept for older clients; every row carries its own phase.
+          description: Always EVIDENCE. Every row carries its own phase, and the list now covers all three phases, so clients must read the row's phase rather than this field.
         days:
           type: array
           items:

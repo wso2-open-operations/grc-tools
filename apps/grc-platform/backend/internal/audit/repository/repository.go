@@ -79,7 +79,6 @@ type ProductRepository interface {
 	Create(ctx context.Context, req model.CreateProductRequest, createdBy string) (*model.AuditProduct, error)
 }
 
-// ControlRepository is the data-access contract for audit controls.
 // DeadlineDaysOptions says what saving allowed days should also do.
 type DeadlineDaysOptions struct {
 	ApplyToOpenStages bool
@@ -92,6 +91,7 @@ type DeadlineDaysRepository interface {
 	Put(ctx context.Context, auditID int, rows []model.DeadlineDaysRow, updatedBy string, opts DeadlineDaysOptions) (*model.DeadlineDays, error)
 }
 
+// ControlRepository is the data-access contract for audit controls.
 type ControlRepository interface {
 	// List returns every control in auditID, unscoped — for internal callers
 	// that need the full picture regardless of the caller's row scope (e.g.
