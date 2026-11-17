@@ -24,7 +24,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 )
 
-// Workflow-aware reminders for Design controls. A control has two deadlines:
+// Workflow-aware reminders for Design and OE controls. A control has two deadlines:
 //
 //   - the ultimate deadline (its due date): 10 days before it reminds the owner;
 //     5 days before, 1 day before, on the day and every day after it until the
@@ -114,11 +114,17 @@ func markFor(days int, due, todayStr string, withTenDay bool) (workflowMark, boo
 	return workflowMark{}, false
 }
 
-// isWorkflowControl is whether a control gets the workflow-aware reminders.
-// Release 1 covers Design controls; OE controls keep the existing reminders
-// until their timeline is agreed.
+// isWorkflowControl is whether a control gets the workflow-aware reminders:
+// every open Design or OE control. An OE control's ultimate deadline is the
+// control's own due date, covering its population and evidence phases together.
 func isWorkflowControl(c *model.AuditControl) bool {
-	return c != nil && strings.EqualFold(c.RequirementType, "DESIGN") && c.Status != "COMPLETE"
+	return c != nil && (strings.EqualFold(c.RequirementType, "DESIGN") || strings.EqualFold(c.RequirementType, "OE")) &&
+		c.Status != "COMPLETE"
+}
+
+// inPopulation is whether the control's current holder is in the OE population phase.
+func inPopulation(c *model.AuditControl) bool {
+	return c.CurrentPhase != nil && *c.CurrentPhase == "POPULATION"
 }
 
 // workflowReminder is one reminder for one control, ready for the job to route.
@@ -153,9 +159,15 @@ func handlerKind(handler string) (actorKind, bool) {
 	return 0, false
 }
 
+// holderID is the person holding the control for a kind of holder. In the
+// population phase the Owner is the population's owner, who may be someone
+// other than the control's owner.
 func holderID(c *model.AuditControl, kind actorKind) *int {
 	switch kind {
 	case actorOwner:
+		if inPopulation(c) && c.PopulationOwnerID != nil {
+			return c.PopulationOwnerID
+		}
 		return c.OwnerID
 	case actorAuditor:
 		return c.AuditorID
@@ -163,7 +175,7 @@ func holderID(c *model.AuditControl, kind actorKind) *int {
 	return nil
 }
 
-// workflowReminders works out today's reminders for one Design control: at most
+// workflowReminders works out today's reminders for one Design or OE control: at most
 // one for its ultimate deadline and one for the holder's own deadline. When both
 // land on the same person with the same type and date they are folded into one,
 // so that person gets a single row set and a single claim.
@@ -177,6 +189,10 @@ func workflowReminders(c *model.AuditControl, today time.Time, auditName string)
 	}
 	todayStr := today.Format("2006-01-02")
 
+	requirement := "Evidence Requirement"
+	if inPopulation(c) {
+		requirement = "Population Requirement"
+	}
 	base := func(due string, m workflowMark, kind, label string) model.ReminderItem {
 		return model.ReminderItem{
 			AuditID:         c.AuditID,
@@ -186,7 +202,7 @@ func workflowReminders(c *model.AuditControl, today time.Time, auditName string)
 			Description:     c.Description,
 			DueDate:         due,
 			Tier:            label + " - " + m.Text,
-			RequirementType: "Evidence Requirement",
+			RequirementType: requirement,
 			DedupSnapshot:   m.Dedup,
 			AuditName:       auditName,
 			LinkControlID:   c.ID,

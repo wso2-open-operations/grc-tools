@@ -179,19 +179,64 @@ func TestIndividualReminderGoesToTheHolder(t *testing.T) {
 func TestWorkflowRemindersSkipWhatTheyDoNotCover(t *testing.T) {
 	complete := wfControl(-5, -5)
 	complete.Status = "COMPLETE"
-	oe := wfControl(-5, -5)
-	oe.RequirementType = "OE"
 	untracked := wfControl(-5, -5)
 	untracked.DeadlineTracked, untracked.CurrentHandler, untracked.CurrentDueDate = false, nil, nil
 
 	if rs := workflowReminders(complete, colomboDay(wfNow), "x"); len(rs) != 0 {
 		t.Errorf("a completed control reminds nobody: %+v", rs)
 	}
-	if rs := workflowReminders(oe, colomboDay(wfNow), "x"); len(rs) != 0 {
-		t.Errorf("OE controls keep the existing reminders: %+v", rs)
-	}
 	if rs := workflowReminders(untracked, colomboDay(wfNow), "x"); len(rs) != 1 || rs[0].item.Kind != kindUltimate {
 		t.Errorf("an untracked control gets the ultimate reminder only: %+v", rs)
+	}
+}
+
+// An OE control in its population phase: the Owner's own deadline goes to the
+// population's owner, and the row says Population Requirement.
+func TestOEPopulationRemindersGoToThePopulationOwner(t *testing.T) {
+	c := wfControl(50, 1)
+	c.RequirementType, c.Status = "OE", "POPULATION_PENDING"
+	c.CurrentPhase, c.PopulationOwnerID = strPtr("POPULATION"), intPtr(555)
+	rs := workflowReminders(c, colomboDay(wfNow), "SOC 2")
+	if len(rs) != 1 {
+		t.Fatalf("got %+v", rs)
+	}
+	got := rs[0]
+	if got.item.Kind != kindIndividual || got.actorID == nil || *got.actorID != 555 || got.item.RequirementType != "Population Requirement" {
+		t.Errorf("got %+v", got)
+	}
+	if got.item.Status != "Population Pending" {
+		t.Errorf("status label = %q", got.item.Status)
+	}
+}
+
+// Once the control is in OE evidence the Owner is the control's owner again, and
+// the ultimate deadline (the control's due date) still goes to the owner and lead.
+func TestOEEvidenceRemindersAndUltimate(t *testing.T) {
+	c := wfControl(5, 1)
+	c.RequirementType, c.Status = "OE", "SUBMITTED_SAMPLE"
+	c.CurrentPhase, c.PopulationOwnerID = strPtr("OE_EVIDENCE"), intPtr(555)
+	rs := workflowReminders(c, colomboDay(wfNow), "SOC 2")
+	if len(rs) != 2 {
+		t.Fatalf("want ultimate + individual, got %d", len(rs))
+	}
+	for _, r := range rs {
+		if r.actorID == nil || *r.actorID != routeOwner || r.item.RequirementType != "Evidence Requirement" {
+			t.Errorf("got %+v", r)
+		}
+	}
+	if !rs[0].item.ToLead || rs[0].item.Kind != kindUltimate {
+		t.Errorf("ultimate at 5 days also goes to the lead: %+v", rs[0].item)
+	}
+}
+
+// EY holds the control through the sample, so its deadline goes to the auditor.
+func TestOEAuditorWindowGoesToAuditor(t *testing.T) {
+	c := wfControl(50, 0)
+	c.RequirementType, c.Status = "OE", "AWAITING_SAMPLE"
+	c.CurrentPhase, c.CurrentHandler = strPtr("POPULATION"), strPtr("AUDITOR")
+	rs := workflowReminders(c, colomboDay(wfNow), "SOC 2")
+	if len(rs) != 1 || rs[0].actorID == nil || *rs[0].actorID != routeAuditor || rs[0].waitsOn != actorAuditor {
+		t.Fatalf("got %+v", rs)
 	}
 }
 
