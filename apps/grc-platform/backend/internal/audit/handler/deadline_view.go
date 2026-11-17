@@ -58,6 +58,14 @@ func delayLogText(entries []model.DelayLogEntry) string {
 		if name == "" {
 			name = e.HandledBy
 		}
+		// An OE phase is named so a late Owner in population reads differently
+		// from a late Owner in evidence; Design's phase needs no label.
+		switch e.Phase {
+		case "POPULATION":
+			name += " (Population)"
+		case "OE_EVIDENCE":
+			name += " (Evidence)"
+		}
 		parts = append(parts, name+" - "+monthDay(e.Date))
 	}
 	return strings.Join(parts, "; ")

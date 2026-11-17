@@ -5410,9 +5410,31 @@ components:
       properties:
         status:
           type: string
+    PhasePlan:
+      type: object
+      description: The original plan for one phase of a control. A phase appears once it has started; an OE control has POPULATION, then OE_EVIDENCE.
+      properties:
+        phase:
+          type: string
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
+        plannedOwnerDate:
+          type: string
+          format: date
+          nullable: true
+        plannedComplianceDate:
+          type: string
+          format: date
+          nullable: true
+        plannedAuditorDate:
+          type: string
+          format: date
+          nullable: true
     DelayLogEntry:
       type: object
       properties:
+        phase:
+          type: string
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
         handledBy:
           type: string
           enum: [OWNER, COMPLIANCE, AUDITOR]
@@ -5421,7 +5443,12 @@ components:
           format: date
     DeadlineDaysRow:
       type: object
+      description: One allowed-days setting. A row sent without a phase means EVIDENCE (Design).
       properties:
+        phase:
+          type: string
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
+          description: EVIDENCE is Design evidence; POPULATION and OE_EVIDENCE are the two OE phases.
         cycleType:
           type: string
           enum: [INITIAL, REVISION]
@@ -5442,6 +5469,7 @@ components:
         phase:
           type: string
           enum: [EVIDENCE]
+          description: Kept for older clients; every row carries its own phase.
         days:
           type: array
           items:
@@ -5464,7 +5492,7 @@ components:
           type: integer
         deadlineTracked:
           type: boolean
-          description: False for a control with no recorded hand-offs (OE, or one that predates the feature); the deadline fields below are then empty and dueDate is the only date.
+          description: False for a control with no recorded hand-offs (one that predates the feature); the deadline fields below are then empty and dueDate is the only date.
         currentHandler:
           type: string
           nullable: true
@@ -5487,9 +5515,20 @@ components:
           type: string
           format: date
           nullable: true
+        currentPhase:
+          type: string
+          nullable: true
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
+          description: The phase of the current holder's stage.
+        phasePlans:
+          type: array
+          description: The plan of every phase the control has started. The three planned dates above are those of the first phase.
+          items:
+            $ref: '#/components/schemas/PhasePlan'
         delayed:
           type: boolean
           nullable: true
+          description: True when any group held the control past its own deadline, i.e. the delay log has at least one entry. It stays true afterwards.
         ultimateDelayed:
           type: boolean
           nullable: true

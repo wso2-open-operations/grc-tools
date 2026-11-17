@@ -40,6 +40,17 @@ func TestDelayLogText(t *testing.T) {
 	}
 }
 
+func TestDelayLogTextNamesOEPhases(t *testing.T) {
+	got := delayLogText([]model.DelayLogEntry{
+		{Phase: "POPULATION", HandledBy: "OWNER", Date: "2026-11-08"},
+		{Phase: "OE_EVIDENCE", HandledBy: "AUDITOR", Date: "2026-11-20"},
+		{Phase: "EVIDENCE", HandledBy: "OWNER", Date: "2026-11-21"},
+	})
+	if got != "Owner (Population) - 11/08; Auditor (Evidence) - 11/20; Owner - 11/21" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestMonthDayKeepsOddInputUntouched(t *testing.T) {
 	if monthDay("2026-01-05") != "01/05" || monthDay("junk") != "junk" || monthDay("") != "" {
 		t.Fatal("monthDay mishandled its input")

@@ -62,8 +62,15 @@ func (s *deadlineDaysService) Update(ctx context.Context, auditID int, req model
 	seen := map[string]bool{}
 	rows := make([]model.DeadlineDaysRow, 0, len(req.Days))
 	for i, row := range req.Days {
+		row.Phase = strings.ToUpper(strings.TrimSpace(row.Phase))
+		if row.Phase == "" {
+			row.Phase = "EVIDENCE"
+		}
 		row.CycleType = strings.ToUpper(row.CycleType)
 		row.HandledBy = strings.ToUpper(row.HandledBy)
+		if row.Phase != "EVIDENCE" && row.Phase != "POPULATION" && row.Phase != "OE_EVIDENCE" {
+			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: fmt.Sprintf("days[%d]: phase must be EVIDENCE, POPULATION or OE_EVIDENCE", i)}
+		}
 		if row.CycleType != "INITIAL" && row.CycleType != "REVISION" {
 			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: fmt.Sprintf("days[%d]: cycleType must be INITIAL or REVISION", i)}
 		}
@@ -73,9 +80,9 @@ func (s *deadlineDaysService) Update(ctx context.Context, auditID int, req model
 		if row.AllowedDays < 1 || row.AllowedDays > maxAllowedDays {
 			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: fmt.Sprintf("days[%d]: allowedDays must be a whole number from 1 to %d", i, maxAllowedDays)}
 		}
-		key := row.CycleType + "|" + row.HandledBy
+		key := row.Phase + "|" + row.CycleType + "|" + row.HandledBy
 		if seen[key] {
-			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: fmt.Sprintf("days[%d]: %s/%s is listed more than once", i, row.CycleType, row.HandledBy)}
+			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: fmt.Sprintf("days[%d]: %s/%s/%s is listed more than once", i, row.Phase, row.CycleType, row.HandledBy)}
 		}
 		seen[key] = true
 		rows = append(rows, row)
@@ -100,16 +107,16 @@ func (s *deadlineDaysService) recordTrail(ctx context.Context, auditID int, acto
 	}
 	old := map[string]int{}
 	for _, d := range before.Days {
-		old[d.CycleType+"|"+d.HandledBy] = d.AllowedDays
+		old[phaseOf(d.Phase)+"|"+d.CycleType+"|"+d.HandledBy] = d.AllowedDays
 	}
 	changes := []map[string]any{}
 	for _, r := range rows {
-		from := old[r.CycleType+"|"+r.HandledBy]
+		from := old[r.Phase+"|"+r.CycleType+"|"+r.HandledBy]
 		if from == r.AllowedDays {
 			continue
 		}
 		changes = append(changes, map[string]any{
-			"cycleType": r.CycleType, "handledBy": r.HandledBy, "from": from, "to": r.AllowedDays,
+			"phase": r.Phase, "cycleType": r.CycleType, "handledBy": r.HandledBy, "from": from, "to": r.AllowedDays,
 		})
 	}
 	if len(changes) == 0 {
@@ -118,4 +125,12 @@ func (s *deadlineDaysService) recordTrail(ctx context.Context, auditID int, acto
 	if err := s.trail.RecordAuditAction(ctx, auditID, "UPDATED", actor, map[string]any{"deadlineDays": changes}); err != nil {
 		slog.WarnContext(ctx, "record deadline days trail failed", "auditId", auditID, "err", err)
 	}
+}
+
+// phaseOf treats a row with no phase as Design evidence.
+func phaseOf(p string) string {
+	if p == "" {
+		return "EVIDENCE"
+	}
+	return p
 }
