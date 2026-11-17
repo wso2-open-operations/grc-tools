@@ -17,9 +17,9 @@
 import { Footer as FooterUI } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 
-const COMPANY_NAME = "WSO2 LLC.";
-const TERMS_OF_SERVICE_URL = "https://wso2.com/terms-of-use/";
-const PRIVACY_POLICY_URL = "https://wso2.com/privacy-policy/";
+const COMPANY_NAME = "Choreo Labs.";
+const TERMS_OF_SERVICE_URL = "https://choreolabs.com/legal/";
+const PRIVACY_POLICY_URL = "https://choreolabs.com/legal/";
 
 /**
  * Footer component.
