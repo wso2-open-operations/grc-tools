@@ -37,14 +37,26 @@ type StageRepository interface {
 	// GetDeadlineDays returns the allowed days saved for the audit. Anything not
 	// saved is left for deadline.PhaseDays.For to default.
 	GetDeadlineDays(ctx context.Context, auditID int) (deadline.PhaseDays, error)
-	// PutDeadlineDays upserts the given rows in one transaction.
-	PutDeadlineDays(ctx context.Context, auditID int, rows []domain.DeadlineDaysRow) error
+	// PutDeadlineDays upserts the given rows in one transaction. With
+	// ApplyToOpenStages it also moves the deadline of every open stage that a
+	// changed row governs, in the same transaction; with DryRun it does all of
+	// that and rolls back, returning only what would have changed.
+	PutDeadlineDays(ctx context.Context, auditID int, rows []domain.DeadlineDaysRow, opts DeadlineDaysOptions) (domain.RecalcSummary, error)
 }
 
-type stageRepo struct{ db *sql.DB }
+// DeadlineDaysOptions says what saving allowed days should also do.
+type DeadlineDaysOptions struct {
+	ApplyToOpenStages bool
+	DryRun            bool // implies working out ApplyToOpenStages, and saves nothing
+}
+
+type stageRepo struct {
+	db  *sql.DB
+	now func() time.Time
+}
 
 // NewStageRepository constructs a StageRepository.
-func NewStageRepository(db *sql.DB) StageRepository { return &stageRepo{db: db} }
+func NewStageRepository(db *sql.DB) StageRepository { return &stageRepo{db: db, now: time.Now} }
 
 // stageDB is the part of *sql.DB / *sql.Tx the stage helpers need, so the same
 // code runs inside a control transaction or on its own.
@@ -112,25 +124,112 @@ func (r *stageRepo) GetDeadlineDays(ctx context.Context, auditID int) (deadline.
 	return loadDeadlineDays(ctx, r.db, auditID)
 }
 
-func (r *stageRepo) PutDeadlineDays(ctx context.Context, auditID int, rows []domain.DeadlineDaysRow) error {
+func (r *stageRepo) PutDeadlineDays(ctx context.Context, auditID int, rows []domain.DeadlineDaysRow, opts DeadlineDaysOptions) (domain.RecalcSummary, error) {
+	var sum domain.RecalcSummary
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("stage.PutDeadlineDays begin: %w", err)
+		return sum, fmt.Errorf("stage.PutDeadlineDays begin: %w", err)
 	}
 	defer tx.Rollback()
+
+	// The values that actually change, by phase|cycle|group: a row sent with the
+	// number the audit already uses moves nothing.
+	changed := map[string]int{}
+	if opts.ApplyToOpenStages || opts.DryRun {
+		before, err := loadDeadlineDays(ctx, tx, auditID)
+		if err != nil {
+			return sum, err
+		}
+		for _, row := range rows {
+			p := rowPhase(row)
+			if row.AllowedDays != before.For(p, row.CycleType, row.HandledBy) {
+				changed[stageKey(p, row.CycleType, row.HandledBy)] = row.AllowedDays
+			}
+		}
+	}
 	for _, row := range rows {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO audit_deadline_days (audit_id, phase, cycle_type, handled_by, allowed_days)
 			 VALUES (?, ?, ?, ?, ?)
 			 ON DUPLICATE KEY UPDATE allowed_days = VALUES(allowed_days)`,
 			auditID, rowPhase(row), row.CycleType, row.HandledBy, row.AllowedDays); err != nil {
-			return fmt.Errorf("stage.PutDeadlineDays(%d): %w", auditID, err)
+			return sum, fmt.Errorf("stage.PutDeadlineDays(%d): %w", auditID, err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("stage.PutDeadlineDays commit: %w", err)
+	if len(changed) > 0 {
+		if sum, err = recalcOpenStages(ctx, tx, auditID, changed, r.now()); err != nil {
+			return sum, err
+		}
 	}
-	return nil
+	if opts.DryRun {
+		return sum, nil // the deferred rollback discards everything
+	}
+	if err := tx.Commit(); err != nil {
+		return sum, fmt.Errorf("stage.PutDeadlineDays commit: %w", err)
+	}
+	return sum, nil
+}
+
+func stageKey(phase, cycle, handler string) string { return phase + "|" + cycle + "|" + handler }
+
+// recalcOpenStages moves the deadline of each open stage in the audit that a
+// changed value governs to its start day plus the new days. Only the stage's
+// own deadline moves: the control's ultimate deadline and the planned GRC and EY
+// dates frozen on a phase's first stage are never touched. The Owner's planned
+// date is that first stage's deadline, so it follows while the stage is open.
+func recalcOpenStages(ctx context.Context, tx stageDB, auditID int, changed map[string]int, now time.Time) (domain.RecalcSummary, error) {
+	var sum domain.RecalcSummary
+	rows, err := tx.QueryContext(ctx,
+		`SELECT s.id, s.phase, s.cycle_type, s.handled_by, s.started_at, s.due_date
+		 FROM audit_control_stage s
+		 WHERE s.ended_at IS NULL AND s.control_id IN (SELECT id FROM audit_control WHERE audit_id = ?)
+		 FOR UPDATE`, auditID)
+	if err != nil {
+		return sum, fmt.Errorf("stage.recalc(%d) load: %w", auditID, err)
+	}
+	type move struct {
+		id     int64
+		newDue time.Time
+	}
+	var moves []move
+	today := deadline.DayOf(now)
+	for rows.Next() {
+		var (
+			id                    int64
+			phase, cycle, handler string
+			started, due          time.Time
+		)
+		if err := rows.Scan(&id, &phase, &cycle, &handler, &started, &due); err != nil {
+			rows.Close()
+			return sum, fmt.Errorf("stage.recalc(%d) scan: %w", auditID, err)
+		}
+		days, ok := changed[stageKey(phase, cycle, handler)]
+		if !ok {
+			continue
+		}
+		newDue := deadline.AddDays(deadline.DayOf(started), days)
+		oldDue := deadline.DayFromDB(due)
+		if newDue.Equal(oldDue) {
+			continue
+		}
+		moves = append(moves, move{id, newDue})
+		sum.StagesUpdated++
+		if newDue.Before(today) && !oldDue.Before(today) {
+			sum.NewlyOverdue++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return sum, fmt.Errorf("stage.recalc(%d): %w", auditID, err)
+	}
+	rows.Close()
+	for _, m := range moves {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE audit_control_stage SET due_date = ? WHERE id = ?", deadline.FormatDay(m.newDue), m.id); err != nil {
+			return sum, fmt.Errorf("stage.recalc(%d) update %d: %w", auditID, m.id, err)
+		}
+	}
+	return sum, nil
 }
 
 // rowPhase is the phase a saved row belongs to; a row from a client that

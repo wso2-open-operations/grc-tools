@@ -23,6 +23,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/deadline"
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
 )
 
 func stageNow() time.Time {
@@ -304,6 +307,141 @@ func TestApplyStageTransitionFirstTimeAuditorAfterRevisionGetsInitialDays(t *tes
 		t.Fatal(err)
 	}
 	_ = tx.Commit()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ---- applying changed days to open stages ----
+
+func recalcRepo(t *testing.T) (*stageRepo, sqlmock.Sqlmock, func()) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 8 Nov in Sri Lanka.
+	now := time.Date(2026, time.November, 8, 12, 0, 0, 0, deadline.Location)
+	return &stageRepo{db: db, now: func() time.Time { return now }}, mock, func() { db.Close() }
+}
+
+func utcDay(m time.Month, d int) time.Time { return time.Date(2026, m, d, 0, 0, 0, 0, time.UTC) }
+
+func complianceRow(days int) domain.DeadlineDaysRow {
+	return domain.DeadlineDaysRow{Phase: "EVIDENCE", CycleType: "INITIAL", HandledBy: "COMPLIANCE", AllowedDays: days}
+}
+
+func expectOpenStages(mock sqlmock.Sqlmock) {
+	started := time.Date(2026, time.November, 1, 10, 0, 0, 0, deadline.Location)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage s")).
+		WithArgs(7).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "cycle_type", "handled_by", "started_at", "due_date"}).
+			AddRow(10, "EVIDENCE", "INITIAL", "COMPLIANCE", started, utcDay(time.November, 11)).
+			AddRow(11, "EVIDENCE", "REVISION", "COMPLIANCE", started, utcDay(time.November, 6)).
+			AddRow(12, "EVIDENCE", "INITIAL", "AUDITOR", started, utcDay(time.November, 11)))
+}
+
+func emptyDays(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
+}
+
+func TestPutDeadlineDaysWithoutApplyOnlySavesTheDays(t *testing.T) {
+	r, mock, done := recalcRepo(t)
+	defer done()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
+		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 15).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	sum, err := r.PutDeadlineDays(context.Background(), 7, []domain.DeadlineDaysRow{complianceRow(15)}, DeadlineDaysOptions{})
+	if err != nil || sum.StagesUpdated != 0 {
+		t.Fatalf("sum=%+v err=%v", sum, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 10 -> 15: the open initial Compliance stage that started 1 Nov moves from 11 Nov to
+// 16 Nov. The revision stage and the Auditor's stage are not governed by the change.
+func TestPutDeadlineDaysExtendsOpenStagesOfTheChangedCycleOnly(t *testing.T) {
+	r, mock, done := recalcRepo(t)
+	defer done()
+	mock.ExpectBegin()
+	emptyDays(mock)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
+		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 15).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectOpenStages(mock)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET due_date")).
+		WithArgs("2026-11-16", int64(10)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	sum, err := r.PutDeadlineDays(context.Background(), 7, []domain.DeadlineDaysRow{complianceRow(15)}, DeadlineDaysOptions{ApplyToOpenStages: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.StagesUpdated != 1 || sum.NewlyOverdue != 0 {
+		t.Fatalf("sum = %+v", sum)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 10 -> 5: that stage's deadline becomes 6 Nov, before today (8 Nov): newly overdue.
+func TestPutDeadlineDaysShorteningCountsNewlyOverdue(t *testing.T) {
+	r, mock, done := recalcRepo(t)
+	defer done()
+	mock.ExpectBegin()
+	emptyDays(mock)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
+		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 5).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectOpenStages(mock)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET due_date")).
+		WithArgs("2026-11-06", int64(10)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	sum, err := r.PutDeadlineDays(context.Background(), 7, []domain.DeadlineDaysRow{complianceRow(5)}, DeadlineDaysOptions{ApplyToOpenStages: true})
+	if err != nil || sum.StagesUpdated != 1 || sum.NewlyOverdue != 1 {
+		t.Fatalf("sum=%+v err=%v", sum, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Sending the number the audit already uses changes nothing, so no stage is touched.
+func TestPutDeadlineDaysUnchangedValueMovesNothing(t *testing.T) {
+	r, mock, done := recalcRepo(t)
+	defer done()
+	mock.ExpectBegin()
+	emptyDays(mock)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
+		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 10).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	sum, err := r.PutDeadlineDays(context.Background(), 7, []domain.DeadlineDaysRow{complianceRow(10)}, DeadlineDaysOptions{ApplyToOpenStages: true})
+	if err != nil || sum.StagesUpdated != 0 {
+		t.Fatalf("sum=%+v err=%v", sum, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A dry run works everything out and then rolls back: nothing is committed.
+func TestPutDeadlineDaysDryRunRollsBack(t *testing.T) {
+	r, mock, done := recalcRepo(t)
+	defer done()
+	mock.ExpectBegin()
+	emptyDays(mock)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_deadline_days")).
+		WithArgs(7, "EVIDENCE", "INITIAL", "COMPLIANCE", 5).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectOpenStages(mock)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET due_date")).
+		WithArgs("2026-11-06", int64(10)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectRollback()
+	sum, err := r.PutDeadlineDays(context.Background(), 7, []domain.DeadlineDaysRow{complianceRow(5)}, DeadlineDaysOptions{DryRun: true})
+	if err != nil || sum.StagesUpdated != 1 || sum.NewlyOverdue != 1 {
+		t.Fatalf("sum=%+v err=%v", sum, err)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}

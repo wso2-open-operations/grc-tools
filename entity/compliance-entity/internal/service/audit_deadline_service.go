@@ -103,10 +103,21 @@ func (s *deadlineDaysService) UpdateDeadlineDays(ctx context.Context, auditID in
 	if audit.Status == "REMOVED" {
 		return domain.DeadlineDaysResponse{}, &apierror.ConflictError{Msg: "cannot edit deadline days: audit is removed"}
 	}
-	if err := s.repo.PutDeadlineDays(ctx, auditID, rows); err != nil {
+	sum, err := s.repo.PutDeadlineDays(ctx, auditID, rows, repository.DeadlineDaysOptions{
+		ApplyToOpenStages: req.ApplyToOpenStages, DryRun: req.DryRun,
+	})
+	if err != nil {
 		return domain.DeadlineDaysResponse{}, err
 	}
-	return s.build(ctx, auditID)
+	resp, err := s.build(ctx, auditID)
+	if err != nil {
+		return domain.DeadlineDaysResponse{}, err
+	}
+	if req.ApplyToOpenStages || req.DryRun {
+		resp.Recalculated = &sum
+		resp.DryRun = req.DryRun
+	}
+	return resp, nil
 }
 
 // build lists the six cycle/handler values of every phase, marking the ones

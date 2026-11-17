@@ -34,6 +34,8 @@ type fakeStageRepo struct {
 	days    deadline.PhaseDays
 	listErr error
 	put     []domain.DeadlineDaysRow
+	opts    repository.DeadlineDaysOptions
+	recalc  domain.RecalcSummary
 	listed  int
 }
 
@@ -50,8 +52,11 @@ func (f *fakeStageRepo) GetDeadlineDays(context.Context, int) (deadline.PhaseDay
 	}
 	return f.days, nil
 }
-func (f *fakeStageRepo) PutDeadlineDays(_ context.Context, _ int, rows []domain.DeadlineDaysRow) error {
-	f.put = rows
+func (f *fakeStageRepo) PutDeadlineDays(_ context.Context, _ int, rows []domain.DeadlineDaysRow, opts repository.DeadlineDaysOptions) (domain.RecalcSummary, error) {
+	f.put, f.opts = rows, opts
+	if opts.DryRun {
+		return f.recalc, nil // nothing is saved
+	}
 	for _, r := range rows {
 		if f.days == nil {
 			f.days = deadline.PhaseDays{}
@@ -62,7 +67,7 @@ func (f *fakeStageRepo) PutDeadlineDays(_ context.Context, _ int, rows []domain.
 		}
 		f.days.Set(ph, r.CycleType, r.HandledBy, r.AllowedDays)
 	}
-	return nil
+	return f.recalc, nil
 }
 
 type fakeAuditRepo struct {
@@ -365,5 +370,48 @@ func TestUpdateDeadlineDaysSavesPerPhase(t *testing.T) {
 	}
 	if got["POPULATION"] != 6 || got["OE_EVIDENCE"] != 3 || got["EVIDENCE"] != 10 {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestUpdateDeadlineDaysAppliesToOpenStagesOnRequest(t *testing.T) {
+	repo := &fakeStageRepo{recalc: domain.RecalcSummary{StagesUpdated: 12, NewlyOverdue: 3}}
+	svc := NewDeadlineDaysService(repo, fakeAuditRepo{status: "ACTIVE"})
+	row := []domain.DeadlineDaysRow{{CycleType: "INITIAL", HandledBy: "COMPLIANCE", AllowedDays: 15}}
+
+	plain, err := svc.UpdateDeadlineDays(context.Background(), 7, domain.UpdateDeadlineDaysRequest{UpdatedBy: "a", Days: row})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.opts.ApplyToOpenStages || plain.Recalculated != nil {
+		t.Fatal("without the option nothing is recalculated and no summary is returned")
+	}
+
+	applied, err := svc.UpdateDeadlineDays(context.Background(), 7, domain.UpdateDeadlineDaysRequest{UpdatedBy: "a", Days: row, ApplyToOpenStages: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.opts.ApplyToOpenStages || applied.Recalculated == nil || applied.Recalculated.StagesUpdated != 12 ||
+		applied.Recalculated.NewlyOverdue != 3 || applied.DryRun {
+		t.Fatalf("got %+v opts=%+v", applied, repo.opts)
+	}
+}
+
+func TestUpdateDeadlineDaysDryRunSavesNothing(t *testing.T) {
+	repo := &fakeStageRepo{recalc: domain.RecalcSummary{StagesUpdated: 4, NewlyOverdue: 1}}
+	svc := NewDeadlineDaysService(repo, fakeAuditRepo{status: "ACTIVE"})
+	resp, err := svc.UpdateDeadlineDays(context.Background(), 7, domain.UpdateDeadlineDaysRequest{
+		UpdatedBy: "a", DryRun: true,
+		Days: []domain.DeadlineDaysRow{{CycleType: "INITIAL", HandledBy: "COMPLIANCE", AllowedDays: 3}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.DryRun || resp.Recalculated == nil || resp.Recalculated.StagesUpdated != 4 || resp.Recalculated.NewlyOverdue != 1 {
+		t.Fatalf("got %+v", resp)
+	}
+	for _, d := range resp.Days {
+		if d.CycleType == "INITIAL" && d.HandledBy == "COMPLIANCE" && d.Phase == "EVIDENCE" && d.AllowedDays != 10 {
+			t.Fatalf("a dry run must leave the saved days alone, got %d", d.AllowedDays)
+		}
 	}
 }
