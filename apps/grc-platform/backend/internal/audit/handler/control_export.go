@@ -322,6 +322,9 @@ func (h *controlHandler) exportControls(w http.ResponseWriter, r *http.Request) 
 		response.MapServiceError(ctx, w, err, response.ErrMsgInternal)
 		return
 	}
+	// The delay log names which group was late, so it leaves the file only for
+	// org-wide readers, exactly as on the page and in the API.
+	redactDelayLog(controls, canSeeDelayLog(ctx))
 	controls = filterControls(controls, params)
 	if len(controls) > controlExportMaxRows {
 		response.WriteError(w, http.StatusUnprocessableEntity,
