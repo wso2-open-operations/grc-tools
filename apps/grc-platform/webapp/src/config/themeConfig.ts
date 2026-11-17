@@ -34,7 +34,7 @@ export const themes: Record<string, OxygenTheme> = {
 export const THEME_OPTIONS: { key: string; label: string }[] = [
   { key: "acrylicOrange", label: "Acrylic Orange" },
   { key: "acrylicPurple", label: "Acrylic Purple" },
-  { key: "choreo", label: "WSO2" },
+  { key: "choreo", label: "Choreo Labs" },
   { key: "highContrast", label: "High Contrast" },
   { key: "classic", label: "Classic" },
 ];
