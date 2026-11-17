@@ -97,10 +97,7 @@ export default function Brand({
           alt="Company Logo"
           sx={{
             height: BRAND_LOGO_HEIGHT,
-            // Phones show only the wordmark's leading icon, so the header actions stay on screen.
-            width: { xs: BRAND_LOGO_HEIGHT.xs, sm: "auto" },
-            objectFit: "cover",
-            objectPosition: "left center",
+            width: "auto",
             display: "block",
           }}
         />
