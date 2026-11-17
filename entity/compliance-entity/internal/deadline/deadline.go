@@ -39,8 +39,21 @@ const (
 	Revision = "REVISION"
 )
 
-// PhaseEvidence is the only phase tracked in release 1 (DESIGN controls).
-const PhaseEvidence = "EVIDENCE"
+// Phases. A DESIGN control only has EVIDENCE. An OE control has POPULATION and
+// then OE_EVIDENCE; OE evidence keeps its own days, apart from Design evidence.
+const (
+	PhaseEvidence   = "EVIDENCE"
+	PhasePopulation = "POPULATION"
+	PhaseOEEvidence = "OE_EVIDENCE"
+)
+
+// Phases lists every phase, in the order they are shown.
+func Phases() []string { return []string{PhaseEvidence, PhasePopulation, PhaseOEEvidence} }
+
+// ValidPhase reports whether p is a known phase.
+func ValidPhase(p string) bool {
+	return p == PhaseEvidence || p == PhasePopulation || p == PhaseOEEvidence
+}
 
 // MaxAllowedDays is the upper limit an admin may set for any allowed-days value.
 const MaxAllowedDays = 365
@@ -59,24 +72,31 @@ func loadLocation() *time.Location {
 	return time.FixedZone("Asia/Colombo", 5*3600+30*60)
 }
 
-// Days maps cycle -> handler -> allowed days.
+// Days maps cycle -> handler -> allowed days, for one phase.
 type Days map[string]map[string]int
 
-// DefaultDays are used for every audit that has no saved rows.
-func DefaultDays() Days {
+// DefaultDaysFor are the days a phase uses for every audit that has no saved rows.
+func DefaultDaysFor(phase string) Days {
+	switch phase {
+	case PhasePopulation:
+		return Days{
+			Initial:  {Owner: 4, Compliance: 3, Auditor: 3},
+			Revision: {Owner: 2, Compliance: 2, Auditor: 2},
+		}
+	case PhaseOEEvidence:
+		return Days{
+			Initial:  {Owner: 5, Compliance: 2, Auditor: 2},
+			Revision: {Owner: 2, Compliance: 2, Auditor: 2},
+		}
+	}
 	return Days{
 		Initial:  {Owner: 30, Compliance: 10, Auditor: 10},
 		Revision: {Owner: 15, Compliance: 5, Auditor: 5},
 	}
 }
 
-// For returns the allowed days for a cycle and handler, falling back to the default.
-func (d Days) For(cycle, handler string) int {
-	if v, ok := d[cycle][handler]; ok && v > 0 {
-		return v
-	}
-	return DefaultDays()[cycle][handler]
-}
+// DefaultDays are the Design evidence defaults.
+func DefaultDays() Days { return DefaultDaysFor(PhaseEvidence) }
 
 // Set records one value, creating the inner map when needed.
 func (d Days) Set(cycle, handler string, days int) {
@@ -84,6 +104,26 @@ func (d Days) Set(cycle, handler string, days int) {
 		d[cycle] = map[string]int{}
 	}
 	d[cycle][handler] = days
+}
+
+// PhaseDays holds an audit's saved days for every phase. Anything not saved
+// falls back to that phase's defaults.
+type PhaseDays map[string]Days
+
+// For returns the allowed days for a phase, cycle and handler.
+func (p PhaseDays) For(phase, cycle, handler string) int {
+	if v, ok := p[phase][cycle][handler]; ok && v > 0 {
+		return v
+	}
+	return DefaultDaysFor(phase)[cycle][handler]
+}
+
+// Set records one value for a phase.
+func (p PhaseDays) Set(phase, cycle, handler string, days int) {
+	if p[phase] == nil {
+		p[phase] = Days{}
+	}
+	p[phase].Set(cycle, handler, days)
 }
 
 // ValidCycle reports whether c is INITIAL or REVISION.
@@ -118,25 +158,55 @@ func FormatDay(d time.Time) string { return d.Format("2006-01-02") }
 // AddDays returns d moved by n calendar days.
 func AddDays(d time.Time, n int) time.Time { return d.AddDate(0, 0, n) }
 
-// HandlerForStatus maps an evidence-phase status to the group holding the control.
-// ok is false for COMPLETE (nobody holds it) and for statuses this feature does
-// not track (the OE population and sample statuses).
-func HandlerForStatus(status string) (handler string, ok bool) {
+// StageFor maps a status to the phase it belongs to and the group holding the
+// control. oe says whether the control is an OE control, which decides whether
+// the evidence statuses belong to OE_EVIDENCE or to Design's EVIDENCE. ok is
+// false for COMPLETE (nobody holds it) and for any untracked status.
+//
+// For OE the Auditor holds the control from POPULATION_UNDER_VALIDATION until
+// the sample is submitted, and the Owner holds it from SUBMITTED_SAMPLE.
+func StageFor(status string, oe bool) (phase, handler string, ok bool) {
 	switch status {
-	case "EVIDENCE_PENDING", "EVIDENCE_NEED_CLARIFICATION":
-		return Owner, true
-	case "EVIDENCE_INTERNAL_REVIEW":
-		return Compliance, true
-	case "EVIDENCE_UNDER_VALIDATION":
-		return Auditor, true
+	case "POPULATION_PENDING", "POPULATION_NEED_CLARIFICATION":
+		return PhasePopulation, Owner, true
+	case "POPULATION_INTERNAL_REVIEW":
+		return PhasePopulation, Compliance, true
+	case "POPULATION_UNDER_VALIDATION", "POPULATION_COMPLETE", "AWAITING_SAMPLE":
+		return PhasePopulation, Auditor, true
 	}
-	return "", false
+	evidence := PhaseEvidence
+	if oe {
+		evidence = PhaseOEEvidence
+	}
+	switch status {
+	case "SUBMITTED_SAMPLE":
+		return PhaseOEEvidence, Owner, true
+	case "EVIDENCE_PENDING", "EVIDENCE_NEED_CLARIFICATION":
+		return evidence, Owner, true
+	case "EVIDENCE_INTERNAL_REVIEW":
+		return evidence, Compliance, true
+	case "EVIDENCE_UNDER_VALIDATION":
+		return evidence, Auditor, true
+	}
+	return "", "", false
 }
+
+// HandlerForStatus maps a status to the group holding the control.
+func HandlerForStatus(status string) (handler string, ok bool) {
+	_, handler, ok = StageFor(status, false)
+	return handler, ok
+}
+
+// HeldKey is the HeldBefore key for a group in a phase: a group that held the
+// control in one phase is still new to it in the next.
+func HeldKey(phase, handler string) string { return phase + ":" + handler }
 
 // IsRejection reports whether from -> to sends a control back to the owner.
 func IsRejection(from, to string) bool {
 	return (from == "EVIDENCE_INTERNAL_REVIEW" && to == "EVIDENCE_PENDING") ||
-		(from == "EVIDENCE_UNDER_VALIDATION" && to == "EVIDENCE_NEED_CLARIFICATION")
+		(from == "EVIDENCE_UNDER_VALIDATION" && to == "EVIDENCE_NEED_CLARIFICATION") ||
+		(from == "POPULATION_INTERNAL_REVIEW" && to == "POPULATION_PENDING") ||
+		(from == "POPULATION_UNDER_VALIDATION" && to == "POPULATION_NEED_CLARIFICATION")
 }
 
 // Stage is one period during which one group held one control.
@@ -156,10 +226,14 @@ type Stage struct {
 
 // NewStage describes a stage about to be opened.
 type NewStage struct {
+	Phase     string
 	HandledBy string
 	CycleType string
 	StartedAt time.Time
 	DueDate   time.Time // a Day
+	// The original plan for GRC and EY, set only on a phase's first Owner stage.
+	PlannedComplianceDate *time.Time
+	PlannedAuditorDate    *time.Time
 }
 
 // Change is what a status transition does to a control's stages.
@@ -171,11 +245,12 @@ type Change struct {
 // TransitionInput is everything PlanTransition needs.
 type TransitionInput struct {
 	From, To   string
+	OE         bool // the control is an OE control
 	Override   bool // an admin backward override rather than the normal workflow
 	Now        time.Time
 	OpenStage  *Stage          // the control's open stage, nil when none
-	HeldBefore map[string]bool // groups that have held this control in an earlier stage
-	Days       Days
+	HeldBefore map[string]bool // HeldKey of every group that held this control in an earlier stage
+	Days       PhaseDays
 }
 
 // PlanTransition decides how a status change opens and closes stages.
@@ -183,48 +258,63 @@ func PlanTransition(in TransitionInput) Change {
 	if in.From == in.To {
 		return Change{}
 	}
-	handler, tracked := HandlerForStatus(in.To)
+	phase, handler, tracked := StageFor(in.To, in.OE)
 	if !tracked {
 		if in.To == "COMPLETE" {
 			return Change{CloseOpen: in.OpenStage != nil}
 		}
 		return Change{}
 	}
-	if in.OpenStage != nil && in.OpenStage.HandledBy == handler {
+	if in.OpenStage != nil && in.OpenStage.HandledBy == handler && in.OpenStage.Phase == phase {
 		return Change{}
 	}
-	// The cycle depends on the group, not on the control: a group that is getting
-	// the control for the first time has the initial days, even when others
-	// already went through a revision. One that held it before has the revision
-	// days. EVIDENCE_NEED_CLARIFICATION is only reached by an auditor rejection,
-	// so the way out of it is a revision even for a control with no stage history.
+	// The cycle depends on the group and the phase, not on the control: a group
+	// that is getting the control for the first time in a phase has the initial
+	// days, even when others already went through a revision, or when it held the
+	// control in an earlier phase. One that held it before in this phase has the
+	// revision days. A NEED_CLARIFICATION status is only reached by an auditor
+	// rejection, so the way out of it is a revision even for a control with no
+	// stage history.
 	cycle := Initial
-	if in.HeldBefore[handler] || IsRejection(in.From, in.To) || in.From == "EVIDENCE_NEED_CLARIFICATION" || in.Override {
+	if in.HeldBefore[HeldKey(phase, handler)] || IsRejection(in.From, in.To) ||
+		in.From == "EVIDENCE_NEED_CLARIFICATION" || in.From == "POPULATION_NEED_CLARIFICATION" || in.Override {
 		cycle = Revision
 	}
-	return Change{
-		CloseOpen: in.OpenStage != nil,
-		Open: &NewStage{
-			HandledBy: handler,
-			CycleType: cycle,
-			StartedAt: in.Now,
-			DueDate:   AddDays(DayOf(in.Now), in.Days.For(cycle, handler)),
-		},
+	ns := &NewStage{
+		Phase:     phase,
+		HandledBy: handler,
+		CycleType: cycle,
+		StartedAt: in.Now,
+		DueDate:   AddDays(DayOf(in.Now), in.Days.For(phase, cycle, handler)),
 	}
+	// An owner's first stage in a phase is where that phase's plan is fixed.
+	if handler == Owner && cycle == Initial {
+		c, a := PlannedDates(phase, ns.DueDate, in.Days)
+		ns.PlannedComplianceDate, ns.PlannedAuditorDate = &c, &a
+	}
+	return Change{CloseOpen: in.OpenStage != nil, Open: ns}
 }
 
-// PlannedDates returns the original planned GRC and EY dates for a control whose
+// PlannedDates returns the original planned GRC and EY dates for a phase whose
 // owner committed to ownerDue: GRC is the initial GRC days after that, EY the
 // initial EY days after GRC.
-func PlannedDates(ownerDue time.Time, days Days) (compliance, auditor time.Time) {
-	compliance = AddDays(ownerDue, days.For(Initial, Compliance))
-	auditor = AddDays(compliance, days.For(Initial, Auditor))
+func PlannedDates(phase string, ownerDue time.Time, days PhaseDays) (compliance, auditor time.Time) {
+	compliance = AddDays(ownerDue, days.For(phase, Initial, Compliance))
+	auditor = AddDays(compliance, days.For(phase, Initial, Auditor))
 	return compliance, auditor
 }
 
+// FirstPhase is the phase a new control starts in.
+func FirstPhase(oe bool) string {
+	if oe {
+		return PhasePopulation
+	}
+	return PhaseEvidence
+}
+
 // FirstStage is the owner's opening stage for a newly created control.
-func FirstStage(ownerDue, now time.Time) NewStage {
-	return NewStage{HandledBy: Owner, CycleType: Initial, StartedAt: now, DueDate: ownerDue}
+func FirstStage(phase string, ownerDue, now time.Time) NewStage {
+	return NewStage{Phase: phase, HandledBy: Owner, CycleType: Initial, StartedAt: now, DueDate: ownerDue}
 }
 
 // UltimateDelayed reports whether a control missed its ultimate deadline (the
@@ -240,19 +330,35 @@ func UltimateDelayed(ultimate, now time.Time, finishedAt *time.Time) bool {
 
 // LogEntry is one late day for one group.
 type LogEntry struct {
+	Phase     string
 	HandledBy string
 	Date      time.Time // a Day
 }
 
+// PhasePlan is the original plan for one phase: the date each group was first
+// expected to hand the control on.
+type PhasePlan struct {
+	Phase      string
+	Owner      *time.Time
+	Compliance *time.Time
+	Auditor    *time.Time
+}
+
 // Evaluation is what a report shows for one control.
 type Evaluation struct {
-	CurrentHandler        *string
-	CurrentDueDate        *time.Time
+	CurrentHandler *string
+	CurrentDueDate *time.Time
+	CurrentPhase   *string
+	// The planned dates of the control's first phase, kept flat for callers that
+	// predate OE; PhasePlans has every phase.
 	PlannedOwnerDate      *time.Time
 	PlannedComplianceDate *time.Time
 	PlannedAuditorDate    *time.Time
-	Delayed               bool
-	DelayLog              []LogEntry
+	PhasePlans            []PhasePlan
+	// Delayed is true when any group held the control past its own deadline,
+	// which is the same as the delay log not being empty.
+	Delayed  bool
+	DelayLog []LogEntry
 }
 
 // Evaluate works out the current holder, planned dates, Delayed flag and delay
@@ -271,42 +377,47 @@ func Evaluate(stages []Stage, now time.Time) Evaluation {
 	})
 	today := DayOf(now)
 
-	first := sorted[0]
-	if first.HandledBy == Owner && first.CycleType == Initial {
-		d := first.DueDate
-		ev.PlannedOwnerDate = &d
+	// One plan per phase, from that phase's first owner stage.
+	planned := map[string]bool{}
+	for _, s := range sorted {
+		if s.HandledBy != Owner || s.CycleType != Initial || planned[s.Phase] {
+			continue
+		}
+		planned[s.Phase] = true
+		d := s.DueDate
+		ev.PhasePlans = append(ev.PhasePlans, PhasePlan{
+			Phase: s.Phase, Owner: &d, Compliance: s.PlannedComplianceDate, Auditor: s.PlannedAuditorDate,
+		})
 	}
-	ev.PlannedComplianceDate = first.PlannedComplianceDate
-	ev.PlannedAuditorDate = first.PlannedAuditorDate
+	if len(ev.PhasePlans) > 0 {
+		p := ev.PhasePlans[0]
+		ev.PlannedOwnerDate, ev.PlannedComplianceDate, ev.PlannedAuditorDate = p.Owner, p.Compliance, p.Auditor
+	}
+	// A control that predates tracking can start with a stage that is not the
+	// owner's first: its planned dates, if it has any, still belong to the plan.
+	if len(ev.PhasePlans) == 0 {
+		first := sorted[0]
+		ev.PlannedComplianceDate = first.PlannedComplianceDate
+		ev.PlannedAuditorDate = first.PlannedAuditorDate
+	}
 
-	revisionLate := false
-	var lastInitialEnd *time.Time
 	for _, s := range sorted {
 		end := today
 		if s.EndedAt != nil {
 			end = DayOf(*s.EndedAt)
 		}
 		if s.EndedAt == nil {
-			h, d := s.HandledBy, s.DueDate
+			h, d, p := s.HandledBy, s.DueDate, s.Phase
 			ev.CurrentHandler = &h
 			ev.CurrentDueDate = &d
-		}
-		if s.CycleType == Initial {
-			e := end
-			lastInitialEnd = &e
+			ev.CurrentPhase = &p
 		}
 		d := AddDays(s.DueDate, 1)
 		for i := 0; i < maxLogDays && !d.After(end); i++ {
-			ev.DelayLog = append(ev.DelayLog, LogEntry{HandledBy: s.HandledBy, Date: d})
-			if s.CycleType == Revision {
-				revisionLate = true
-			}
+			ev.DelayLog = append(ev.DelayLog, LogEntry{Phase: s.Phase, HandledBy: s.HandledBy, Date: d})
 			d = AddDays(d, 1)
 		}
 	}
-
-	initialLate := ev.PlannedAuditorDate != nil && lastInitialEnd != nil &&
-		lastInitialEnd.After(*ev.PlannedAuditorDate)
-	ev.Delayed = initialLate || revisionLate
+	ev.Delayed = len(ev.DelayLog) > 0
 	return ev
 }

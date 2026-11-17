@@ -38,14 +38,14 @@ func TestOpenFirstStageFreezesPlannedDates(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
 		WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+		WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
-		WithArgs(42, "OWNER", "INITIAL", stageNow(), "2026-12-10", "2026-12-20", "2026-12-30").
+		WithArgs(42, "EVIDENCE", "OWNER", "INITIAL", stageNow(), "2026-12-10", "2026-12-20", "2026-12-30").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()
-	if err := openFirstStage(context.Background(), tx, 7, 42, stageNow()); err != nil {
+	if err := openFirstStage(context.Background(), tx, 7, 42, false, stageNow()); err != nil {
 		t.Fatal(err)
 	}
 	_ = tx.Commit()
@@ -63,15 +63,15 @@ func TestOpenFirstStageUsesSavedAuditDays(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
 		WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}).
-			AddRow("INITIAL", "COMPLIANCE", 12).AddRow("INITIAL", "AUDITOR", 5))
+		WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}).
+			AddRow("EVIDENCE", "INITIAL", "COMPLIANCE", 12).AddRow("EVIDENCE", "INITIAL", "AUDITOR", 5))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
-		WithArgs(42, "OWNER", "INITIAL", stageNow(), "2026-12-10", "2026-12-22", "2026-12-27").
+		WithArgs(42, "EVIDENCE", "OWNER", "INITIAL", stageNow(), "2026-12-10", "2026-12-22", "2026-12-27").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()
-	if err := openFirstStage(context.Background(), tx, 7, 42, stageNow()); err != nil {
+	if err := openFirstStage(context.Background(), tx, 7, 42, false, stageNow()); err != nil {
 		t.Fatal(err)
 	}
 	_ = tx.Commit()
@@ -91,13 +91,13 @@ func TestApplyStageTransitionHandsOffToGRC(t *testing.T) {
 		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("DESIGN"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage")).
 		WithArgs(42).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "handled_by", "cycle_type", "ended_at"}).AddRow(5, "OWNER", "INITIAL", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "handled_by", "cycle_type", "ended_at"}).AddRow(5, "EVIDENCE", "OWNER", "INITIAL", nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
-		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET ended_at")).
 		WithArgs(stageNow(), "owner@wso2.com", int64(5)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
-		WithArgs(42, "COMPLIANCE", "INITIAL", stageNow(), "2026-11-20").WillReturnResult(sqlmock.NewResult(6, 1))
+		WithArgs(42, "EVIDENCE", "COMPLIANCE", "INITIAL", stageNow(), "2026-11-20", nil, nil).WillReturnResult(sqlmock.NewResult(6, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()
@@ -111,7 +111,7 @@ func TestApplyStageTransitionHandsOffToGRC(t *testing.T) {
 	}
 }
 
-func TestApplyStageTransitionSkipsOEControls(t *testing.T) {
+func TestApplyStageTransitionOEPopulationHandOff(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -120,11 +120,83 @@ func TestApplyStageTransitionSkipsOEControls(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT requirement_type FROM audit_control")).
 		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("OE"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage")).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "handled_by", "cycle_type", "ended_at"}).AddRow(5, "POPULATION", "OWNER", "INITIAL", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET ended_at")).
+		WithArgs(stageNow(), "owner@wso2.com", int64(5)).WillReturnResult(sqlmock.NewResult(0, 1))
+	// GRC has 3 population days from the 10th.
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
+		WithArgs(42, "POPULATION", "COMPLIANCE", "INITIAL", stageNow(), "2026-11-13", nil, nil).WillReturnResult(sqlmock.NewResult(6, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()
 	if err := applyStageTransition(context.Background(), tx, 7, 42,
-		"EVIDENCE_PENDING", "EVIDENCE_INTERNAL_REVIEW", "x", false, stageNow()); err != nil {
+		"POPULATION_PENDING", "POPULATION_INTERNAL_REVIEW", "owner@wso2.com", false, stageNow()); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx.Commit()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// When EY submits the sample the Owner starts the evidence phase: their first
+// time there, so 5 initial days, and the phase's plan is frozen on that row
+// (GRC 2 days later, EY 2 more) even though the Owner held the population.
+func TestApplyStageTransitionOEEvidenceStartsFreshWithPlan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT requirement_type FROM audit_control")).
+		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("OE"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage")).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "handled_by", "cycle_type", "ended_at"}).
+			AddRow(8, "POPULATION", "AUDITOR", "INITIAL", nil).
+			AddRow(7, "POPULATION", "COMPLIANCE", "INITIAL", stageNow()).
+			AddRow(6, "POPULATION", "OWNER", "INITIAL", stageNow()))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET ended_at")).
+		WithArgs(stageNow(), "ey@wso2.com", int64(8)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
+		WithArgs(42, "OE_EVIDENCE", "OWNER", "INITIAL", stageNow(), "2026-11-15", "2026-11-17", "2026-11-19").WillReturnResult(sqlmock.NewResult(9, 1))
+	mock.ExpectCommit()
+
+	tx, _ := db.Begin()
+	if err := applyStageTransition(context.Background(), tx, 7, 42,
+		"AWAITING_SAMPLE", "SUBMITTED_SAMPLE", "ey@wso2.com", false, stageNow()); err != nil {
+		t.Fatal(err)
+	}
+	_ = tx.Commit()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The new OE control starts in the population phase with the Owner's 4 days.
+func TestOpenFirstStageOEStartsInPopulation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
+		WithArgs(42, "POPULATION", "OWNER", "INITIAL", stageNow(), "2026-11-14", "2026-11-17", "2026-11-20").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	tx, _ := db.Begin()
+	if err := openFirstStage(context.Background(), tx, 7, 42, true, stageNow()); err != nil {
 		t.Fatal(err)
 	}
 	_ = tx.Commit()
@@ -145,11 +217,11 @@ func TestApplyStageTransitionStartsTrackingLegacyControl(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT requirement_type FROM audit_control")).
 		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("DESIGN"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage")).
-		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"id", "handled_by", "cycle_type", "ended_at"}))
+		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "handled_by", "cycle_type", "ended_at"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
-		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
-		WithArgs(42, "AUDITOR", "INITIAL", stageNow(), "2026-11-20").WillReturnResult(sqlmock.NewResult(1, 1))
+		WithArgs(42, "EVIDENCE", "AUDITOR", "INITIAL", stageNow(), "2026-11-20", nil, nil).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()
@@ -174,7 +246,7 @@ func TestApplyStageTransitionClosesOnComplete(t *testing.T) {
 		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("DESIGN"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage")).
 		WithArgs(42).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "handled_by", "cycle_type", "ended_at"}).AddRow(9, "AUDITOR", "INITIAL", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "handled_by", "cycle_type", "ended_at"}).AddRow(9, "EVIDENCE", "AUDITOR", "INITIAL", nil))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET ended_at")).
 		WithArgs(stageNow(), "ey@wso2.com", int64(9)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -192,7 +264,7 @@ func TestApplyStageTransitionClosesOnComplete(t *testing.T) {
 
 func TestBuildControlFiltersCurrentHandlers(t *testing.T) {
 	where, args := buildControlFilters("WHERE c.audit_id = ?", []any{7}, domainSearchWithHandlers("OWNER", "AUDITOR"))
-	if !regexp.MustCompile(`EXISTS \(SELECT 1 FROM audit_control_stage st WHERE st.control_id = c.id AND st.phase = 'EVIDENCE' AND st.ended_at IS NULL AND st.handled_by IN \(\?,\?\)\)`).MatchString(where) {
+	if !regexp.MustCompile(`EXISTS \(SELECT 1 FROM audit_control_stage st WHERE st.control_id = c.id AND st.ended_at IS NULL AND st.handled_by IN \(\?,\?\)\)`).MatchString(where) {
 		t.Fatalf("where = %s", where)
 	}
 	if len(args) < 3 || args[1] != "OWNER" || args[2] != "AUDITOR" {
@@ -213,17 +285,17 @@ func TestApplyStageTransitionFirstTimeAuditorAfterRevisionGetsInitialDays(t *tes
 		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("DESIGN"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_control_stage")).
 		WithArgs(42).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "handled_by", "cycle_type", "ended_at"}).
-			AddRow(9, "COMPLIANCE", "REVISION", nil).
-			AddRow(8, "OWNER", "REVISION", stageNow()).
-			AddRow(7, "COMPLIANCE", "INITIAL", stageNow()).
-			AddRow(6, "OWNER", "INITIAL", stageNow()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "handled_by", "cycle_type", "ended_at"}).
+			AddRow(9, "EVIDENCE", "COMPLIANCE", "REVISION", nil).
+			AddRow(8, "EVIDENCE", "OWNER", "REVISION", stageNow()).
+			AddRow(7, "EVIDENCE", "COMPLIANCE", "INITIAL", stageNow()).
+			AddRow(6, "EVIDENCE", "OWNER", "INITIAL", stageNow()))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM audit_deadline_days")).
-		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+		WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE audit_control_stage SET ended_at")).
 		WithArgs(stageNow(), "grc@wso2.com", int64(9)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_control_stage")).
-		WithArgs(42, "AUDITOR", "INITIAL", stageNow(), "2026-11-20").WillReturnResult(sqlmock.NewResult(10, 1))
+		WithArgs(42, "EVIDENCE", "AUDITOR", "INITIAL", stageNow(), "2026-11-20", nil, nil).WillReturnResult(sqlmock.NewResult(10, 1))
 	mock.ExpectCommit()
 
 	tx, _ := db.Begin()

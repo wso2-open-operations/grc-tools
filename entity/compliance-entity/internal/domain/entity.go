@@ -354,7 +354,7 @@ type AuditControl struct {
 	StatusOverridden bool       `json:"statusOverridden"`
 	OverriddenBy     *string    `json:"overriddenBy"`
 	OverriddenAt     *time.Time `json:"overriddenAt"`
-	// Workflow-aware due dates (DESIGN controls). All
+	// Workflow-aware due dates (DESIGN and OE controls). All
 	// worked out from the control's recorded hand-offs when read; nothing here is
 	// stored on audit_control. DeadlineTracked is false for a control with no
 	// hand-offs recorded yet, in which case the rest stay empty and DueDate is
@@ -365,7 +365,12 @@ type AuditControl struct {
 	PlannedOwnerDate      *string `json:"plannedOwnerDate"`
 	PlannedComplianceDate *string `json:"plannedComplianceDate"`
 	PlannedAuditorDate    *string `json:"plannedAuditorDate"`
-	Delayed               *bool   `json:"delayed"`
+	// CurrentPhase is the phase of the current holder's stage. PhasePlans holds
+	// the plan of every phase the control has started (OE has two); the three
+	// planned dates above are those of the first phase.
+	CurrentPhase *string     `json:"currentPhase"`
+	PhasePlans   []PhasePlan `json:"phasePlans,omitempty"`
+	Delayed      *bool       `json:"delayed"`
 	// UltimateDelayed is true when the control finished after, or is still open
 	// past, its DueDate (the ultimate deadline). Empty when it cannot be known,
 	// such as a control completed before tracking started.

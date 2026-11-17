@@ -71,8 +71,15 @@ func (s *deadlineDaysService) UpdateDeadlineDays(ctx context.Context, auditID in
 	seen := map[string]bool{}
 	rows := make([]domain.DeadlineDaysRow, 0, len(req.Days))
 	for i, row := range req.Days {
+		row.Phase = strings.ToUpper(strings.TrimSpace(row.Phase))
+		if row.Phase == "" {
+			row.Phase = deadline.PhaseEvidence
+		}
 		row.CycleType = strings.ToUpper(row.CycleType)
 		row.HandledBy = strings.ToUpper(row.HandledBy)
+		if !deadline.ValidPhase(row.Phase) {
+			return domain.DeadlineDaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("days[%d]: phase must be EVIDENCE, POPULATION or OE_EVIDENCE", i)}
+		}
 		if !deadline.ValidCycle(row.CycleType) {
 			return domain.DeadlineDaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("days[%d]: cycleType must be INITIAL or REVISION", i)}
 		}
@@ -82,9 +89,9 @@ func (s *deadlineDaysService) UpdateDeadlineDays(ctx context.Context, auditID in
 		if row.AllowedDays < 1 || row.AllowedDays > deadline.MaxAllowedDays {
 			return domain.DeadlineDaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("days[%d]: allowedDays must be a whole number from 1 to %d", i, deadline.MaxAllowedDays)}
 		}
-		key := row.CycleType + "|" + row.HandledBy
+		key := row.Phase + "|" + row.CycleType + "|" + row.HandledBy
 		if seen[key] {
-			return domain.DeadlineDaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("days[%d]: %s/%s is listed more than once", i, row.CycleType, row.HandledBy)}
+			return domain.DeadlineDaysResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("days[%d]: %s/%s/%s is listed more than once", i, row.Phase, row.CycleType, row.HandledBy)}
 		}
 		seen[key] = true
 		rows = append(rows, row)
@@ -102,23 +109,26 @@ func (s *deadlineDaysService) UpdateDeadlineDays(ctx context.Context, auditID in
 	return s.build(ctx, auditID)
 }
 
-// build lists all six cycle/handler values, marking the ones still on the default.
+// build lists the six cycle/handler values of every phase, marking the ones
+// still on the default.
 func (s *deadlineDaysService) build(ctx context.Context, auditID int) (domain.DeadlineDaysResponse, error) {
 	saved, err := s.repo.GetDeadlineDays(ctx, auditID)
 	if err != nil {
 		return domain.DeadlineDaysResponse{}, err
 	}
-	defaults := deadline.DefaultDays()
 	resp := domain.DeadlineDaysResponse{AuditID: auditID, Phase: deadline.PhaseEvidence}
-	for _, cycle := range deadlineCycles {
-		for _, handler := range deadlineHandlers {
-			v, ok := saved[cycle][handler]
-			if !ok || v <= 0 {
-				v, ok = defaults[cycle][handler], false
+	for _, phase := range deadline.Phases() {
+		defaults := deadline.DefaultDaysFor(phase)
+		for _, cycle := range deadlineCycles {
+			for _, handler := range deadlineHandlers {
+				v, ok := saved[phase][cycle][handler]
+				if !ok || v <= 0 {
+					v, ok = defaults[cycle][handler], false
+				}
+				resp.Days = append(resp.Days, domain.DeadlineDaysRow{
+					Phase: phase, CycleType: cycle, HandledBy: handler, AllowedDays: v, IsDefault: !ok,
+				})
 			}
-			resp.Days = append(resp.Days, domain.DeadlineDaysRow{
-				CycleType: cycle, HandledBy: handler, AllowedDays: v, IsDefault: !ok,
-			})
 		}
 	}
 	return resp, nil

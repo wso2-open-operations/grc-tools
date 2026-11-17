@@ -31,12 +31,12 @@ import (
 // audit's allowed days (audit_deadline_days). Writing stages happens inside
 // the control repository's own transactions, next to the status write.
 type StageRepository interface {
-	// ListStagesByControls returns each control's evidence stages, oldest first.
+	// ListStagesByControls returns each control's stages in every phase, oldest first.
 	// Controls with no recorded hand-offs are absent from the map.
 	ListStagesByControls(ctx context.Context, controlIDs []int) (map[int][]deadline.Stage, error)
 	// GetDeadlineDays returns the allowed days saved for the audit. Anything not
-	// saved is left for deadline.Days.For to default.
-	GetDeadlineDays(ctx context.Context, auditID int) (deadline.Days, error)
+	// saved is left for deadline.PhaseDays.For to default.
+	GetDeadlineDays(ctx context.Context, auditID int) (deadline.PhaseDays, error)
 	// PutDeadlineDays upserts the given rows in one transaction.
 	PutDeadlineDays(ctx context.Context, auditID int, rows []domain.DeadlineDaysRow) error
 }
@@ -68,7 +68,7 @@ func (r *stageRepo) ListStagesByControls(ctx context.Context, controlIDs []int) 
 		`SELECT id, control_id, phase, handled_by, cycle_type, started_at, due_date,
 		        planned_compliance_date, planned_auditor_date, ended_at, updated_by
 		 FROM audit_control_stage
-		 WHERE phase = 'EVIDENCE' AND control_id IN (`+ph[:len(ph)-1]+`)
+		 WHERE control_id IN (`+ph[:len(ph)-1]+`)
 		 ORDER BY control_id, started_at, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("stage.ListByControls: %w", err)
@@ -108,7 +108,7 @@ func (r *stageRepo) ListStagesByControls(ctx context.Context, controlIDs []int) 
 	return out, rows.Err()
 }
 
-func (r *stageRepo) GetDeadlineDays(ctx context.Context, auditID int) (deadline.Days, error) {
+func (r *stageRepo) GetDeadlineDays(ctx context.Context, auditID int) (deadline.PhaseDays, error) {
 	return loadDeadlineDays(ctx, r.db, auditID)
 }
 
@@ -121,9 +121,9 @@ func (r *stageRepo) PutDeadlineDays(ctx context.Context, auditID int, rows []dom
 	for _, row := range rows {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO audit_deadline_days (audit_id, phase, cycle_type, handled_by, allowed_days)
-			 VALUES (?, 'EVIDENCE', ?, ?, ?)
+			 VALUES (?, ?, ?, ?, ?)
 			 ON DUPLICATE KEY UPDATE allowed_days = VALUES(allowed_days)`,
-			auditID, row.CycleType, row.HandledBy, row.AllowedDays); err != nil {
+			auditID, rowPhase(row), row.CycleType, row.HandledBy, row.AllowedDays); err != nil {
 			return fmt.Errorf("stage.PutDeadlineDays(%d): %w", auditID, err)
 		}
 	}
@@ -133,23 +133,32 @@ func (r *stageRepo) PutDeadlineDays(ctx context.Context, auditID int, rows []dom
 	return nil
 }
 
-// loadDeadlineDays reads the evidence-phase allowed days saved for an audit.
-func loadDeadlineDays(ctx context.Context, q stageDB, auditID int) (deadline.Days, error) {
-	days := deadline.Days{}
+// rowPhase is the phase a saved row belongs to; a row from a client that
+// predates OE has none and means Design evidence.
+func rowPhase(row domain.DeadlineDaysRow) string {
+	if row.Phase == "" {
+		return deadline.PhaseEvidence
+	}
+	return row.Phase
+}
+
+// loadDeadlineDays reads the allowed days saved for an audit, for every phase.
+func loadDeadlineDays(ctx context.Context, q stageDB, auditID int) (deadline.PhaseDays, error) {
+	days := deadline.PhaseDays{}
 	rows, err := q.QueryContext(ctx,
-		`SELECT cycle_type, handled_by, allowed_days FROM audit_deadline_days
-		 WHERE audit_id = ? AND phase = 'EVIDENCE'`, auditID)
+		`SELECT phase, cycle_type, handled_by, allowed_days FROM audit_deadline_days
+		 WHERE audit_id = ?`, auditID)
 	if err != nil {
 		return nil, fmt.Errorf("deadlineDays.load(%d): %w", auditID, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var cycle, handler string
+		var phase, cycle, handler string
 		var n int
-		if err := rows.Scan(&cycle, &handler, &n); err != nil {
+		if err := rows.Scan(&phase, &cycle, &handler, &n); err != nil {
 			return nil, fmt.Errorf("deadlineDays.load scan: %w", err)
 		}
-		days.Set(cycle, handler, n)
+		days.Set(phase, cycle, handler, n)
 	}
 	return days, rows.Err()
 }
@@ -163,30 +172,32 @@ func dayString(s string) string {
 	return s
 }
 
-// openFirstStage records the owner's opening stage for a new DESIGN control. The
-// owner's deadline is the creation day plus the audit's Owner initial days; the
-// control's own due date is the ultimate deadline and plays no part in the plan.
-// The original planned GRC and EY dates are frozen on the row.
-func openFirstStage(ctx context.Context, tx stageDB, auditID, controlID int, now time.Time) error {
+// openFirstStage records the owner's opening stage for a new control: Design
+// evidence for a DESIGN control, population for an OE control. The owner's
+// deadline is the creation day plus the audit's Owner initial days for that
+// phase; the control's own due date is the ultimate deadline and plays no part
+// in the plan. The original planned GRC and EY dates are frozen on the row.
+func openFirstStage(ctx context.Context, tx stageDB, auditID, controlID int, oe bool, now time.Time) error {
 	days, err := loadDeadlineDays(ctx, tx, auditID)
 	if err != nil {
 		return err
 	}
-	ownerDue := deadline.AddDays(deadline.DayOf(now), days.For(deadline.Initial, deadline.Owner))
-	compliance, auditor := deadline.PlannedDates(ownerDue, days)
-	first := deadline.FirstStage(ownerDue, now)
+	phase := deadline.FirstPhase(oe)
+	ownerDue := deadline.AddDays(deadline.DayOf(now), days.For(phase, deadline.Initial, deadline.Owner))
+	compliance, auditor := deadline.PlannedDates(phase, ownerDue, days)
+	first := deadline.FirstStage(phase, ownerDue, now)
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO audit_control_stage
 		 (control_id, phase, handled_by, cycle_type, started_at, due_date, planned_compliance_date, planned_auditor_date)
-		 VALUES (?, 'EVIDENCE', ?, ?, ?, ?, ?, ?)`,
-		controlID, first.HandledBy, first.CycleType, first.StartedAt,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		controlID, first.Phase, first.HandledBy, first.CycleType, first.StartedAt,
 		deadline.FormatDay(first.DueDate), deadline.FormatDay(compliance), deadline.FormatDay(auditor)); err != nil {
 		return fmt.Errorf("stage.openFirst(%d): %w", controlID, err)
 	}
 	return nil
 }
 
-// applyStageTransition closes and opens stages for a status change on a DESIGN
+// applyStageTransition closes and opens stages for a status change on a
 // control. It runs inside the transaction that writes the new status, so the
 // two can never disagree. A control with no stage history yet (it predates the
 // feature) simply starts being tracked from this hand-off.
@@ -195,7 +206,7 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 	if from == to {
 		return nil
 	}
-	if _, tracked := deadline.HandlerForStatus(to); !tracked && to != "COMPLETE" {
+	if _, _, tracked := deadline.StageFor(to, true); !tracked && to != "COMPLETE" {
 		return nil
 	}
 	var requirementType string
@@ -203,15 +214,13 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 		"SELECT requirement_type FROM audit_control WHERE id = ?", controlID).Scan(&requirementType); err != nil {
 		return fmt.Errorf("stage.transition(%d) requirement type: %w", controlID, err)
 	}
-	if requirementType != "DESIGN" {
-		return nil
-	}
+	oe := strings.EqualFold(requirementType, "OE")
 
 	// Every stage the control has had, newest first: the latest says who holds it
-	// now, and the handlers seen anywhere in the list have held it before.
+	// now, and the groups seen anywhere in the list, per phase, have held it before.
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, handled_by, cycle_type, ended_at FROM audit_control_stage
-		 WHERE control_id = ? AND phase = 'EVIDENCE'
+		`SELECT id, phase, handled_by, cycle_type, ended_at FROM audit_control_stage
+		 WHERE control_id = ?
 		 ORDER BY started_at DESC, id DESC FOR UPDATE`, controlID)
 	if err != nil {
 		return fmt.Errorf("stage.transition(%d) history: %w", controlID, err)
@@ -221,17 +230,17 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 	first := true
 	for rows.Next() {
 		var (
-			stageID        int64
-			handler, cycle string
-			ended          sql.NullTime
+			stageID               int64
+			phase, handler, cycle string
+			ended                 sql.NullTime
 		)
-		if err := rows.Scan(&stageID, &handler, &cycle, &ended); err != nil {
+		if err := rows.Scan(&stageID, &phase, &handler, &cycle, &ended); err != nil {
 			rows.Close()
 			return fmt.Errorf("stage.transition(%d) history scan: %w", controlID, err)
 		}
-		heldBefore[handler] = true
+		heldBefore[deadline.HeldKey(phase, handler)] = true
 		if first && !ended.Valid {
-			open = &deadline.Stage{ID: stageID, HandledBy: handler, CycleType: cycle}
+			open = &deadline.Stage{ID: stageID, Phase: phase, HandledBy: handler, CycleType: cycle}
 		}
 		first = false
 	}
@@ -241,14 +250,14 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 	}
 	rows.Close()
 
-	days := deadline.Days{}
+	days := deadline.PhaseDays{}
 	if to != "COMPLETE" {
 		if days, err = loadDeadlineDays(ctx, tx, auditID); err != nil {
 			return err
 		}
 	}
 	change := deadline.PlanTransition(deadline.TransitionInput{
-		From: from, To: to, Override: override, Now: now, OpenStage: open, HeldBefore: heldBefore, Days: days,
+		From: from, To: to, OE: oe, Override: override, Now: now, OpenStage: open, HeldBefore: heldBefore, Days: days,
 	})
 	if change.CloseOpen && open != nil {
 		if _, err := tx.ExecContext(ctx,
@@ -257,11 +266,20 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 		}
 	}
 	if change.Open != nil {
+		o := change.Open
+		var plannedCompliance, plannedAuditor any
+		if o.PlannedComplianceDate != nil {
+			plannedCompliance = deadline.FormatDay(*o.PlannedComplianceDate)
+		}
+		if o.PlannedAuditorDate != nil {
+			plannedAuditor = deadline.FormatDay(*o.PlannedAuditorDate)
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO audit_control_stage (control_id, phase, handled_by, cycle_type, started_at, due_date)
-			 VALUES (?, 'EVIDENCE', ?, ?, ?, ?)`,
-			controlID, change.Open.HandledBy, change.Open.CycleType, change.Open.StartedAt,
-			deadline.FormatDay(change.Open.DueDate)); err != nil {
+			`INSERT INTO audit_control_stage
+			 (control_id, phase, handled_by, cycle_type, started_at, due_date, planned_compliance_date, planned_auditor_date)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			controlID, o.Phase, o.HandledBy, o.CycleType, o.StartedAt,
+			deadline.FormatDay(o.DueDate), plannedCompliance, plannedAuditor); err != nil {
 			return fmt.Errorf("stage.transition(%d) open: %w", controlID, err)
 		}
 	}
@@ -269,14 +287,11 @@ func applyStageTransition(ctx context.Context, tx stageDB, auditID, controlID in
 }
 
 // resetStagesForRequirementType rebuilds a control's stages after it switches
-// between DESIGN and OE (only possible before work has started): OE controls
-// are not tracked, a DESIGN control starts a fresh first stage.
+// between DESIGN and OE (only possible before work has started): the control
+// starts a fresh first stage in the first phase of its new type.
 func resetStagesForRequirementType(ctx context.Context, tx stageDB, auditID, controlID int, newType string, now time.Time) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM audit_control_stage WHERE control_id = ?", controlID); err != nil {
 		return fmt.Errorf("stage.reset(%d) clear: %w", controlID, err)
 	}
-	if newType != "DESIGN" {
-		return nil
-	}
-	return openFirstStage(ctx, tx, auditID, controlID, now)
+	return openFirstStage(ctx, tx, auditID, controlID, strings.EqualFold(newType, "OE"), now)
 }

@@ -245,7 +245,7 @@ func buildControlFilters(seedWhere string, seedArgs []any, req domain.SearchCont
 	if len(req.CurrentHandlers) > 0 {
 		ph := strings.Repeat("?,", len(req.CurrentHandlers))
 		where += " AND EXISTS (SELECT 1 FROM audit_control_stage st WHERE st.control_id = c.id" +
-			" AND st.phase = 'EVIDENCE' AND st.ended_at IS NULL AND st.handled_by IN (" + ph[:len(ph)-1] + "))"
+			" AND st.ended_at IS NULL AND st.handled_by IN (" + ph[:len(ph)-1] + "))"
 		for _, h := range req.CurrentHandlers {
 			args = append(args, h)
 		}
@@ -396,10 +396,8 @@ func (r *controlRepo) CreateControl(ctx context.Context, auditID int, req domain
 			return nil, fmt.Errorf("control.Create population: %w", err)
 		}
 	}
-	if strings.EqualFold(defCols.requirementType, "DESIGN") {
-		if err := openFirstStage(ctx, tx, auditID, int(id), r.clock()); err != nil {
-			return nil, fmt.Errorf("control.Create stage: %w", err)
-		}
+	if err := openFirstStage(ctx, tx, auditID, int(id), strings.EqualFold(defCols.requirementType, "OE"), r.clock()); err != nil {
+		return nil, fmt.Errorf("control.Create stage: %w", err)
 	}
 	if err := recomputeAuditStatus(ctx, tx, auditID); err != nil {
 		return nil, err
@@ -453,10 +451,8 @@ func (r *controlRepo) BulkCreateControls(ctx context.Context, auditID int, reqs 
 				return nil, fmt.Errorf("control.BulkCreate population %q: %w", req.ControlNumber, err)
 			}
 		}
-		if strings.EqualFold(defCols.requirementType, "DESIGN") {
-			if err := openFirstStage(ctx, tx, auditID, int(id), r.clock()); err != nil {
-				return nil, fmt.Errorf("control.BulkCreate stage %q: %w", req.ControlNumber, err)
-			}
+		if err := openFirstStage(ctx, tx, auditID, int(id), strings.EqualFold(defCols.requirementType, "OE"), r.clock()); err != nil {
+			return nil, fmt.Errorf("control.BulkCreate stage %q: %w", req.ControlNumber, err)
 		}
 	}
 

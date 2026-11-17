@@ -147,15 +147,15 @@ func TestUpdateControl_DueDateDoesNotMoveStages(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"requirement_type"}).AddRow("DESIGN"))
 	mock.ExpectQuery(re("FROM audit_control_stage")).
 		WithArgs(2).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "handled_by", "cycle_type", "ended_at"}).AddRow(7, "OWNER", "INITIAL", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "phase", "handled_by", "cycle_type", "ended_at"}).AddRow(7, "EVIDENCE", "OWNER", "INITIAL", nil))
 	mock.ExpectQuery(re("FROM audit_deadline_days")).
 		WithArgs(1).
-		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+		WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
 	mock.ExpectExec(re("UPDATE audit_control_stage SET ended_at")).
 		WithArgs(sqlmock.AnyArg(), "actor", int64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(re("INSERT INTO audit_control_stage")).
-		WithArgs(2, "COMPLIANCE", "INITIAL", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(2, "EVIDENCE", "COMPLIANCE", "INITIAL", sqlmock.AnyArg(), sqlmock.AnyArg(), nil, nil).
 		WillReturnResult(sqlmock.NewResult(8, 1))
 	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
 		WithArgs(1).
@@ -438,10 +438,16 @@ func TestChangeRequirementType_DesignToOE_Success(t *testing.T) {
 	mock.ExpectExec(re("SET requirement_type = ?, status = ?, status_overridden = FALSE")).
 		WithArgs("OE", "POPULATION_PENDING", "actor", 1, 2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	// OE controls are not tracked: the control's stage history is cleared.
+	// An OE control starts a fresh first stage in the population phase.
 	mock.ExpectExec(re("DELETE FROM audit_control_stage WHERE control_id = ?")).
 		WithArgs(2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(re("FROM audit_deadline_days")).
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
+	mock.ExpectExec(re("INSERT INTO audit_control_stage")).
+		WithArgs(2, "POPULATION", "OWNER", "INITIAL", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
 		WithArgs(1).
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("ACTIVE"))
@@ -509,9 +515,9 @@ func TestChangeRequirementType_OEToDesign_Success(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(re("FROM audit_deadline_days")).
 		WithArgs(1).
-		WillReturnRows(sqlmock.NewRows([]string{"cycle_type", "handled_by", "allowed_days"}))
+		WillReturnRows(sqlmock.NewRows([]string{"phase", "cycle_type", "handled_by", "allowed_days"}))
 	mock.ExpectExec(re("INSERT INTO audit_control_stage")).
-		WithArgs(2, "OWNER", "INITIAL", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(2, "EVIDENCE", "OWNER", "INITIAL", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(re("SELECT status FROM audit WHERE id = ? FOR UPDATE")).
 		WithArgs(1).

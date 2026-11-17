@@ -18,12 +18,23 @@ package domain
 
 // DelayLogEntry is one late day for one group. The GRC Backend decides who may see it.
 type DelayLogEntry struct {
-	HandledBy string `json:"handledBy"` // OWNER | COMPLIANCE | AUDITOR
-	Date      string `json:"date"`      // YYYY-MM-DD
+	Phase     string `json:"phase,omitempty"` // EVIDENCE | POPULATION | OE_EVIDENCE
+	HandledBy string `json:"handledBy"`       // OWNER | COMPLIANCE | AUDITOR
+	Date      string `json:"date"`            // YYYY-MM-DD
+}
+
+// PhasePlan is the original plan for one phase of a control: the date each
+// group was first expected to hand it on. A phase appears once it has started.
+type PhasePlan struct {
+	Phase                 string  `json:"phase"` // EVIDENCE | POPULATION | OE_EVIDENCE
+	PlannedOwnerDate      *string `json:"plannedOwnerDate"`
+	PlannedComplianceDate *string `json:"plannedComplianceDate"`
+	PlannedAuditorDate    *string `json:"plannedAuditorDate"`
 }
 
 // DeadlineDaysRow is one allowed-days setting for an audit.
 type DeadlineDaysRow struct {
+	Phase       string `json:"phase"`       // EVIDENCE (Design) | POPULATION | OE_EVIDENCE; empty means EVIDENCE
 	CycleType   string `json:"cycleType"`   // INITIAL | REVISION
 	HandledBy   string `json:"handledBy"`   // OWNER | COMPLIANCE | AUDITOR
 	AllowedDays int    `json:"allowedDays"` // 1..365
@@ -31,10 +42,10 @@ type DeadlineDaysRow struct {
 }
 
 // DeadlineDaysResponse is returned by GET and PUT /audits/{auditId}/deadline-days.
-// It always lists all six cycle/handler combinations.
+// It always lists the six cycle/handler combinations of every phase.
 type DeadlineDaysResponse struct {
 	AuditID int               `json:"auditId"`
-	Phase   string            `json:"phase"` // EVIDENCE
+	Phase   string            `json:"phase"` // EVIDENCE; kept for older clients, rows carry their own phase
 	Days    []DeadlineDaysRow `json:"days"`
 }
 

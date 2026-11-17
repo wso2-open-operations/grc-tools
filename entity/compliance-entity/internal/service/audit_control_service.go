@@ -80,7 +80,7 @@ func normalizeCurrentHandlers(req *domain.SearchControlsRequest) error {
 	return nil
 }
 
-// enrichDeadlines fills each DESIGN control's deadline fields (current holder
+// enrichDeadlines fills each control's deadline fields (current holder
 // and deadline, planned dates, Delayed, delay log) from its recorded hand-offs
 // in one query. Everything is worked out as of now and nothing is stored. A
 // failure to load them is returned, so a read never shows a tracked control as
@@ -91,12 +91,7 @@ func (s *controlService) enrichDeadlines(ctx context.Context, controls []domain.
 	}
 	ids := make([]int, 0, len(controls))
 	for _, c := range controls {
-		if strings.EqualFold(c.RequirementType, "DESIGN") {
-			ids = append(ids, c.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
+		ids = append(ids, c.ID)
 	}
 	stages, err := s.stageRepo.ListStagesByControls(ctx, ids)
 	if err != nil {
@@ -176,13 +171,20 @@ func applyEvaluation(c *domain.AuditControl, ev deadline.Evaluation) {
 	c.DeadlineTracked = true
 	c.CurrentHandler = ev.CurrentHandler
 	c.CurrentDueDate = day(ev.CurrentDueDate)
+	c.CurrentPhase = ev.CurrentPhase
+	c.PhasePlans = nil
+	for _, p := range ev.PhasePlans {
+		c.PhasePlans = append(c.PhasePlans, domain.PhasePlan{
+			Phase: p.Phase, PlannedOwnerDate: day(p.Owner), PlannedComplianceDate: day(p.Compliance), PlannedAuditorDate: day(p.Auditor),
+		})
+	}
 	c.PlannedOwnerDate = day(ev.PlannedOwnerDate)
 	c.PlannedComplianceDate = day(ev.PlannedComplianceDate)
 	c.PlannedAuditorDate = day(ev.PlannedAuditorDate)
 	c.Delayed = &delayed
 	c.DelayLog = nil
 	for _, e := range ev.DelayLog {
-		c.DelayLog = append(c.DelayLog, domain.DelayLogEntry{HandledBy: e.HandledBy, Date: deadline.FormatDay(e.Date)})
+		c.DelayLog = append(c.DelayLog, domain.DelayLogEntry{Phase: e.Phase, HandledBy: e.HandledBy, Date: deadline.FormatDay(e.Date)})
 	}
 }
 

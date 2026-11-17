@@ -64,41 +64,92 @@ func TestHandlerForStatus(t *testing.T) {
 			t.Errorf("%s: got %q,%v want %q", status, got, ok, want)
 		}
 	}
-	for _, status := range []string{"COMPLETE", "POPULATION_PENDING", "AWAITING_SAMPLE", "SUBMITTED_SAMPLE"} {
-		if _, ok := HandlerForStatus(status); ok {
-			t.Errorf("%s should not be tracked", status)
+	if _, ok := HandlerForStatus("COMPLETE"); ok {
+		t.Error("COMPLETE should not be tracked")
+	}
+}
+
+func TestStageFor(t *testing.T) {
+	cases := []struct {
+		status, phase, handler string
+		oe                     bool
+	}{
+		{"POPULATION_PENDING", PhasePopulation, Owner, true},
+		{"POPULATION_NEED_CLARIFICATION", PhasePopulation, Owner, true},
+		{"POPULATION_INTERNAL_REVIEW", PhasePopulation, Compliance, true},
+		{"POPULATION_UNDER_VALIDATION", PhasePopulation, Auditor, true},
+		{"POPULATION_COMPLETE", PhasePopulation, Auditor, true},
+		{"AWAITING_SAMPLE", PhasePopulation, Auditor, true},
+		{"SUBMITTED_SAMPLE", PhaseOEEvidence, Owner, true},
+		{"EVIDENCE_PENDING", PhaseOEEvidence, Owner, true},
+		{"EVIDENCE_NEED_CLARIFICATION", PhaseOEEvidence, Owner, true},
+		{"EVIDENCE_INTERNAL_REVIEW", PhaseOEEvidence, Compliance, true},
+		{"EVIDENCE_UNDER_VALIDATION", PhaseOEEvidence, Auditor, true},
+		{"EVIDENCE_PENDING", PhaseEvidence, Owner, false},
+		{"EVIDENCE_UNDER_VALIDATION", PhaseEvidence, Auditor, false},
+	}
+	for _, tc := range cases {
+		phase, handler, ok := StageFor(tc.status, tc.oe)
+		if !ok || phase != tc.phase || handler != tc.handler {
+			t.Errorf("%s (oe=%v): got %s/%s/%v, want %s/%s", tc.status, tc.oe, phase, handler, ok, tc.phase, tc.handler)
 		}
+	}
+	if _, _, ok := StageFor("COMPLETE", true); ok {
+		t.Error("COMPLETE should not be tracked")
 	}
 }
 
 func TestPlannedDates(t *testing.T) {
-	c, a := PlannedDates(day(time.November, 7), DefaultDays())
+	c, a := PlannedDates(PhaseEvidence, day(time.November, 7), PhaseDays{})
 	if FormatDay(c) != "2026-11-17" || FormatDay(a) != "2026-11-27" {
 		t.Fatalf("got %s %s", FormatDay(c), FormatDay(a))
+	}
+	c, a = PlannedDates(PhasePopulation, day(time.November, 7), PhaseDays{})
+	if FormatDay(c) != "2026-11-10" || FormatDay(a) != "2026-11-13" {
+		t.Fatalf("population: got %s %s", FormatDay(c), FormatDay(a))
+	}
+}
+
+func TestDefaultsPerPhase(t *testing.T) {
+	d := PhaseDays{}
+	want := map[string][6]int{
+		// initial O/C/A, revision O/C/A
+		PhaseEvidence:   {30, 10, 10, 15, 5, 5},
+		PhasePopulation: {4, 3, 3, 2, 2, 2},
+		PhaseOEEvidence: {5, 2, 2, 2, 2, 2},
+	}
+	for phase, w := range want {
+		got := [6]int{
+			d.For(phase, Initial, Owner), d.For(phase, Initial, Compliance), d.For(phase, Initial, Auditor),
+			d.For(phase, Revision, Owner), d.For(phase, Revision, Compliance), d.For(phase, Revision, Auditor),
+		}
+		if got != w {
+			t.Errorf("%s: got %v want %v", phase, got, w)
+		}
 	}
 }
 
 func TestDaysFallBackToDefaults(t *testing.T) {
-	d := Days{}
-	if d.For(Initial, Compliance) != 10 || d.For(Revision, Owner) != 15 {
-		t.Fatal("defaults not applied")
-	}
-	d.Set(Initial, Compliance, 12)
-	if d.For(Initial, Compliance) != 12 || d.For(Initial, Auditor) != 10 {
+	d := PhaseDays{}
+	d.Set(PhasePopulation, Initial, Compliance, 7)
+	if d.For(PhasePopulation, Initial, Compliance) != 7 || d.For(PhasePopulation, Initial, Auditor) != 3 {
 		t.Fatal("custom value or fallback wrong")
+	}
+	if d.For(PhaseEvidence, Initial, Compliance) != 10 {
+		t.Fatal("a value saved for one phase must not leak into another")
 	}
 }
 
 func held(handlers ...string) map[string]bool {
 	m := map[string]bool{}
 	for _, h := range handlers {
-		m[h] = true
+		m[HeldKey(PhaseEvidence, h)] = true
 	}
 	return m
 }
 
 func TestPlanTransition(t *testing.T) {
-	open := func(h, cycle string) *Stage { return &Stage{HandledBy: h, CycleType: cycle} }
+	open := func(h, cycle string) *Stage { return &Stage{Phase: PhaseEvidence, HandledBy: h, CycleType: cycle} }
 	now := at(time.November, 6, 10, 0)
 	cases := []struct {
 		name      string
@@ -164,10 +215,6 @@ func TestPlanTransition(t *testing.T) {
 			in:   TransitionInput{From: "EVIDENCE_PENDING", To: "EVIDENCE_PENDING", OpenStage: open(Owner, Initial)},
 		},
 		{
-			name: "population statuses are not tracked",
-			in:   TransitionInput{From: "POPULATION_PENDING", To: "POPULATION_INTERNAL_REVIEW"},
-		},
-		{
 			name: "same handler already holds it: nothing changes",
 			in:   TransitionInput{From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_PENDING", OpenStage: open(Owner, Revision), HeldBefore: held(Owner, Compliance, Auditor)},
 		},
@@ -175,7 +222,7 @@ func TestPlanTransition(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.in.Now = now
-			tc.in.Days = DefaultDays()
+			tc.in.Days = PhaseDays{}
 			got := PlanTransition(tc.in)
 			if got.CloseOpen != tc.wantClose {
 				t.Errorf("CloseOpen = %v, want %v", got.CloseOpen, tc.wantClose)
@@ -200,11 +247,11 @@ func TestPlanTransition(t *testing.T) {
 func TestPlanTransitionResubmitWithoutHistoryIsRevision(t *testing.T) {
 	now := at(time.November, 6, 10, 0)
 	got := PlanTransition(TransitionInput{
-		From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_INTERNAL_REVIEW", Now: now, Days: DefaultDays(),
+		From: "EVIDENCE_NEED_CLARIFICATION", To: "EVIDENCE_INTERNAL_REVIEW", Now: now, Days: PhaseDays{},
 	})
-	want := &NewStage{HandledBy: Compliance, CycleType: Revision, StartedAt: now, DueDate: day(time.November, 11)}
-	if got.Open == nil || *got.Open != *want {
-		t.Fatalf("got %+v, want %+v", got.Open, want)
+	if got.Open == nil || got.Open.HandledBy != Compliance || got.Open.CycleType != Revision ||
+		FormatDay(got.Open.DueDate) != "2026-11-11" {
+		t.Fatalf("got %+v", got.Open)
 	}
 }
 
@@ -214,7 +261,7 @@ func TestPlanTransitionUsesColomboDay(t *testing.T) {
 	now := time.Date(2026, time.November, 9, 23, 30, 0, 0, time.UTC)
 	got := PlanTransition(TransitionInput{
 		From: "EVIDENCE_PENDING", To: "EVIDENCE_INTERNAL_REVIEW", Now: now,
-		OpenStage: &Stage{HandledBy: Owner, CycleType: Initial}, HeldBefore: held(Owner), Days: DefaultDays(),
+		OpenStage: &Stage{Phase: PhaseEvidence, HandledBy: Owner, CycleType: Initial}, HeldBefore: held(Owner), Days: PhaseDays{},
 	})
 	if got.Open == nil || FormatDay(got.Open.DueDate) != "2026-11-20" {
 		t.Fatalf("got %+v", got.Open)
@@ -224,7 +271,7 @@ func TestPlanTransitionUsesColomboDay(t *testing.T) {
 func TestRevisionDeadlineMonthBoundary(t *testing.T) {
 	got := PlanTransition(TransitionInput{
 		From: "EVIDENCE_UNDER_VALIDATION", To: "EVIDENCE_NEED_CLARIFICATION", Now: at(time.November, 24, 12, 0),
-		OpenStage: &Stage{HandledBy: Auditor, CycleType: Initial}, HeldBefore: held(Owner, Compliance, Auditor), Days: DefaultDays(),
+		OpenStage: &Stage{Phase: PhaseEvidence, HandledBy: Auditor, CycleType: Initial}, HeldBefore: held(Owner, Compliance, Auditor), Days: PhaseDays{},
 	})
 	if FormatDay(got.Open.DueDate) != "2026-12-09" {
 		t.Fatalf("24 Nov + 15 days should be 9 Dec, got %s", FormatDay(got.Open.DueDate))
@@ -282,14 +329,14 @@ func TestEvaluateLateAtEveryStep(t *testing.T) {
 		log     []string
 	}{
 		{"5 Nov, on time", at(time.November, 5, 12, 0), Owner, "2026-11-07", false, []string{}},
-		{"8 Nov, internal late one day", at(time.November, 8, 12, 0), Owner, "2026-11-07", false, []string{"Internal - 11/08"}},
-		{"10 Nov before submit", at(time.November, 10, 9, 0), Owner, "2026-11-07", false, []string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10"}},
-		{"11 Nov, with GRC", at(time.November, 11, 9, 0), Compliance, "2026-11-20", false, []string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10"}},
-		{"22 Nov, GRC late", at(time.November, 22, 9, 0), Compliance, "2026-11-20", false,
+		{"8 Nov, internal late one day", at(time.November, 8, 12, 0), Owner, "2026-11-07", true, []string{"Internal - 11/08"}},
+		{"10 Nov before submit", at(time.November, 10, 9, 0), Owner, "2026-11-07", true, []string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10"}},
+		{"11 Nov, with GRC", at(time.November, 11, 9, 0), Compliance, "2026-11-20", true, []string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10"}},
+		{"22 Nov, GRC late", at(time.November, 22, 9, 0), Compliance, "2026-11-20", true,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22"}},
-		{"24 Nov, with EY", at(time.November, 24, 9, 0), Auditor, "2026-12-03", false,
+		{"24 Nov, with EY", at(time.November, 24, 9, 0), Auditor, "2026-12-03", true,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22", "GRC - 11/23"}},
-		{"28 Nov, original EY date missed", at(time.November, 28, 9, 0), Auditor, "2026-12-03", true,
+		{"28 Nov, EY on time but earlier groups were late", at(time.November, 28, 9, 0), Auditor, "2026-12-03", true,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22", "GRC - 11/23"}},
 		{"4 Dec, EY late", at(time.December, 4, 9, 0), Auditor, "2026-12-03", true,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22", "GRC - 11/23", "EY - 12/04"}},
@@ -316,7 +363,7 @@ func TestEvaluateLateAtEveryStep(t *testing.T) {
 			t.Errorf("log = %v, want %v", got, want)
 		}
 		if !ev.Delayed {
-			t.Error("a control that finished after the original EY date stays Delayed")
+			t.Error("a control where someone was late stays Delayed")
 		}
 		if ev.CurrentHandler != nil {
 			t.Error("a completed control has no current handler")
@@ -370,15 +417,204 @@ func TestEvaluateNoStages(t *testing.T) {
 	}
 }
 
-// A control created before this feature (lazily tracked) has no planned dates,
-// so the initial-cycle Delayed rule cannot fire.
+// A control created before this feature (lazily tracked) has no planned dates;
+// lateness is still logged and sets Delayed.
 func TestEvaluateWithoutPlannedDates(t *testing.T) {
 	stages := []Stage{{ID: 1, HandledBy: Compliance, CycleType: Initial, StartedAt: at(time.November, 1, 9, 0), DueDate: day(time.November, 11)}}
 	ev := Evaluate(stages, at(time.December, 20, 9, 0))
-	if ev.Delayed {
-		t.Fatal("no planned EY date, so the initial rule cannot mark it Delayed")
+	if !ev.Delayed || len(ev.DelayLog) == 0 {
+		t.Fatal("lateness is logged and sets Delayed even without planned dates")
 	}
-	if len(ev.DelayLog) == 0 {
-		t.Fatal("lateness is still logged")
+}
+
+// ---- OE (population + evidence) ----
+
+// oeWalk applies a status path to an OE control the way the repository does:
+// every stage ever opened counts as held, and the open stage is the last one.
+type oeWalk struct {
+	t      *testing.T
+	stages []Stage
+	held   map[string]bool
+	status string
+	now    time.Time
+	days   PhaseDays
+}
+
+func newOEWalk(t *testing.T, start time.Time) *oeWalk {
+	w := &oeWalk{t: t, held: map[string]bool{}, status: "POPULATION_PENDING", now: start, days: PhaseDays{}}
+	first := FirstStage(PhasePopulation, AddDays(DayOf(start), w.days.For(PhasePopulation, Initial, Owner)), start)
+	w.stages = append(w.stages, Stage{ID: 1, Phase: first.Phase, HandledBy: first.HandledBy, CycleType: first.CycleType,
+		StartedAt: first.StartedAt, DueDate: first.DueDate})
+	w.held[HeldKey(first.Phase, first.HandledBy)] = true
+	return w
+}
+
+// to moves the control to status after daysLater days and returns the stage it opened, if any.
+func (w *oeWalk) to(status string, daysLater int) *Stage {
+	w.now = w.now.AddDate(0, 0, daysLater)
+	var open *Stage
+	if n := len(w.stages); n > 0 && w.stages[n-1].EndedAt == nil {
+		open = &w.stages[n-1]
+	}
+	ch := PlanTransition(TransitionInput{From: w.status, To: status, OE: true, Now: w.now, OpenStage: open, HeldBefore: w.held, Days: w.days})
+	w.status = status
+	if ch.CloseOpen && open != nil {
+		end := w.now
+		open.EndedAt = &end
+	}
+	if ch.Open == nil {
+		return nil
+	}
+	s := Stage{ID: int64(len(w.stages) + 1), Phase: ch.Open.Phase, HandledBy: ch.Open.HandledBy, CycleType: ch.Open.CycleType,
+		StartedAt: ch.Open.StartedAt, DueDate: ch.Open.DueDate,
+		PlannedComplianceDate: ch.Open.PlannedComplianceDate, PlannedAuditorDate: ch.Open.PlannedAuditorDate}
+	w.stages = append(w.stages, s)
+	w.held[HeldKey(s.Phase, s.HandledBy)] = true
+	return &w.stages[len(w.stages)-1]
+}
+
+func (w *oeWalk) expect(status string, daysLater int, phase, handler, cycle string, allowed int) {
+	w.t.Helper()
+	before := w.now.AddDate(0, 0, daysLater)
+	s := w.to(status, daysLater)
+	if s == nil {
+		w.t.Fatalf("%s: expected a new stage", status)
+	}
+	if s.Phase != phase || s.HandledBy != handler || s.CycleType != cycle {
+		w.t.Fatalf("%s: got %s/%s/%s, want %s/%s/%s", status, s.Phase, s.HandledBy, s.CycleType, phase, handler, cycle)
+	}
+	if want := AddDays(DayOf(before), allowed); !s.DueDate.Equal(want) {
+		w.t.Fatalf("%s: due %s, want %s (%d days)", status, FormatDay(s.DueDate), FormatDay(want), allowed)
+	}
+}
+
+// The example: Owner 4, GRC 3, EY 3, then evidence: Owner 5, GRC 2, EY 2.
+func TestOEWalkInitialEverywhere(t *testing.T) {
+	w := newOEWalk(t, at(time.November, 1, 9, 0))
+	w.expect("POPULATION_INTERNAL_REVIEW", 1, PhasePopulation, Compliance, Initial, 3)
+	w.expect("POPULATION_UNDER_VALIDATION", 1, PhasePopulation, Auditor, Initial, 3)
+	// The same EY window carries on through completing and the sample.
+	if s := w.to("POPULATION_COMPLETE", 1); s != nil {
+		t.Fatalf("EY keeps one window through POPULATION_COMPLETE, got %+v", *s)
+	}
+	if s := w.to("AWAITING_SAMPLE", 1); s != nil {
+		t.Fatalf("EY keeps one window through AWAITING_SAMPLE, got %+v", *s)
+	}
+	// EY submits the sample: the Owner has 5 initial days, though they held the population.
+	w.expect("SUBMITTED_SAMPLE", 1, PhaseOEEvidence, Owner, Initial, 5)
+	if s := w.to("EVIDENCE_PENDING", 0); s != nil {
+		t.Fatalf("owner already holds it, got %+v", *s)
+	}
+	w.expect("EVIDENCE_INTERNAL_REVIEW", 1, PhaseOEEvidence, Compliance, Initial, 2)
+	w.expect("EVIDENCE_UNDER_VALIDATION", 1, PhaseOEEvidence, Auditor, Initial, 2)
+	w.to("COMPLETE", 1)
+	if last := w.stages[len(w.stages)-1]; last.EndedAt == nil {
+		t.Fatal("COMPLETE closes the open stage")
+	}
+}
+
+// Owner -> GRC rejects -> Owner -> GRC -> EY: EY has never held it, so initial 3.
+func TestOEPopulationRejectionThenFirstEYIsInitial(t *testing.T) {
+	w := newOEWalk(t, at(time.November, 1, 9, 0))
+	w.expect("POPULATION_INTERNAL_REVIEW", 1, PhasePopulation, Compliance, Initial, 3)
+	w.expect("POPULATION_PENDING", 1, PhasePopulation, Owner, Revision, 2)
+	w.expect("POPULATION_INTERNAL_REVIEW", 1, PhasePopulation, Compliance, Revision, 2)
+	w.expect("POPULATION_UNDER_VALIDATION", 1, PhasePopulation, Auditor, Initial, 3)
+	// EY rejects: Owner revision, GRC revision, EY revision.
+	w.expect("POPULATION_NEED_CLARIFICATION", 1, PhasePopulation, Owner, Revision, 2)
+	w.expect("POPULATION_INTERNAL_REVIEW", 1, PhasePopulation, Compliance, Revision, 2)
+	w.expect("POPULATION_UNDER_VALIDATION", 1, PhasePopulation, Auditor, Revision, 2)
+}
+
+// The count starts again in evidence, and EY rejecting evidence is a revision there.
+func TestOEEvidencePhaseStartsFresh(t *testing.T) {
+	w := newOEWalk(t, at(time.November, 1, 9, 0))
+	w.to("POPULATION_INTERNAL_REVIEW", 1)
+	w.to("POPULATION_PENDING", 1) // rejected once in population
+	w.to("POPULATION_INTERNAL_REVIEW", 1)
+	w.to("POPULATION_UNDER_VALIDATION", 1)
+	w.to("POPULATION_COMPLETE", 1)
+	// Skipping the sample step goes straight to evidence.
+	w.expect("EVIDENCE_PENDING", 1, PhaseOEEvidence, Owner, Initial, 5)
+	w.expect("EVIDENCE_INTERNAL_REVIEW", 1, PhaseOEEvidence, Compliance, Initial, 2)
+	w.expect("EVIDENCE_PENDING", 1, PhaseOEEvidence, Owner, Revision, 2)
+	w.expect("EVIDENCE_INTERNAL_REVIEW", 1, PhaseOEEvidence, Compliance, Revision, 2)
+	w.expect("EVIDENCE_UNDER_VALIDATION", 1, PhaseOEEvidence, Auditor, Initial, 2)
+	w.expect("EVIDENCE_NEED_CLARIFICATION", 1, PhaseOEEvidence, Owner, Revision, 2)
+}
+
+func TestOEDaysAreOwnPerPhase(t *testing.T) {
+	w := newOEWalk(t, at(time.November, 1, 9, 0))
+	w.days.Set(PhasePopulation, Initial, Compliance, 8)
+	w.days.Set(PhaseEvidence, Initial, Compliance, 20) // Design evidence must not affect OE
+	w.expect("POPULATION_INTERNAL_REVIEW", 1, PhasePopulation, Compliance, Initial, 8)
+	w.expect("POPULATION_UNDER_VALIDATION", 1, PhasePopulation, Auditor, Initial, 3)
+	w.expect("SUBMITTED_SAMPLE", 1, PhaseOEEvidence, Owner, Initial, 5)
+	w.expect("EVIDENCE_INTERNAL_REVIEW", 1, PhaseOEEvidence, Compliance, Initial, 2)
+}
+
+// Each phase freezes its own plan on the owner's first stage in it.
+func TestOEPlansPerPhase(t *testing.T) {
+	w := newOEWalk(t, at(time.November, 2, 9, 0))
+	w.stages[0].PlannedComplianceDate = ptr(day(time.November, 9))
+	w.stages[0].PlannedAuditorDate = ptr(day(time.November, 12))
+	w.to("POPULATION_INTERNAL_REVIEW", 1)
+	w.to("POPULATION_UNDER_VALIDATION", 1)
+	w.to("SUBMITTED_SAMPLE", 1) // 5 Nov
+	ev := Evaluate(w.stages, at(time.November, 5, 12, 0))
+	if len(ev.PhasePlans) != 2 {
+		t.Fatalf("want 2 phase plans, got %d", len(ev.PhasePlans))
+	}
+	pop, evd := ev.PhasePlans[0], ev.PhasePlans[1]
+	if pop.Phase != PhasePopulation || FormatDay(*pop.Owner) != "2026-11-06" || FormatDay(*pop.Compliance) != "2026-11-09" || FormatDay(*pop.Auditor) != "2026-11-12" {
+		t.Errorf("population plan wrong: %+v", pop)
+	}
+	// Evidence plan: Owner 5 days from 5 Nov, GRC 2 more, EY 2 more.
+	if evd.Phase != PhaseOEEvidence || FormatDay(*evd.Owner) != "2026-11-10" || FormatDay(*evd.Compliance) != "2026-11-12" || FormatDay(*evd.Auditor) != "2026-11-14" {
+		t.Errorf("evidence plan wrong: %s %s %s %s", evd.Phase, FormatDay(*evd.Owner), FormatDay(*evd.Compliance), FormatDay(*evd.Auditor))
+	}
+	// The flat fields are the first phase's plan.
+	if FormatDay(*ev.PlannedOwnerDate) != "2026-11-06" {
+		t.Errorf("flat planned owner = %s", FormatDay(*ev.PlannedOwnerDate))
+	}
+	if ev.CurrentPhase == nil || *ev.CurrentPhase != PhaseOEEvidence {
+		t.Errorf("current phase = %v", ev.CurrentPhase)
+	}
+}
+
+// Delayed means someone held the control past their own deadline, whoever it was.
+// A late Owner does not make an on-time EY look late.
+func TestDelayedBlamesOnlyTheLateGroup(t *testing.T) {
+	stages := []Stage{
+		{ID: 1, Phase: PhasePopulation, HandledBy: Owner, CycleType: Initial, StartedAt: at(time.November, 1, 9, 0), DueDate: day(time.November, 5),
+			PlannedComplianceDate: ptr(day(time.November, 8)), PlannedAuditorDate: ptr(day(time.November, 11)), EndedAt: ptr(at(time.November, 7, 10, 0))},
+		{ID: 2, Phase: PhasePopulation, HandledBy: Compliance, CycleType: Initial, StartedAt: at(time.November, 7, 10, 0), DueDate: day(time.November, 10), EndedAt: ptr(at(time.November, 9, 10, 0))},
+		{ID: 3, Phase: PhasePopulation, HandledBy: Auditor, CycleType: Initial, StartedAt: at(time.November, 9, 10, 0), DueDate: day(time.November, 12), EndedAt: ptr(at(time.November, 11, 10, 0))},
+	}
+	ev := Evaluate(stages, at(time.November, 20, 9, 0))
+	if !ev.Delayed {
+		t.Fatal("the Owner was two days late, so the control is Delayed")
+	}
+	if got := logString(ev); !equalStrings(got, []string{"Internal - 11/06", "Internal - 11/07"}) {
+		t.Fatalf("only the Owner is in the log, got %v", got)
+	}
+	for _, e := range ev.DelayLog {
+		if e.Phase != PhasePopulation {
+			t.Errorf("log entry phase = %q", e.Phase)
+		}
+	}
+}
+
+func TestStillDelayedAfterLateOwnerRecovers(t *testing.T) {
+	stages := []Stage{
+		{ID: 1, Phase: PhaseEvidence, HandledBy: Owner, CycleType: Initial, StartedAt: at(time.November, 1, 9, 0), DueDate: day(time.November, 5),
+			EndedAt: ptr(at(time.November, 6, 10, 0))},
+		{ID: 2, Phase: PhaseEvidence, HandledBy: Compliance, CycleType: Initial, StartedAt: at(time.November, 6, 10, 0), DueDate: day(time.November, 16)},
+	}
+	if ev := Evaluate(stages, at(time.November, 8, 9, 0)); !ev.Delayed {
+		t.Fatal("one late day in the past still means Delayed")
+	}
+	if ev := Evaluate(stages[1:], at(time.November, 8, 9, 0)); ev.Delayed {
+		t.Fatal("a holder inside their deadline is not Delayed")
 	}
 }

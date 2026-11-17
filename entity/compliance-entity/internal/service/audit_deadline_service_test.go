@@ -31,7 +31,7 @@ import (
 
 type fakeStageRepo struct {
 	stages  map[int][]deadline.Stage
-	days    deadline.Days
+	days    deadline.PhaseDays
 	listErr error
 	put     []domain.DeadlineDaysRow
 	listed  int
@@ -44,9 +44,9 @@ func (f *fakeStageRepo) ListStagesByControls(_ context.Context, ids []int) (map[
 	}
 	return f.stages, nil
 }
-func (f *fakeStageRepo) GetDeadlineDays(context.Context, int) (deadline.Days, error) {
+func (f *fakeStageRepo) GetDeadlineDays(context.Context, int) (deadline.PhaseDays, error) {
 	if f.days == nil {
-		return deadline.Days{}, nil
+		return deadline.PhaseDays{}, nil
 	}
 	return f.days, nil
 }
@@ -54,9 +54,13 @@ func (f *fakeStageRepo) PutDeadlineDays(_ context.Context, _ int, rows []domain.
 	f.put = rows
 	for _, r := range rows {
 		if f.days == nil {
-			f.days = deadline.Days{}
+			f.days = deadline.PhaseDays{}
 		}
-		f.days.Set(r.CycleType, r.HandledBy, r.AllowedDays)
+		ph := r.Phase
+		if ph == "" {
+			ph = deadline.PhaseEvidence
+		}
+		f.days.Set(ph, r.CycleType, r.HandledBy, r.AllowedDays)
 	}
 	return nil
 }
@@ -96,7 +100,7 @@ func TestEnrichDeadlinesFillsDesignControls(t *testing.T) {
 	controls := []domain.AuditControl{
 		{ID: 1, RequirementType: "DESIGN"},
 		{ID: 2, RequirementType: "DESIGN"}, // no stages: predates the feature
-		{ID: 3, RequirementType: "OE"},     // never tracked
+		{ID: 3, RequirementType: "OE"},     // no stages yet either
 	}
 	_ = svc.enrichDeadlines(context.Background(), controls)
 
@@ -118,16 +122,16 @@ func TestEnrichDeadlinesFillsDesignControls(t *testing.T) {
 		t.Fatal("a control with no stages is left untouched")
 	}
 	if controls[2].DeadlineTracked {
-		t.Fatal("OE controls are never tracked")
+		t.Fatal("an OE control with no stages is left untouched")
 	}
 }
 
-func TestEnrichDeadlinesOnlyQueriesDesignControls(t *testing.T) {
+func TestEnrichDeadlinesQueriesOEControlsToo(t *testing.T) {
 	repo := &fakeStageRepo{}
 	svc := &controlService{stageRepo: repo, now: time.Now}
 	_ = svc.enrichDeadlines(context.Background(), []domain.AuditControl{{ID: 1, RequirementType: "OE"}})
-	if repo.listed != 0 {
-		t.Fatal("no stage query is needed when there are no DESIGN controls")
+	if repo.listed != 1 {
+		t.Fatal("OE controls have stages to load")
 	}
 }
 
@@ -181,8 +185,15 @@ func TestGetDeadlineDaysListsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Days) != 6 || resp.Phase != "EVIDENCE" {
+	if len(resp.Days) != 18 || resp.Phase != "EVIDENCE" {
 		t.Fatalf("got %+v", resp)
+	}
+	// Each phase lists its own defaults: Design evidence, OE population, OE evidence.
+	want := map[string]int{"EVIDENCE": 30, "POPULATION": 4, "OE_EVIDENCE": 5}
+	for _, d := range resp.Days {
+		if d.CycleType == "INITIAL" && d.HandledBy == "OWNER" && d.AllowedDays != want[d.Phase] {
+			t.Errorf("%s initial owner = %d, want %d", d.Phase, d.AllowedDays, want[d.Phase])
+		}
 	}
 	for _, d := range resp.Days {
 		if !d.IsDefault {
@@ -208,7 +219,7 @@ func TestUpdateDeadlineDaysSavesAndMarksCustom(t *testing.T) {
 		t.Fatalf("saved %+v", repo.put)
 	}
 	for _, d := range resp.Days {
-		isEdited := d.CycleType == "INITIAL" && d.HandledBy == "COMPLIANCE"
+		isEdited := d.Phase == "EVIDENCE" && d.CycleType == "INITIAL" && d.HandledBy == "COMPLIANCE"
 		if isEdited && (d.IsDefault || d.AllowedDays != 12) {
 			t.Errorf("edited row wrong: %+v", d)
 		}
@@ -231,6 +242,7 @@ func TestUpdateDeadlineDaysValidation(t *testing.T) {
 		"zero days":         {UpdatedBy: "a", Days: []domain.DeadlineDaysRow{row("INITIAL", "OWNER", 0)}},
 		"too many days":     {UpdatedBy: "a", Days: []domain.DeadlineDaysRow{row("INITIAL", "OWNER", 366)}},
 		"duplicate":         {UpdatedBy: "a", Days: []domain.DeadlineDaysRow{row("INITIAL", "OWNER", 5), row("INITIAL", "OWNER", 6)}},
+		"bad phase":         {UpdatedBy: "a", Days: []domain.DeadlineDaysRow{{Phase: "SAMPLE", CycleType: "INITIAL", HandledBy: "OWNER", AllowedDays: 5}}},
 	}
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -330,3 +342,28 @@ func TestApplyUltimate(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// The same cycle and group in different phases are different settings.
+func TestUpdateDeadlineDaysSavesPerPhase(t *testing.T) {
+	repo := &fakeStageRepo{}
+	svc := NewDeadlineDaysService(repo, fakeAuditRepo{status: "ACTIVE"})
+	resp, err := svc.UpdateDeadlineDays(context.Background(), 7, domain.UpdateDeadlineDaysRequest{
+		UpdatedBy: "admin@wso2.com",
+		Days: []domain.DeadlineDaysRow{
+			{Phase: "population", CycleType: "INITIAL", HandledBy: "AUDITOR", AllowedDays: 6},
+			{Phase: "OE_EVIDENCE", CycleType: "INITIAL", HandledBy: "AUDITOR", AllowedDays: 3},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, d := range resp.Days {
+		if d.CycleType == "INITIAL" && d.HandledBy == "AUDITOR" {
+			got[d.Phase] = d.AllowedDays
+		}
+	}
+	if got["POPULATION"] != 6 || got["OE_EVIDENCE"] != 3 || got["EVIDENCE"] != 10 {
+		t.Fatalf("got %v", got)
+	}
+}
