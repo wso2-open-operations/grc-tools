@@ -91,17 +91,22 @@ func (s *deadlineDaysService) Update(ctx context.Context, auditID int, req model
 	if err != nil {
 		return nil, err
 	}
-	after, err := s.repo.Put(ctx, auditID, rows, updatedBy)
+	after, err := s.repo.Put(ctx, auditID, rows, updatedBy, repository.DeadlineDaysOptions{
+		ApplyToOpenStages: req.ApplyToOpenStages, DryRun: req.DryRun,
+	})
 	if err != nil {
 		return nil, err
 	}
-	s.recordTrail(ctx, auditID, updatedBy, before, rows)
+	// A preview changed nothing, so it leaves nothing in the trail.
+	if !req.DryRun {
+		s.recordTrail(ctx, auditID, updatedBy, before, rows, req.ApplyToOpenStages, after.Recalculated)
+	}
 	return after, nil
 }
 
 // recordTrail appends a best-effort audit-level entry listing each changed value
 // as from/to. A failure here must never fail the edit it describes.
-func (s *deadlineDaysService) recordTrail(ctx context.Context, auditID int, actor string, before *model.DeadlineDays, rows []model.DeadlineDaysRow) {
+func (s *deadlineDaysService) recordTrail(ctx context.Context, auditID int, actor string, before *model.DeadlineDays, rows []model.DeadlineDaysRow, applied bool, recalc *model.RecalcSummary) {
 	if s.trail == nil {
 		return
 	}
@@ -122,7 +127,13 @@ func (s *deadlineDaysService) recordTrail(ctx context.Context, auditID int, acto
 	if len(changes) == 0 {
 		return
 	}
-	if err := s.trail.RecordAuditAction(ctx, auditID, "UPDATED", actor, map[string]any{"deadlineDays": changes}); err != nil {
+	details := map[string]any{"deadlineDays": changes}
+	if applied && recalc != nil {
+		// Said whether or not any stage moved, so the trail shows the option was used.
+		details["openStagesRecalculated"] = recalc.StagesUpdated
+		details["newlyOverdue"] = recalc.NewlyOverdue
+	}
+	if err := s.trail.RecordAuditAction(ctx, auditID, "UPDATED", actor, details); err != nil {
 		slog.WarnContext(ctx, "record deadline days trail failed", "auditId", auditID, "err", err)
 	}
 }

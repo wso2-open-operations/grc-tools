@@ -24,12 +24,15 @@ import (
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
 type fakeDeadlineDaysRepo struct {
 	before *model.DeadlineDays
 	put    []model.DeadlineDaysRow
 	putBy  string
+	opts   repository.DeadlineDaysOptions
+	recalc *model.RecalcSummary
 	getErr error
 }
 
@@ -39,9 +42,9 @@ func (f *fakeDeadlineDaysRepo) Get(context.Context, int) (*model.DeadlineDays, e
 	}
 	return f.before, nil
 }
-func (f *fakeDeadlineDaysRepo) Put(_ context.Context, auditID int, rows []model.DeadlineDaysRow, by string) (*model.DeadlineDays, error) {
-	f.put, f.putBy = rows, by
-	return &model.DeadlineDays{AuditID: auditID, Phase: "EVIDENCE", Days: rows}, nil
+func (f *fakeDeadlineDaysRepo) Put(_ context.Context, auditID int, rows []model.DeadlineDaysRow, by string, opts repository.DeadlineDaysOptions) (*model.DeadlineDays, error) {
+	f.put, f.putBy, f.opts = rows, by, opts
+	return &model.DeadlineDays{AuditID: auditID, Phase: "EVIDENCE", Days: rows, Recalculated: f.recalc, DryRun: opts.DryRun}, nil
 }
 
 type recordingTrail struct {
@@ -140,5 +143,40 @@ func TestDeadlineDaysUpdateStopsWhenAuditCannotBeRead(t *testing.T) {
 	}}, "admin")
 	if err == nil || repo.put != nil {
 		t.Fatal("an unreadable audit must not be written to")
+	}
+}
+
+func TestDeadlineDaysApplyToOpenStagesIsPassedOnAndRecorded(t *testing.T) {
+	repo := &fakeDeadlineDaysRepo{before: defaultsBefore(), recalc: &model.RecalcSummary{StagesUpdated: 12, NewlyOverdue: 3}}
+	trail := &recordingTrail{}
+	svc := NewDeadlineDaysService(repo, trail)
+	after, err := svc.Update(context.Background(), 7, model.UpdateDeadlineDaysRequest{
+		ApplyToOpenStages: true,
+		Days:              []model.DeadlineDaysRow{{CycleType: "INITIAL", HandledBy: "COMPLIANCE", AllowedDays: 15}},
+	}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.opts.ApplyToOpenStages || repo.opts.DryRun || after.Recalculated == nil || after.Recalculated.StagesUpdated != 12 {
+		t.Fatalf("opts=%+v after=%+v", repo.opts, after)
+	}
+	if trail.details["openStagesRecalculated"] != 12 || trail.details["newlyOverdue"] != 3 {
+		t.Fatalf("trail = %+v", trail.details)
+	}
+}
+
+func TestDeadlineDaysDryRunLeavesNoTrail(t *testing.T) {
+	repo := &fakeDeadlineDaysRepo{before: defaultsBefore(), recalc: &model.RecalcSummary{StagesUpdated: 2}}
+	trail := &recordingTrail{}
+	svc := NewDeadlineDaysService(repo, trail)
+	after, err := svc.Update(context.Background(), 7, model.UpdateDeadlineDaysRequest{
+		DryRun: true,
+		Days:   []model.DeadlineDaysRow{{CycleType: "INITIAL", HandledBy: "COMPLIANCE", AllowedDays: 15}},
+	}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.opts.DryRun || !after.DryRun || trail.calls != 0 {
+		t.Fatalf("opts=%+v after=%+v trail calls=%d", repo.opts, after, trail.calls)
 	}
 }

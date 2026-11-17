@@ -40,8 +40,14 @@ func (r *deadlineDaysRepo) Get(ctx context.Context, auditID int) (*model.Deadlin
 	return &out, nil
 }
 
-func (r *deadlineDaysRepo) Put(ctx context.Context, auditID int, rows []model.DeadlineDaysRow, updatedBy string) (*model.DeadlineDays, error) {
+func (r *deadlineDaysRepo) Put(ctx context.Context, auditID int, rows []model.DeadlineDaysRow, updatedBy string, opts repository.DeadlineDaysOptions) (*model.DeadlineDays, error) {
 	body := map[string]any{"days": rows, "updatedBy": updatedBy}
+	if opts.ApplyToOpenStages {
+		body["applyToOpenStages"] = true
+	}
+	if opts.DryRun {
+		body["dryRun"] = true
+	}
 	var out model.DeadlineDays
 	if err := r.c.Put(ctx, fmt.Sprintf("/audits/%d/deadline-days", auditID), body, &out); err != nil {
 		return nil, err

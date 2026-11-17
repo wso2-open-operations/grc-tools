@@ -48,10 +48,30 @@ type DeadlineDays struct {
 	AuditID int               `json:"auditId"`
 	Phase   string            `json:"phase"` // EVIDENCE; kept for older clients, rows carry their own phase
 	Days    []DeadlineDaysRow `json:"days"`
+	// Recalculated is set when the request asked to apply the change to the open
+	// stages (or to preview it); DryRun says nothing was saved.
+	Recalculated *RecalcSummary `json:"recalculated,omitempty"`
+	DryRun       bool           `json:"dryRun,omitempty"`
+}
+
+// RecalcSummary is what applying changed days to the open stages did.
+type RecalcSummary struct {
+	// StagesUpdated is the number of open stages (one per control) whose
+	// deadline moved to its start day plus the new days.
+	StagesUpdated int `json:"stagesUpdated"`
+	// NewlyOverdue is how many of those were within their deadline before and
+	// are past the new one.
+	NewlyOverdue int `json:"newlyOverdue"`
 }
 
 // UpdateDeadlineDaysRequest is the payload for PUT /api/v1/audits/{id}/settings/deadline-days.
 // Only the rows listed are changed.
 type UpdateDeadlineDaysRequest struct {
 	Days []DeadlineDaysRow `json:"days"`
+	// ApplyToOpenStages also moves the deadline of every open stage whose phase,
+	// cycle and group match a value that changed. Off, a change only affects
+	// hand-offs that happen afterwards.
+	ApplyToOpenStages bool `json:"applyToOpenStages,omitempty"`
+	// DryRun works out what ApplyToOpenStages would do and saves nothing.
+	DryRun bool `json:"dryRun,omitempty"`
 }
