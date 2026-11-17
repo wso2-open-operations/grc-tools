@@ -246,6 +246,9 @@ INSERT INTO `role` (role_name, description, module, scope_basis, assignable_user
   ('grc-platform-risk-management',
    'Management approval/rejection in the Risk Hub. Grant GLOBAL for org-wide, or scope to a register. Audit Hub has its own counterpart, grc-platform-audit-management.',
    'RISK', 'SOURCE_REGISTER', 'INTERNAL', 'ACTIVE'),
+  ('grc-platform-risk-viewer',
+   'View-only access to selected Risk Hub registers: registers list, risk detail, dashboard and analytics for the registers it is granted on. No create/edit/approve actions, no CSV export. Grant one register at a time; a GLOBAL grant shows every register.',
+   'RISK', 'SOURCE_REGISTER', 'INTERNAL', 'ACTIVE'),
   ('grc-platform-admin',
    'Platform administrator. Manages users, role grants, and the Admin Console reference-data screens (Risk Teams/Categories/Compliance References; Audit Hub equivalents pending). SHARED, so it can only be granted GLOBAL — see the bootstrap grant template at the end of this file.',
    'SHARED', NULL, 'INTERNAL', 'ACTIVE'),
@@ -439,6 +442,23 @@ JOIN   privilege p ON p.privilege_name IN (
   'RISK_VIEW_RISKS', 'RISK_VIEW_ALL_RISKS', 'RISK_VIEW_DASHBOARD', 'RISK_VIEW_ANALYTICS'
 ) AND p.status = 'ACTIVE'
 WHERE  r.role_name = 'grc-platform-risk-compliance-team'
+ON DUPLICATE KEY UPDATE is_active = TRUE;
+
+-- grc-platform-risk-viewer → Risk Hub: view-only, scoped to the registers it is
+-- granted on. Deliberately WITHOUT RISK_VIEW_ALL_RISKS, which the compliance
+-- team holds: that privilege also gates the CSV export and subscribes its
+-- holders to overdue-risk reminder emails (complianceOversight in
+-- reminder.go). With only the three privileges below, a register-scoped grant
+-- is team-scoped by seesEveryRisk (it needs RISK_VIEW_RISKS at GLOBAL scope),
+-- and the dashboard and analytics are limited to the granted registers by
+-- RegisterScopeIDsFor.
+INSERT INTO role_privilege (role_id, privilege_id, is_active)
+SELECT r.id, p.id, TRUE
+FROM   `role` r
+JOIN   privilege p ON p.privilege_name IN (
+  'RISK_VIEW_RISKS', 'RISK_VIEW_DASHBOARD', 'RISK_VIEW_ANALYTICS'
+) AND p.status = 'ACTIVE'
+WHERE  r.role_name = 'grc-platform-risk-viewer'
 ON DUPLICATE KEY UPDATE is_active = TRUE;
 
 -- grc-platform-risk-management → Risk Hub: management approval/rejection
