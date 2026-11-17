@@ -7,7 +7,7 @@ USE grc_platform;
 -- built-in defaults, so existing audits need no data change.
 CREATE TABLE IF NOT EXISTS audit_deadline_days (
   audit_id     INT                          NOT NULL,
-  phase        ENUM('EVIDENCE','POPULATION') NOT NULL DEFAULT 'EVIDENCE',
+  phase        ENUM('EVIDENCE','POPULATION','OE_EVIDENCE') NOT NULL DEFAULT 'EVIDENCE',
   cycle_type   ENUM('INITIAL','REVISION')    NOT NULL,
   handled_by   ENUM('OWNER','COMPLIANCE','AUDITOR') NOT NULL,
   allowed_days SMALLINT UNSIGNED             NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS audit_deadline_days (
 CREATE TABLE IF NOT EXISTS audit_control_stage (
   id                      BIGINT       NOT NULL AUTO_INCREMENT,
   control_id              INT          NOT NULL,
-  phase                   ENUM('EVIDENCE','POPULATION') NOT NULL DEFAULT 'EVIDENCE',
+  phase                   ENUM('EVIDENCE','POPULATION','OE_EVIDENCE') NOT NULL DEFAULT 'EVIDENCE',
   handled_by              ENUM('OWNER','COMPLIANCE','AUDITOR') NOT NULL,
   cycle_type              ENUM('INITIAL','REVISION') NOT NULL,
   started_at              DATETIME     NOT NULL,

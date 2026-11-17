@@ -504,12 +504,13 @@ CREATE TABLE IF NOT EXISTS audit_notification (
 -- An audit with no rows here uses the built-in defaults (INITIAL 30/10/10,
 -- REVISION 15/5/5 for OWNER/COMPLIANCE/AUDITOR), so existing audits need no
 -- data change. Editing a value only affects hand-offs that happen afterwards.
--- phase is EVIDENCE for DESIGN controls; POPULATION is reserved for OE controls.
+-- phase: EVIDENCE for DESIGN controls; POPULATION and OE_EVIDENCE for OE controls
+-- (OE evidence has its own days, so it is kept apart from Design evidence).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS audit_deadline_days (
   audit_id     INT                          NOT NULL,
-  phase        ENUM('EVIDENCE','POPULATION') NOT NULL DEFAULT 'EVIDENCE',
+  phase        ENUM('EVIDENCE','POPULATION','OE_EVIDENCE') NOT NULL DEFAULT 'EVIDENCE',
   cycle_type   ENUM('INITIAL','REVISION')    NOT NULL,
   handled_by   ENUM('OWNER','COMPLIANCE','AUDITOR') NOT NULL,
   allowed_days SMALLINT UNSIGNED             NOT NULL,
@@ -534,7 +535,7 @@ CREATE TABLE IF NOT EXISTS audit_deadline_days (
 CREATE TABLE IF NOT EXISTS audit_control_stage (
   id                      BIGINT       NOT NULL AUTO_INCREMENT,
   control_id              INT          NOT NULL,
-  phase                   ENUM('EVIDENCE','POPULATION') NOT NULL DEFAULT 'EVIDENCE',
+  phase                   ENUM('EVIDENCE','POPULATION','OE_EVIDENCE') NOT NULL DEFAULT 'EVIDENCE',
   handled_by              ENUM('OWNER','COMPLIANCE','AUDITOR') NOT NULL,
   cycle_type              ENUM('INITIAL','REVISION') NOT NULL,
   started_at              DATETIME     NOT NULL,
