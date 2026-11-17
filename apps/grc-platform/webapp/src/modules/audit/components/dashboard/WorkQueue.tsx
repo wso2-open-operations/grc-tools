@@ -596,14 +596,14 @@ export default function WorkQueue({
     // unlike Pending Submission/Under Validation, which are single stages.
     // Listed first: it's the broadest "what's still open" view.
     { value: QUEUE_TAB_ALL_PENDING, label: `All Pending (${totalAllPendingItems})`, tabKey: "all-pending", emptyText: "Nothing pending across any stage" },
-    { value: QUEUE_TAB_AWAITING, label: `${queueTitle} (${totalActionItems})`, tabKey: "action-items", emptyText: "No pending actions" },
-    { value: QUEUE_TAB_DUE_SOON, label: `Due Soon (${totalDueSoonItems})`, tabKey: "due-soon", emptyText: "Nothing due in the next 7 days" },
     { value: QUEUE_TAB_PENDING, label: `Pending Submission (${totalPendingItems})`, tabKey: "pending", emptyText: "Nothing pending submission or clarification" },
-    { value: QUEUE_TAB_VALIDATION, label: `Under Validation (${totalValidationItems})`, tabKey: "validation", emptyText: "Nothing under validation" },
     {
       value: QUEUE_TAB_OVERDUE, label: `Overdue (${totalOverdueControls})`, tabKey: "overdue", emptyText: "No overdue controls",
       sx: totalOverdueControls > 0 ? { color: "#E53935", "&.Mui-selected": { color: "#E53935" } } : undefined,
     },
+    { value: QUEUE_TAB_AWAITING, label: `${queueTitle} (${totalActionItems})`, tabKey: "action-items", emptyText: "No pending actions" },
+    { value: QUEUE_TAB_DUE_SOON, label: `Due Soon (${totalDueSoonItems})`, tabKey: "due-soon", emptyText: "Nothing due in the next 7 days" },
+    { value: QUEUE_TAB_VALIDATION, label: `Under Validation (${totalValidationItems})`, tabKey: "validation", emptyText: "Nothing under validation" },
     { value: QUEUE_TAB_COMPLETED, label: `Completed (${totalCompletedItems})`, tabKey: "completed", emptyText: "No completed controls yet" },
   ];
 
