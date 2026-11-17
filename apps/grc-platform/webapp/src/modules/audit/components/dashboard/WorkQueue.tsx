@@ -441,6 +441,7 @@ function TabPanel({ tab, canApprove, canSubmit, emptyText }: TabPanelProps): JSX
                   <TextColFilter label="Control No" value={controlInput} onChange={setControlInput} />
                 </Box>
               </TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Description</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>
                 <Box sx={{ display: "flex", alignItems: "center" }}>
                   Audit
@@ -502,6 +503,15 @@ function TabPanel({ tab, canApprove, canSubmit, emptyText }: TabPanelProps): JSX
                   }}
                 >
                   <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 600 }}>{item.controlNumber}</TableCell>
+                  <TableCell sx={{ minWidth: 220, maxWidth: 320 }}>
+                    <Typography
+                      variant="body2"
+                      title={item.description}
+                      sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+                    >
+                      {item.description || "—"}
+                    </Typography>
+                  </TableCell>
                   <TableCell sx={{ maxWidth: 180 }}>
                     <Typography variant="body2" noWrap title={item.auditName}>{item.auditName}</Typography>
                   </TableCell>
