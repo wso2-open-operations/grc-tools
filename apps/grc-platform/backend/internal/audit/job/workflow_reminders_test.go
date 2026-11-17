@@ -454,3 +454,62 @@ func TestUltimateReminderNeverReadsAsPopulation(t *testing.T) {
 		}
 	}
 }
+
+// With the owner unassigned the admins stand in for the reminder, but the lead
+// digest belongs to the real owner: no admin's lead is told about it.
+func TestUnassignedOwnerItemIsNotEscalatedToTheAdminsLeads(t *testing.T) {
+	var res wfResult
+	c := wfControl(5, 50) // the ultimate deadline is 5 days away: a lead-eligible mark
+	c.OwnerID = nil
+	j := newWorkflowJob(&res, &fakeClaimer{claimed: map[string]bool{}}, c)
+	if err := j.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.reminders[routeAdminA]) != 1 || len(res.reminders[routeAdminB]) != 1 {
+		t.Fatalf("the admins still get the reminder: %+v", res.reminders)
+	}
+	if len(res.ultimate) != 0 {
+		t.Fatalf("no lead digest for an item an admin only stands in for: %+v", res.ultimate)
+	}
+	for _, it := range res.reminders[routeAdminA] {
+		if it.ToLead {
+			t.Error("the item must not stay marked for a lead")
+		}
+	}
+}
+
+// Owner unassigned and the control with GRC, both deadlines overdue: both rows go
+// to the same admins with the same claim, so they travel as one.
+func TestOverdueRowsForTheSameAdminsAreFolded(t *testing.T) {
+	c := wfControl(-5, -2)
+	c.OwnerID = nil
+	c.Status, c.CurrentHandler = "EVIDENCE_INTERNAL_REVIEW", strPtr("COMPLIANCE")
+	rs := workflowReminders(c, colomboDay(wfNow), "SOC 2")
+	if len(rs) != 1 || len(rs[0].item.Extras) != 1 {
+		t.Fatalf("want one folded reminder, got %+v", rs)
+	}
+	main, extra := rs[0].item, rs[0].item.Extras[0]
+	if main.Kind != kindUltimate || extra.Kind != kindIndividual {
+		t.Errorf("rows = %s then %s", main.Kind, extra.Kind)
+	}
+	if extra.WaitingOn != waitingOnAdmins {
+		t.Errorf("the individual row says it waits on %q", extra.WaitingOn)
+	}
+}
+
+func TestFoldedAdminRowsBothReachEveryAdmin(t *testing.T) {
+	var res wfResult
+	c := wfControl(-5, -2)
+	c.OwnerID = nil
+	c.Status, c.CurrentHandler = "EVIDENCE_INTERNAL_REVIEW", strPtr("COMPLIANCE")
+	j := newWorkflowJob(&res, &fakeClaimer{claimed: map[string]bool{}}, c)
+	if err := j.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int{routeAdminA, routeAdminB} {
+		got := res.escalations[id]
+		if len(got) != 1 || len(got[0].Extras) != 1 {
+			t.Fatalf("admin %d should get one item carrying both rows, got %+v", id, got)
+		}
+	}
+}

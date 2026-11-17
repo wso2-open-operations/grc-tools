@@ -262,8 +262,16 @@ func workflowReminders(c *model.AuditControl, today time.Time, auditName string)
 	// Same person, same type and date: one claim, both rows.
 	if len(out) == 2 {
 		a, b := out[0], out[1]
-		if a.actorID != nil && b.actorID != nil && *a.actorID == *b.actorID &&
-			a.item.Type == b.item.Type && a.item.DedupSnapshot == b.item.DedupSnapshot {
+		sameType := a.item.Type == b.item.Type && a.item.DedupSnapshot == b.item.DedupSnapshot
+		samePerson := a.actorID != nil && b.actorID != nil && *a.actorID == *b.actorID
+		// With nobody assigned to either, both go to the admins with the same
+		// claim, and the second would be turned away as a duplicate, so they are
+		// folded too. Each row keeps saying who it is waiting on.
+		bothToAdmins := a.actorID == nil && b.actorID == nil
+		if sameType && (samePerson || bothToAdmins) {
+			if bothToAdmins {
+				markUnassigned(&b.item, b.waitsOn)
+			}
 			a.item.Extras = append(a.item.Extras, b.item)
 			return []workflowReminder{a}
 		}

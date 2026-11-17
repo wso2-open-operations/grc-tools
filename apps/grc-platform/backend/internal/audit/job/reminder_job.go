@@ -250,6 +250,15 @@ var unassignedNotes = map[actorKind]string{
 	actorAuditor: "No auditor assigned",
 }
 
+// markUnassigned says who an item with nobody to send it to is waiting on.
+func markUnassigned(item *model.ReminderItem, waitsOn actorKind) {
+	if waitsOn == actorAdmins {
+		item.WaitingOn = waitingOnAdmins
+		return
+	}
+	item.WaitingOn, item.UnassignedNote = waitingOnUnassigned, unassignedNotes[waitsOn]
+}
+
 // statusRoute is everything the sweep reads off a control's status: who it is
 // waiting on, which due date it is measured against, and its label. One table,
 // so the recipient and the date can never describe different phases.
@@ -549,10 +558,12 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 
 		// Nobody to remind: the admins are the reviewers, or stand in for a
 		// missing owner/auditor since only they can assign one.
-		if waitsOn == actorAdmins {
-			item.WaitingOn = waitingOnAdmins
-		} else {
-			item.WaitingOn, item.UnassignedNote = waitingOnUnassigned, unassignedNotes[waitsOn]
+		markUnassigned(&item, waitsOn)
+		// The admins stand in only for the reminder itself. A lead digest belongs
+		// to the control's real owner, never to an admin who happens to receive it.
+		item.ToLead = false
+		for i := range item.Extras {
+			item.Extras[i].ToLead = false
 		}
 		if overdue {
 			// Only the escalation digest, never both emails for one item.
