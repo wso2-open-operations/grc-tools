@@ -4760,6 +4760,21 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeadlineDaysRow'
+        recalculated:
+          $ref: '#/components/schemas/DeadlineRecalcSummary'
+        dryRun:
+          type: boolean
+          description: True when nothing was saved; the request only previewed the effect on open stages.
+    DeadlineRecalcSummary:
+      type: object
+      description: Present when the request asked to apply the change to open stages, or to preview it.
+      properties:
+        stagesUpdated:
+          type: integer
+          description: Open stages (one per control) whose deadline moved to its start day plus the new days.
+        newlyOverdue:
+          type: integer
+          description: Of those, how many were within their deadline before and are past the new one.
     UpdateDeadlineDaysRequest:
       type: object
       required: [days, updatedBy]
@@ -4768,6 +4783,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeadlineDaysRow'
+        applyToOpenStages:
+          type: boolean
+          default: false
+          description: Also move the deadline of every open stage whose phase, cycle and group match a value that changed. Off, a change only affects later hand-offs. The control's ultimate deadline and the planned Compliance and Auditor dates never move.
+        dryRun:
+          type: boolean
+          default: false
+          description: Work out what applyToOpenStages would do and save nothing.
         updatedBy:
           type: string
     PhasePlan:
