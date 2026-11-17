@@ -115,11 +115,20 @@ func markFor(days int, due, todayStr string, withTenDay bool) (workflowMark, boo
 }
 
 // isWorkflowControl is whether a control gets the workflow-aware reminders:
-// every open Design or OE control. An OE control's ultimate deadline is the
-// control's own due date, covering its population and evidence phases together.
+// every open Design control, and every open OE control that is being tracked.
+// An OE control's ultimate deadline is the control's own due date, covering its
+// population and evidence phases together. An OE control with no hand-offs
+// recorded yet (it predates tracking) keeps the existing reminders, which
+// measure its population against the population's own due date, until its next
+// hand-off starts tracking it.
 func isWorkflowControl(c *model.AuditControl) bool {
-	return c != nil && (strings.EqualFold(c.RequirementType, "DESIGN") || strings.EqualFold(c.RequirementType, "OE")) &&
-		c.Status != "COMPLETE"
+	if c == nil || c.Status == "COMPLETE" {
+		return false
+	}
+	if strings.EqualFold(c.RequirementType, "OE") {
+		return c.DeadlineTracked
+	}
+	return strings.EqualFold(c.RequirementType, "DESIGN")
 }
 
 // inPopulation is whether the control's current holder is in the OE population phase.
@@ -189,11 +198,13 @@ func workflowReminders(c *model.AuditControl, today time.Time, auditName string)
 	}
 	todayStr := today.Format("2006-01-02")
 
-	requirement := "Evidence Requirement"
+	// The ultimate deadline is the whole control's, so it never reads as a
+	// population item; the individual one names the phase its holder is in.
+	individualRequirement := "Evidence Requirement"
 	if inPopulation(c) {
-		requirement = "Population Requirement"
+		individualRequirement = "Population Requirement"
 	}
-	base := func(due string, m workflowMark, kind, label string) model.ReminderItem {
+	base := func(due string, m workflowMark, kind, label, requirement string) model.ReminderItem {
 		return model.ReminderItem{
 			AuditID:         c.AuditID,
 			ControlID:       &c.ID,
@@ -219,7 +230,7 @@ func workflowReminders(c *model.AuditControl, today time.Time, auditName string)
 		if days, ok := daysUntil(*c.DueDate, today); ok {
 			due := dayPrefix(*c.DueDate)
 			if m, ok := markFor(days, due, todayStr, true); ok {
-				item := base(due, m, kindUltimate, "Ultimate deadline")
+				item := base(due, m, kindUltimate, "Ultimate deadline", "Evidence Requirement")
 				item.CurrentlyWith = currentlyWith(route.waitsOn)
 				item.ToLead = days <= 5
 				id := c.OwnerID
@@ -237,7 +248,7 @@ func workflowReminders(c *model.AuditControl, today time.Time, auditName string)
 			due := dayPrefix(*c.CurrentDueDate)
 			if days, ok := daysUntil(due, today); ok {
 				if m, ok := markFor(days, due, todayStr, false); ok {
-					item := base(due, m, kindIndividual, "Your deadline")
+					item := base(due, m, kindIndividual, "Your deadline", individualRequirement)
 					id := holderID(c, kind)
 					if id != nil {
 						item.WaitingOnUserID = *id

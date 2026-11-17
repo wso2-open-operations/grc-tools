@@ -421,3 +421,36 @@ func TestWorkflowOverdueUnassignedItemStillReachesTheAdmins(t *testing.T) {
 		t.Fatalf("admins = %+v", res.escalations)
 	}
 }
+
+// An OE control that predates tracking keeps the existing reminders, which use the
+// population's own due date, until its next hand-off starts tracking it.
+func TestUntrackedOEControlKeepsTheExistingReminders(t *testing.T) {
+	c := wfControl(5, 1)
+	c.RequirementType, c.Status = "OE", "POPULATION_PENDING"
+	c.DeadlineTracked, c.CurrentHandler, c.CurrentDueDate = false, nil, nil
+	if isWorkflowControl(c) {
+		t.Fatal("an untracked OE control is not a workflow control")
+	}
+	c.DeadlineTracked = true
+	if !isWorkflowControl(c) {
+		t.Fatal("a tracked OE control is")
+	}
+	d := wfControl(5, 1)
+	d.DeadlineTracked = false
+	if !isWorkflowControl(d) {
+		t.Fatal("an untracked Design control still gets the ultimate reminder")
+	}
+}
+
+// The ultimate reminder is about the whole control, so even in the population
+// phase it is not labelled a population item.
+func TestUltimateReminderNeverReadsAsPopulation(t *testing.T) {
+	c := wfControl(5, 1)
+	c.RequirementType, c.Status = "OE", "POPULATION_PENDING"
+	c.CurrentPhase, c.PopulationOwnerID = strPtr("POPULATION"), intPtr(555)
+	for _, r := range workflowReminders(c, colomboDay(wfNow), "SOC 2") {
+		if r.item.Kind == kindUltimate && r.item.RequirementType != "Evidence Requirement" {
+			t.Errorf("ultimate item labelled %q", r.item.RequirementType)
+		}
+	}
+}
