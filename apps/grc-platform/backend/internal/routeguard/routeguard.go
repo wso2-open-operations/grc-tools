@@ -74,6 +74,12 @@ var externalVisible = map[string]bool{
 	// AUDIT_VIEW_INTERNAL_COMMENTS in the handler, which the auditor lacks.
 	"GET /api/v1/audits/{id}/trail": false,
 
+	// Allowed days per group are internal settings. An external auditor still
+	// sees their own current deadline on the control itself (a field of
+	// GET /audits/{id}/controls above), just not how every group is configured.
+	"GET /api/v1/audits/{id}/settings/deadline-days": false,
+	"PUT /api/v1/audits/{id}/settings/deadline-days": false,
+
 	// ── Audit Hub: controls ──────────────────────────────────────────────────
 	"GET /api/v1/audits/{id}/controls": true,
 	// Compliance Admin / Compliance Team only (AUDIT_REVIEW_EVIDENCE); an

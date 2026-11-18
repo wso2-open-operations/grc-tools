@@ -55,6 +55,7 @@ func buildAuditDeps(fileSvc *file.Service, ec *entityclient.Client, aiCfg config
 	teamRepo := auditentity.NewTeamRepository(ec)
 	commentRepo := auditentity.NewCommentRepository(ec)
 	controlRepo := auditentity.NewControlRepository(ec)
+	deadlineDaysRepo := auditentity.NewDeadlineDaysRepository(ec)
 	evidenceRepo := auditentity.NewEvidenceRepository(ec)
 	populationRepo := auditentity.NewPopulationRepository(ec)
 	trailRepo := auditentity.NewTrailRepository(ec)
@@ -68,6 +69,7 @@ func buildAuditDeps(fileSvc *file.Service, ec *entityclient.Client, aiCfg config
 	trailSvc := auditservice.NewTrailService(trailRepo)
 	auditSvc := auditservice.NewAuditService(auditRepo, frameworkRepo, productRepo, trailSvc)
 	controlSvc := auditservice.NewControlService(controlRepo, populationRepo, trailSvc, dirSvc)
+	deadlineDaysSvc := auditservice.NewDeadlineDaysService(deadlineDaysRepo, trailSvc)
 	frameworkSvc := auditservice.NewFrameworkService(frameworkRepo, productRepo, frameworkControlRepo)
 	userSvc := auditservice.NewUserService(userRepo)
 	teamSvc := auditservice.NewTeamService(teamRepo)
@@ -98,6 +100,7 @@ func buildAuditDeps(fileSvc *file.Service, ec *entityclient.Client, aiCfg config
 	return audithandler.Deps{
 		Audit:           auditSvc,
 		Control:         controlSvc,
+		DeadlineDays:    deadlineDaysSvc,
 		Framework:       frameworkSvc,
 		User:            userSvc,
 		Team:            teamSvc,

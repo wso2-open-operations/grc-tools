@@ -603,6 +603,61 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/audits/{id}/settings/deadline-days:
+    get:
+      tags:
+      - Audit Controls
+      summary: Get an audit's allowed days
+      description: How many calendar days each group (OWNER, COMPLIANCE, AUDITOR) may hold a DESIGN control before passing it on, per cycle (INITIAL or REVISION). Always lists all six combinations; isDefault is true where no saved value overrides the default. Requires the manage-controls privilege.
+      operationId: getAuditDeadlineDays
+      parameters:
+      - $ref: '#/components/parameters/AuditId'
+      responses:
+        '200':
+          description: The audit's allowed days
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDays'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      tags:
+      - Audit Controls
+      summary: Edit an audit's allowed days
+      description: Requires the manage-controls privilege. Changes the listed rows (allowedDays 1 to 365). Only hand-offs that happen afterwards use the new values; deadlines already given never move. Each change is recorded in the audit trail.
+      operationId: updateAuditDeadlineDays
+      parameters:
+      - $ref: '#/components/parameters/AuditId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeadlineDaysRequest'
+      responses:
+        '200':
+          description: The audit's allowed days after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadlineDays'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /api/v1/audits/{id}/controls:
     get:
       tags:
@@ -5223,6 +5278,7 @@ components:
       - requirementType
       - controlType
       - scope
+      - dueDate
       properties:
         controlSource:
           type: string
@@ -5265,7 +5321,7 @@ components:
         dueDate:
           type: string
           format: date
-          nullable: true
+          description: The control's ultimate deadline, the final date for it to be completed. Required, including for every row of a bulk add.
         population:
           nullable: true
           anyOf:
@@ -5354,6 +5410,101 @@ components:
       properties:
         status:
           type: string
+    PhasePlan:
+      type: object
+      description: The original plan for one phase of a control. A phase appears once it has started; an OE control has POPULATION, then OE_EVIDENCE.
+      properties:
+        phase:
+          type: string
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
+        plannedOwnerDate:
+          type: string
+          format: date
+          nullable: true
+        plannedComplianceDate:
+          type: string
+          format: date
+          nullable: true
+        plannedAuditorDate:
+          type: string
+          format: date
+          nullable: true
+    DelayLogEntry:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
+        handledBy:
+          type: string
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+        date:
+          type: string
+          format: date
+    DeadlineDaysRow:
+      type: object
+      description: One allowed-days setting. A row sent without a phase means EVIDENCE (Design).
+      properties:
+        phase:
+          type: string
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
+          description: EVIDENCE is Design evidence; POPULATION and OE_EVIDENCE are the two OE phases.
+        cycleType:
+          type: string
+          enum: [INITIAL, REVISION]
+        handledBy:
+          type: string
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+        allowedDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        isDefault:
+          type: boolean
+    DeadlineDays:
+      type: object
+      properties:
+        auditId:
+          type: integer
+        phase:
+          type: string
+          enum: [EVIDENCE]
+          description: Always EVIDENCE. Every row carries its own phase, and the list now covers all three phases, so clients must read the row's phase rather than this field.
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineDaysRow'
+        recalculated:
+          $ref: '#/components/schemas/DeadlineRecalcSummary'
+        dryRun:
+          type: boolean
+          description: True when nothing was saved; the request only previewed the effect on open stages.
+    DeadlineRecalcSummary:
+      type: object
+      description: Present when the request asked to apply the change to open stages, or to preview it.
+      properties:
+        stagesUpdated:
+          type: integer
+          description: Open stages (one per control) whose deadline moved to its start day plus the new days.
+        newlyOverdue:
+          type: integer
+          description: Of those, how many were within their deadline before and are past the new one.
+    UpdateDeadlineDaysRequest:
+      type: object
+      required: [days]
+      properties:
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeadlineDaysRow'
+        applyToOpenStages:
+          type: boolean
+          default: false
+          description: Also move the deadline of every open stage whose phase, cycle and group match a value that changed. Off, a change only affects later hand-offs. The control's ultimate deadline and the planned Compliance and Auditor dates never move. Late days are worked out from stage deadlines, so extending a deadline can remove lateness that had already built up on that stage (and shortening one can add it); the delay log and delayed follow the new deadline.
+        dryRun:
+          type: boolean
+          default: false
+          description: Work out what applyToOpenStages would do and save nothing.
     AuditControl:
       type: object
       description: A control under evaluation within an audit. Owns its full definition text directly (never FK-linked to the framework catalog).
@@ -5362,6 +5513,54 @@ components:
           type: integer
         auditId:
           type: integer
+        deadlineTracked:
+          type: boolean
+          description: False for a control with no recorded hand-offs (one that predates the feature); the deadline fields below are then empty and dueDate is the only date.
+        currentHandler:
+          type: string
+          nullable: true
+          enum: [OWNER, COMPLIANCE, AUDITOR]
+          description: The group holding the control now; null once it is complete.
+        currentDueDate:
+          type: string
+          format: date
+          nullable: true
+          description: The current holder's deadline.
+        plannedOwnerDate:
+          type: string
+          format: date
+          nullable: true
+        plannedComplianceDate:
+          type: string
+          format: date
+          nullable: true
+        plannedAuditorDate:
+          type: string
+          format: date
+          nullable: true
+        currentPhase:
+          type: string
+          nullable: true
+          enum: [EVIDENCE, POPULATION, OE_EVIDENCE]
+          description: The phase of the current holder's stage.
+        phasePlans:
+          type: array
+          description: The plan of every phase the control has started. The three planned dates above are those of the first phase.
+          items:
+            $ref: '#/components/schemas/PhasePlan'
+        delayed:
+          type: boolean
+          nullable: true
+          description: True when any group held the control past its own deadline, i.e. the delay log has at least one entry. It stays true afterwards. The one exception is that applying changed days to open stages (applyToOpenStages) moves their deadlines, and late days are worked out from the deadlines, so an extension can clear lateness that no longer holds.
+        ultimateDelayed:
+          type: boolean
+          nullable: true
+          description: True when the control finished after, or is still open past, its dueDate (the ultimate deadline). Null when it cannot be known, such as a control completed before tracking started.
+        delayLog:
+          type: array
+          description: One entry per late day per group. Only returned to org-wide GRC viewers; omitted for everyone else.
+          items:
+            $ref: '#/components/schemas/DelayLogEntry'
         ownerId:
           type: integer
           nullable: true

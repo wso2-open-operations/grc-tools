@@ -48,8 +48,10 @@ const (
 // picker is a per-browser preference the server never sees.
 var controlExportHeader = []string{
 	"Control No.", "Description", "Evidence Requirement", "Req. Type", "Control Type",
-	"Status", "Overdue", "Scope", "Team", "Process Owner", "Auditor POC", "Due Date",
+	"Status", "Overdue", "Scope", "Team", "Process Owner", "Auditor POC", "Ultimate Deadline",
 	"Population Due Date", "Population Owner", "Population Team",
+	"Current Holder", "Current Deadline", "Planned Owner Date", "Planned Compliance Date", "Planned Auditor Date",
+	"Delayed", "Ultimate Status", "Delay Log",
 }
 
 // controlExportParams is what the audit detail page is currently showing:
@@ -210,7 +212,38 @@ func controlExportRecord(c *model.AuditControl) []string {
 		csvexport.Date(csvexport.Deref(c.PopulationDueDate)),
 		csvexport.SafeCell(csvexport.Deref(c.PopulationOwnerName)),
 		csvexport.SafeCell(csvexport.Deref(c.PopulationTeamName)),
+		csvexport.SafeCell(handlerLabels[csvexport.Deref(c.CurrentHandler)]),
+		csvexport.Date(csvexport.Deref(c.CurrentDueDate)),
+		csvexport.Date(csvexport.Deref(c.PlannedOwnerDate)),
+		csvexport.Date(csvexport.Deref(c.PlannedComplianceDate)),
+		csvexport.Date(csvexport.Deref(c.PlannedAuditorDate)),
+		delayedCell(c),
+		ultimateStatusCell(c),
+		csvexport.SafeCell(delayLogText(c.DelayLog)),
 	}
+}
+
+// delayedCell is blank for a control with no hand-offs tracked, so an untracked
+// control is never reported as "No".
+func delayedCell(c *model.AuditControl) string {
+	switch {
+	case c.Delayed == nil:
+		return ""
+	case *c.Delayed:
+		return "Yes"
+	}
+	return "No"
+}
+
+// ultimateStatusCell is blank when it cannot be known (see AuditControl.UltimateDelayed).
+func ultimateStatusCell(c *model.AuditControl) string {
+	switch {
+	case c.UltimateDelayed == nil:
+		return ""
+	case *c.UltimateDelayed:
+		return "Delayed"
+	}
+	return "On track"
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
@@ -289,6 +322,9 @@ func (h *controlHandler) exportControls(w http.ResponseWriter, r *http.Request) 
 		response.MapServiceError(ctx, w, err, response.ErrMsgInternal)
 		return
 	}
+	// The delay log names which group was late, so it leaves the file only for
+	// org-wide readers, exactly as on the page and in the API.
+	redactDelayLog(controls, canSeeDelayLog(ctx))
 	controls = filterControls(controls, params)
 	if len(controls) > controlExportMaxRows {
 		response.WriteError(w, http.StatusUnprocessableEntity,

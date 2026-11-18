@@ -50,6 +50,9 @@ type Config struct {
 	// AuditReminderDailyEnabled makes the audit statuses waiting on the
 	// compliance team or the auditor remind every day. See AuditReminderDailyDefault.
 	AuditReminderDailyEnabled bool
+	// AuditWorkflowRemindersEnabled switches Design controls to the ultimate and
+	// individual deadline reminders.
+	AuditWorkflowRemindersEnabled bool
 	// SchedulerEnabled turns the background scheduler (internal/scheduler) on
 	// or off. It is the single switch for every daily sweep at once — today
 	// the overdue-risk escalation and the audit due-date reminder digest. See
@@ -178,6 +181,25 @@ const AuditReminderCCDefault = false
 // sample, submitted sample). Off by default for the same reason as above.
 // AUDIT_REMINDER_DAILY_ENABLED overrides it with exactly "true" or "false".
 const AuditReminderDailyDefault = false
+
+// AuditWorkflowRemindersDefault is the built-in setting for the workflow-aware
+// reminders of Design controls (ultimate and individual deadlines). Off by
+// default, so every environment keeps the existing reminders until it opts in.
+// AUDIT_WORKFLOW_REMINDERS_ENABLED overrides it with exactly "true" or "false".
+const AuditWorkflowRemindersDefault = false
+
+// auditWorkflowRemindersEnabled resolves the override against the default above,
+// the same way.
+func auditWorkflowRemindersEnabled() bool {
+	switch os.Getenv("AUDIT_WORKFLOW_REMINDERS_ENABLED") {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return AuditWorkflowRemindersDefault
+	}
+}
 
 // auditReminderCCEnabled resolves the override against the default above. Any
 // other value — including unset — leaves the default alone, so a typo can
@@ -612,12 +634,13 @@ func Load() (Config, error) {
 			TokenURL:         emailTokenURL,
 			Enabled:          emailEnabled,
 		},
-		LeadEscalationEmailsEnabled: leadEscalationEmailsEnabled(),
-		AuditReminderCCEnabled:      auditReminderCCEnabled(),
-		AuditReminderDailyEnabled:   auditReminderDailyEnabled(),
-		SchedulerEnabled:            schedulerEnabled(),
-		Portal:                      PortalConfig{Audience: portalAudience, Clients: portalClients},
-		UserGuideURL:                os.Getenv("GRC_USER_GUIDE_URL"),
+		LeadEscalationEmailsEnabled:   leadEscalationEmailsEnabled(),
+		AuditReminderCCEnabled:        auditReminderCCEnabled(),
+		AuditReminderDailyEnabled:     auditReminderDailyEnabled(),
+		AuditWorkflowRemindersEnabled: auditWorkflowRemindersEnabled(),
+		SchedulerEnabled:              schedulerEnabled(),
+		Portal:                        PortalConfig{Audience: portalAudience, Clients: portalClients},
+		UserGuideURL:                  os.Getenv("GRC_USER_GUIDE_URL"),
 	}, nil
 }
 

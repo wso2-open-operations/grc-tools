@@ -32,7 +32,7 @@ func TestEveryAuditEventHasATemplate(t *testing.T) {
 	all := []AuditEvent{
 		AuditEventOwnerAssigned, AuditEventAuditorAssigned, AuditEventReminderDue10,
 		AuditEventReminderDue5, AuditEventReminderOverdue, AuditEventReminderOverdueAdmin,
-		AuditEventReminderOverdueLead, AuditEventResubmissionNeeded,
+		AuditEventReminderOverdueLead, AuditEventReminderDue1, AuditEventReminderUltimateLead, AuditEventResubmissionNeeded,
 		AuditEventSampleSubmitted, AuditEventEvidenceInternalReview, AuditEventPopulationInternalReview,
 		AuditEventEvidenceUnderValidation, AuditEventPopulationUnderValidation,
 		AuditEventPopulationCompleteSampleNeeded, AuditEventControlComplete, AuditEventCommentAdded,

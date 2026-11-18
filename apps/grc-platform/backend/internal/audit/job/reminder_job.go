@@ -92,6 +92,13 @@ type ReminderJob struct {
 	// daily turns on the every-day reminder for dailyStatuses and the
 	// dailyRouteOverrides. Off, the sweep only reminds on the 10/5/0/overdue marks.
 	daily bool
+	// workflow switches Design controls to the ultimate and individual deadline
+	// reminders (see workflow_reminders.go). notifyUltimateLead sends one owner's
+	// lead the ultimate-deadline rows; nil leaves the lead out of it.
+	workflow           bool
+	notifyUltimateLead func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error
+	// now is the clock; nil means time.Now. Tests set it.
+	now func() time.Time
 	// running serializes runOnce against itself: Start's daily ticker and the
 	// manual-trigger endpoint (handler.reminderJobHandler.run) both end up
 	// calling runOnce on this same instance. This guards a same-process
@@ -168,6 +175,26 @@ func (j *ReminderJob) WithDailyReminders() *ReminderJob {
 	return j
 }
 
+// WithWorkflowReminders switches Design controls to the workflow-aware
+// reminders: the ultimate deadline to the owner and lead, the individual
+// deadline to whoever holds the control. OE controls keep the existing
+// reminders. notifyLead sends an owner's lead the ultimate-deadline rows and
+// only takes effect when WithLeadAlerts has wired the lead lookup.
+func (j *ReminderJob) WithWorkflowReminders(
+	notifyLead func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error,
+) *ReminderJob {
+	j.workflow = true
+	j.notifyUltimateLead = notifyLead
+	return j
+}
+
+func (j *ReminderJob) clock() time.Time {
+	if j.now != nil {
+		return j.now()
+	}
+	return time.Now()
+}
+
 // overdueOnly returns the entries of a digest that escalate to a lead: overdue
 // and still waiting on an owner's submission.
 func overdueOnly(items []model.ReminderItem) []model.ReminderItem {
@@ -221,6 +248,15 @@ const (
 var unassignedNotes = map[actorKind]string{
 	actorOwner:   "No owner assigned",
 	actorAuditor: "No auditor assigned",
+}
+
+// markUnassigned says who an item with nobody to send it to is waiting on.
+func markUnassigned(item *model.ReminderItem, waitsOn actorKind) {
+	if waitsOn == actorAdmins {
+		item.WaitingOn = waitingOnAdmins
+		return
+	}
+	item.WaitingOn, item.UnassignedNote = waitingOnUnassigned, unassignedNotes[waitsOn]
 }
 
 // statusRoute is everything the sweep reads off a control's status: who it is
@@ -417,8 +453,10 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		return fmt.Errorf("list controls: %w", err)
 	}
 
-	today := time.Now().UTC()
+	now := j.clock()
+	today := now.UTC()
 	todayStr := today.Format("2006-01-02")
+	colomboToday := colomboDay(now)
 	byRecipient := map[int][]model.ReminderItem{}
 	byAdmin := map[adminAuditKey][]model.ReminderItem{}
 	queued, skippedDup, skippedErr := 0, 0, 0
@@ -499,8 +537,52 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		}
 	}
 
+	// dispatch routes one reminder item to whoever it waits on: the assignee, or
+	// the admins when nobody is assigned (or they are the reviewers). Both the
+	// existing reminders and the workflow-aware ones go through it.
+	dispatch := func(item model.ReminderItem, waitsOn actorKind, actorID *int, overdue bool, controlID, populationID *int) {
+		if actorID != nil {
+			item.WaitingOnUserID = *actorID
+			// The workflow reminders tell the lead through ToLead instead.
+			item.EscalatesToLead = item.Kind == "" && waitsOn == actorOwner
+			queue(*actorID, item, controlID, populationID)
+			// With a CC on the assignee's email the admins already hear about
+			// this item, so the separate digest would only repeat it.
+			// A workflow reminder goes only to the assignee (and the lead), as
+			// specified, so it is not also escalated to the admins.
+			if overdue && !ccActive && item.Kind == "" {
+				queueAdmins(item, controlID, populationID)
+			}
+			return
+		}
+
+		// Nobody to remind: the admins are the reviewers, or stand in for a
+		// missing owner/auditor since only they can assign one.
+		markUnassigned(&item, waitsOn)
+		// The admins stand in only for the reminder itself. A lead digest belongs
+		// to the control's real owner, never to an admin who happens to receive it.
+		item.ToLead = false
+		for i := range item.Extras {
+			item.Extras[i].ToLead = false
+		}
+		if overdue {
+			// Only the escalation digest, never both emails for one item.
+			queueAdmins(item, controlID, populationID)
+			return
+		}
+		for _, adminID := range adminIDs {
+			queue(adminID, item, controlID, populationID)
+		}
+	}
+
 	for _, c := range controls {
 		if c == nil || !activeAuditIDs[c.AuditID] {
+			continue
+		}
+		if j.workflow && isWorkflowControl(c) {
+			for _, wr := range workflowReminders(c, colomboToday, auditNames[c.AuditID]) {
+				dispatch(wr.item, wr.waitsOn, wr.actorID, wr.overdue, &c.ID, nil)
+			}
 			continue
 		}
 		route, ok := statusRoutes[c.Status]
@@ -567,43 +649,17 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 			Status:          route.label,
 		}
 
-		if actorID != nil {
-			item.WaitingOnUserID = *actorID
-			item.EscalatesToLead = route.waitsOn == actorOwner
-			queue(*actorID, item, controlID, populationID)
-			// With a CC on the assignee's email the admins already hear about
-			// this item, so the separate digest would only repeat it.
-			if overdue && !ccActive {
-				queueAdmins(item, controlID, populationID)
-			}
-			continue
-		}
-
-		// Nobody to remind: the admins are the reviewers, or stand in for a
-		// missing owner/auditor since only they can assign one.
-		if route.waitsOn == actorAdmins {
-			item.WaitingOn = waitingOnAdmins
-		} else {
-			item.WaitingOn, item.UnassignedNote = waitingOnUnassigned, unassignedNotes[route.waitsOn]
-		}
-		if overdue {
-			// Only the escalation digest, never both emails for one item.
-			queueAdmins(item, controlID, populationID)
-			continue
-		}
-		for _, adminID := range adminIDs {
-			queue(adminID, item, controlID, populationID)
-		}
+		dispatch(item, route.waitsOn, actorID, overdue, controlID, populationID)
 	}
 
 	// Lead recipients, resolved once per sweep and only for owners who
 	// actually have overdue items. Stays nil when the escalation is disabled,
 	// and a nil map reads as "no lead" for every owner below.
 	var ownerLeads map[int]string
-	if j.leads != nil && j.notifyLead != nil {
+	if j.leads != nil && (j.notifyLead != nil || j.notifyUltimateLead != nil) {
 		overdueOwners := make([]int, 0, len(byRecipient))
 		for recipientID, items := range byRecipient {
-			if hasOverdue(items) {
+			if (j.notifyLead != nil && hasOverdue(items)) || (j.notifyUltimateLead != nil && hasLeadItems(items)) {
 				overdueOwners = append(overdueOwners, recipientID)
 			}
 		}
@@ -650,7 +706,23 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		// doing so would re-send the owner's own digest tomorrow for an item
 		// they were already told about.
 		if leadEmail := ownerLeads[recipientID]; leadEmail != "" {
-			if overdue := overdueOnly(items); len(overdue) > 0 {
+			// The ultimate-deadline rows (5 days before and later) of a Design
+			// control reach the lead as one digest, whatever their tier.
+			if j.notifyUltimateLead != nil {
+				if lead := leadItems(items); len(lead) > 0 {
+					var leadCC []string
+					if ccActive {
+						leadCC = cc
+					}
+					if err := j.notifyUltimateLead(ctx, recipientID, leadEmail, lead, leadCC); err != nil {
+						slog.Warn("reminder job: ultimate lead digest failed", "recipientId", recipientID, "items", len(lead), "err", err)
+						leadFailed++
+					} else {
+						leadSent++
+					}
+				}
+			}
+			if overdue := overdueOnly(items); j.notifyLead != nil && len(overdue) > 0 {
 				var err error
 				if ccActive {
 					err = j.notifyLeadCC(ctx, recipientID, leadEmail, overdue, cc)

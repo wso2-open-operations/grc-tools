@@ -263,6 +263,11 @@ func (s *controlService) BulkAdd(ctx context.Context, auditID int, reqs []model.
 		if err := validateAddRequest(req); err != nil {
 			return nil, err
 		}
+		// Only the single add lets a Design control fall back to the audit's
+		// Owner initial days; every row of a bulk add carries its own date.
+		if req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "" {
+			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "dueDate is required"}
+		}
 	}
 	index, err := s.sanitizedControlNumbers(ctx, auditID)
 	if err != nil {
@@ -564,7 +569,8 @@ func validateAddRequest(req model.AddControlRequest) error {
 	if req.EvidenceRequirement == nil || strings.TrimSpace(*req.EvidenceRequirement) == "" {
 		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "evidenceRequirement is required"}
 	}
-	if req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "" {
+	// The due date is the ultimate deadline and is required for every control.
+	if (req.DueDate == nil || strings.TrimSpace(*req.DueDate) == "") {
 		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "dueDate is required"}
 	}
 	if req.RequirementType != "DESIGN" && req.RequirementType != "OE" {

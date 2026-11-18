@@ -211,7 +211,7 @@ func TestExportControls_CSV(t *testing.T) {
 	}
 	// Display labels, a date, and the name columns come through as the table shows them.
 	first := strings.Join(rows[1], "|")
-	if first != "CA-01|Access is reviewed||Design|Non-Config|Complete|No|Common|Platform|Owen Owner|Ada Auditor|2026-11-05|||" {
+	if first != "CA-01|Access is reviewed||Design|Non-Config|Complete|No|Common|Platform|Owen Owner|Ada Auditor|2026-11-05|||||||||||" {
 		t.Errorf("first row = %q", first)
 	}
 	if rows[2][1] != "'=cmd|' /C calc'!A0" {
@@ -269,6 +269,31 @@ func TestExportControls_IsScopedToTheCaller(t *testing.T) {
 	}
 	if svc.scope != model.ScopeOwned || svc.userID != 7 {
 		t.Errorf("listed with scope %v / user %d, want owned / 7", svc.scope, svc.userID)
+	}
+}
+
+// The delay log names which group was late: org-wide readers get it in the file,
+// a caller listed under a narrower scope does not.
+func TestExportControls_DelayLogOnlyForOrgWideReaders(t *testing.T) {
+	logged := func() []*model.AuditControl {
+		controls := sampleControls()
+		controls[1].DelayLog = []model.DelayLogEntry{{HandledBy: "OWNER", Date: "2026-11-08"}}
+		return controls
+	}
+	delayCell := func(rec *httptest.ResponseRecorder) string {
+		rows := exportRows(t, rec)
+		return rows[2][len(rows[2])-1]
+	}
+
+	h, _, _ := newExportHandler(logged(), true)
+	if got := delayCell(exportAs(t, h, 1, viewAll, "")); got != "Owner - 11/08" {
+		t.Errorf("org-wide reader's delay log cell = %q", got)
+	}
+
+	h, _, _ = newExportHandler(logged(), true)
+	team := map[string]bool{privilege.ViewAudits: true, privilege.ReviewEvidence: true, privilege.SubmitEvidence: true}
+	if got := delayCell(exportAs(t, h, 7, team, "")); got != "" {
+		t.Errorf("a narrower-scope caller must not get the delay log, got %q", got)
 	}
 }
 

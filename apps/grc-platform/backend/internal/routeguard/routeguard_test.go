@@ -105,6 +105,23 @@ func TestDuplicateRegistration(t *testing.T) {
 	}
 }
 
+// TestRoutesRegisterOnRealMux registers the whole route set into a real
+// ServeMux. The recorder accepts any pattern, but the mux panics at startup
+// when two patterns can match the same path and neither is more specific
+// (e.g. PUT /audits/{id}/x against PUT /audits/teams/{id}), so this is the
+// only place such a clash shows up before the server is started.
+func TestRoutesRegisterOnRealMux(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("the real mux rejects the route set: %v", r)
+		}
+	}()
+	mux := http.NewServeMux()
+	for _, p := range registeredPatterns(t) {
+		mux.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
+	}
+}
+
 // TestExternalVisibleUnknownPatternDenies pins the default. The mux returns ""
 // for an unmatched path and a method mismatch; neither is permission.
 func TestExternalVisibleUnknownPatternDenies(t *testing.T) {

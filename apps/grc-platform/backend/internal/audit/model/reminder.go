@@ -86,4 +86,22 @@ type ReminderItem struct {
 	// existing audit_notification type for the send log, so the digest reads
 	// this flag, not Type, to choose its wording.
 	Daily bool
+	// Kind is set for the workflow-aware reminders of a Design control:
+	// "ULTIMATE" (the control's final due date) or "INDIVIDUAL" (the current
+	// holder's own deadline). Empty for every other reminder.
+	Kind string
+	// OneDayBefore marks the "due tomorrow" reminder. It is logged under the
+	// REMINDER_DUE_TODAY type with today's date (the same device Daily uses),
+	// so the subject and wording read this flag, not Type.
+	OneDayBefore bool
+	// ToLead is true for an ultimate-deadline row the owner's lead also hears
+	// about (5 days before and later).
+	ToLead bool
+	// CurrentlyWith names the group holding the control now, shown on an
+	// ultimate row so a reader can see where it is stuck.
+	CurrentlyWith string
+	// Extras are further rows folded into this one because they share its
+	// recipient, type and date (an ultimate and an individual deadline on the
+	// same day). Only this item holds a claim; the sender expands the extras.
+	Extras []ReminderItem
 }

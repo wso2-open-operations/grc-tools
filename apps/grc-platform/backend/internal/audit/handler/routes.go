@@ -37,6 +37,7 @@ import (
 type Deps struct {
 	Audit        auditservice.AuditService
 	Control      auditservice.ControlService
+	DeadlineDays auditservice.DeadlineDaysService
 	Framework    auditservice.FrameworkService
 	User         auditservice.UserService
 	Team         auditservice.TeamService
@@ -96,6 +97,7 @@ type Deps struct {
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	ah := &auditHandler{svc: deps.Audit}
 	ch := &controlHandler{svc: deps.Control, auditSvc: deps.Audit, trail: deps.Trail, notify: &deps}
+	ddh := &deadlineDaysHandler{svc: deps.DeadlineDays}
 	tlh := &trailHandler{svc: deps.Trail, controlSvc: deps.Control, auditSvc: deps.Audit, directory: deps.Directory}
 	fh := &frameworkHandler{svc: deps.Framework}
 	uh := &userHandler{svc: deps.User, directory: deps.Directory, grants: deps.Grants}
@@ -144,6 +146,8 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 
 	// Control CRUD + status transitions.
 	// Note: /bulk must be registered before /{controlId} so the router matches it first.
+	mux.HandleFunc("GET /api/v1/audits/{id}/settings/deadline-days", ddh.getDeadlineDays)
+	mux.HandleFunc("PUT /api/v1/audits/{id}/settings/deadline-days", ddh.updateDeadlineDays)
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls", ch.listControls)
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls/export", ch.exportControls)
 	mux.HandleFunc("POST /api/v1/audits/{id}/controls", ch.addControl)

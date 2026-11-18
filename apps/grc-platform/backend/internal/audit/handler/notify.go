@@ -274,6 +274,9 @@ func (d *Deps) SendReminderDigestCCSync(ctx context.Context, ownerUserID int, it
 	if len(items) == 0 {
 		return true, nil
 	}
+	// Rows folded into another (an ultimate and an individual deadline on the
+	// same day) are listed after it.
+	items = expandReminderItems(items)
 	emailItems := make([]emailer.AuditEventItem, 0, len(items))
 	for _, it := range items {
 		emailItems = append(emailItems, emailer.AuditEventItem{
@@ -283,7 +286,7 @@ func (d *Deps) SendReminderDigestCCSync(ctx context.Context, ownerUserID int, it
 			Tier:            it.Tier,
 			RequirementType: it.RequirementType,
 			Audit:           it.AuditName,
-			Note:            it.UnassignedNote,
+			Note:            reminderRowNote(it),
 		})
 	}
 
@@ -300,9 +303,14 @@ func (d *Deps) SendReminderDigestCCSync(ctx context.Context, ownerUserID int, it
 		rank, event := 0, ev
 		switch it.Type {
 		case "REMINDER_OVERDUE":
-			rank, event = 4, emailer.AuditEventReminderOverdue
+			rank, event = 5, emailer.AuditEventReminderOverdue
 		case "REMINDER_DUE_TODAY":
-			rank, event = 3, emailer.AuditEventReminderDueToday
+			// "Due tomorrow" is logged under this type too.
+			if it.OneDayBefore {
+				rank, event = 3, emailer.AuditEventReminderDue1
+			} else {
+				rank, event = 4, emailer.AuditEventReminderDueToday
+			}
 		case "REMINDER_DUE_5":
 			rank, event = 2, emailer.AuditEventReminderDue5
 		case "REMINDER_DUE_10":
@@ -328,6 +336,29 @@ func (d *Deps) SendReminderDigestCCSync(ctx context.Context, ownerUserID int, it
 		CC:        cc,
 	}
 	return d.sendAuditEventSyncResult(ctx, ev, ownerUserID, info, nil, true)
+}
+
+// expandReminderItems returns items followed by the rows folded into them.
+func expandReminderItems(items []model.ReminderItem) []model.ReminderItem {
+	out := make([]model.ReminderItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, it)
+		out = append(out, it.Extras...)
+	}
+	return out
+}
+
+// reminderRowNote is the small second line under a row's status: who the
+// control is with now for an ultimate deadline, or the note an admin gets for a
+// missing owner or auditor.
+func reminderRowNote(it model.ReminderItem) string {
+	if it.UnassignedNote != "" {
+		return it.UnassignedNote
+	}
+	if it.Kind == "ULTIMATE" && it.CurrentlyWith != "" {
+		return "Currently with " + it.CurrentlyWith
+	}
+	return ""
 }
 
 // ReminderAdminCCEmails returns the addresses of the given admins (the ids
@@ -525,29 +556,50 @@ func (d *Deps) SendOverdueLeadDigestSync(ctx context.Context, ownerUserID int, l
 // SendOverdueLeadDigestCCSync is SendOverdueLeadDigestSync with cc copied on
 // the email — the compliance admins, wired in by ReminderJob.WithAdminCC.
 func (d *Deps) SendOverdueLeadDigestCCSync(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error {
+	return d.sendLeadDigest(ctx, emailer.AuditEventReminderOverdueLead, ownerUserID, leadEmail, items, cc, false)
+}
+
+// SendUltimateLeadDigestSync tells an owner's lead which of the owner's Design
+// controls are approaching, at or past their ultimate deadline — wired to
+// job.ReminderJob.WithWorkflowReminders. Like the overdue digest it writes no
+// audit_notification row: the owner's claim on these rows is what stops a
+// second send. cc is copied on the email, empty for none.
+func (d *Deps) SendUltimateLeadDigestSync(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error {
+	return d.sendLeadDigest(ctx, emailer.AuditEventReminderUltimateLead, ownerUserID, leadEmail, items, cc, true)
+}
+
+// sendLeadDigest is the shared send of both lead digests. showStatus adds the
+// timing column, for the digest whose rows span several tiers.
+func (d *Deps) sendLeadDigest(ctx context.Context, event emailer.AuditEvent, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string, showStatus bool) error {
 	leadEmail = strings.TrimSpace(leadEmail)
 	if len(items) == 0 || leadEmail == "" || d.Email == nil {
 		return nil
 	}
 	emailItems := make([]emailer.AuditEventItem, 0, len(items))
 	for _, it := range items {
-		emailItems = append(emailItems, emailer.AuditEventItem{
+		row := emailer.AuditEventItem{
 			ControlNumber:   it.ControlNumber,
 			Description:     it.Description,
 			DueDate:         it.DueDate,
 			RequirementType: it.RequirementType,
 			Audit:           it.AuditName,
-		})
+		}
+		if showStatus {
+			row.Tier = it.Tier
+			row.Note = reminderRowNote(it)
+		}
+		emailItems = append(emailItems, row)
 	}
 	name, withEmail := d.userNames(ctx, ownerUserID)
 	// DetailURL stays empty on purpose: a lead holds no audit privileges, so
 	// every link would land on a denied page. The template omits the button.
 	info := emailer.AuditEventInfo{
-		Actor:     withEmail,
-		OwnerName: name,
-		Items:     emailItems,
-		ShowAudit: true,
-		CC:        cc,
+		Actor:      withEmail,
+		OwnerName:  name,
+		Items:      emailItems,
+		ShowAudit:  true,
+		ShowStatus: showStatus,
+		CC:         cc,
 	}
 
 	select {
@@ -557,11 +609,11 @@ func (d *Deps) SendOverdueLeadDigestCCSync(ctx context.Context, ownerUserID int,
 	}
 	defer func() { <-notifySem }()
 
-	if err := d.Email.SendAuditEvent(ctx, emailer.AuditEventReminderOverdueLead, leadEmail, info); err != nil {
-		slog.Warn("audit notification: lead escalation failed", "ownerId", ownerUserID, "err", err)
+	if err := d.Email.SendAuditEvent(ctx, event, leadEmail, info); err != nil {
+		slog.Warn("audit notification: lead digest failed", "event", event, "ownerId", ownerUserID, "err", err)
 		return fmt.Errorf("send: %w", err)
 	}
-	slog.Info("audit lead escalation sent", "ownerId", ownerUserID, "items", len(items))
+	slog.Info("audit lead digest sent", "event", event, "ownerId", ownerUserID, "items", len(items))
 	return nil
 }
 
