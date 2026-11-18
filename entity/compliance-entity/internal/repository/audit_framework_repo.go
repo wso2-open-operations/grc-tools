@@ -142,13 +142,24 @@ func (r *auditFrameworkRepo) CreateAuditFramework(ctx context.Context, req domai
 		"SELECT id, status FROM audit_framework WHERE name = ? LIMIT 1", req.Name).Scan(&existingID, &existingStatus)
 	switch {
 	case err == nil && existingStatus == frameworkDeleted:
-		if _, err := r.db.ExecContext(ctx,
+		res, err := r.db.ExecContext(ctx,
 			"UPDATE audit_framework SET name = ?, status = ?, updated_by = ? WHERE id = ? AND status = ?",
-			req.Name, status, req.CreatedBy, existingID, frameworkDeleted); err != nil {
+			req.Name, status, req.CreatedBy, existingID, frameworkDeleted)
+		if err != nil {
 			if isDuplicateKey(err) {
 				return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
 			}
 			return nil, fmt.Errorf("audit_framework.Create revive(%d): %w", existingID, err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			// Another request revived (or renamed) the row first. Report who holds
+			// the name now instead of returning that request's framework as ours.
+			var holderStatus string
+			if err := r.db.QueryRowContext(ctx,
+				"SELECT status FROM audit_framework WHERE name = ? LIMIT 1", req.Name).Scan(&holderStatus); err == nil {
+				return nil, &apierror.ConflictError{Msg: nameTakenMessage(holderStatus)}
+			}
+			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
 		}
 		return r.GetAuditFrameworkByID(ctx, existingID)
 	case err == nil:
@@ -200,8 +211,12 @@ func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, r
 	args = append(args, req.UpdatedBy)
 	args = append(args, id)
 
+	// The status guard keeps a DELETE that committed after the read above from
+	// being undone here. If it matched nothing, the read-back below answers: a
+	// deleted row is not found, a valid no-op PATCH returns the unchanged row.
+	args = append(args, frameworkDeleted)
 	if _, err := r.db.ExecContext(ctx,
-		"UPDATE audit_framework SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil { // #nosec G202
+		"UPDATE audit_framework SET "+strings.Join(sets, ", ")+" WHERE id = ? AND status <> ?", args...); err != nil { // #nosec G202
 		if isDuplicateKey(err) {
 			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
 		}

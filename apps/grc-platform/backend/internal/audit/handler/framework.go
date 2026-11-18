@@ -119,6 +119,12 @@ func (h *frameworkHandler) deleteFramework(w http.ResponseWriter, r *http.Reques
 	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
 		return
 	}
+	// Delete is stricter than archive: the privilege must be held at GLOBAL scope
+	// (grc-platform-audit-compliance-admin). Local dev allow-all has no grants.
+	if !auth.AllowAll(r.Context()) && !auth.Grants(r.Context()).HasGlobal(privilege.ManageFrameworks) {
+		response.WriteError(w, http.StatusForbidden, response.ErrMsgForbidden)
+		return
+	}
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id <= 0 {
 		response.WriteError(w, http.StatusBadRequest, "invalid framework id")
