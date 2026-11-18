@@ -20,14 +20,28 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
-// maxFrameworkNameLength mirrors audit_framework.name VARCHAR(100).
+// maxFrameworkNameLength mirrors audit_framework.name VARCHAR(100), which counts
+// characters, not bytes.
 const maxFrameworkNameLength = 100
+
+// validateFrameworkName trims name and checks it is present and fits the column.
+func validateFrameworkName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name is required"}
+	}
+	if utf8.RuneCountInString(name) > maxFrameworkNameLength {
+		return "", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name must be 100 characters or fewer"}
+	}
+	return name, nil
+}
 
 // FrameworkService defines business operations for audit frameworks, products,
 // and the versioned framework control library.
@@ -83,9 +97,11 @@ func (s *frameworkService) FrameworkInScope(ctx context.Context, frameworkID int
 }
 
 func (s *frameworkService) CreateFramework(ctx context.Context, req model.CreateFrameworkRequest, createdBy string) (*model.AuditFramework, error) {
-	if req.Name == "" {
-		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name is required"}
+	name, err := validateFrameworkName(req.Name)
+	if err != nil {
+		return nil, err
 	}
+	req.Name = name
 	return s.frameworkRepo.Create(ctx, req, createdBy)
 }
 
@@ -94,12 +110,9 @@ func (s *frameworkService) UpdateFramework(ctx context.Context, id int, req mode
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "nothing to update"}
 	}
 	if req.Name != nil {
-		name := strings.TrimSpace(*req.Name)
-		if name == "" {
-			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name is required"}
-		}
-		if len(name) > maxFrameworkNameLength {
-			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name must be 100 characters or fewer"}
+		name, err := validateFrameworkName(*req.Name)
+		if err != nil {
+			return nil, err
 		}
 		req.Name = &name
 	}

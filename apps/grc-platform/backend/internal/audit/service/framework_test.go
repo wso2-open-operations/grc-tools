@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
@@ -123,5 +124,34 @@ func TestDeleteFramework_PassesActorAndRequiresOne(t *testing.T) {
 	}
 	if !repo.deleted || repo.deletedBy != "a@b.c" {
 		t.Errorf("delete not recorded with the actor: %+v", repo)
+	}
+}
+
+func TestFrameworkName_LengthCountsCharactersNotBytes(t *testing.T) {
+	svc, repo := newFrameworkSvc()
+	// 100 two-byte characters: 200 bytes, but exactly the column's 100 characters.
+	fits := strings.Repeat("é", 100)
+	if _, err := svc.UpdateFramework(context.Background(), 1, model.UpdateFrameworkRequest{Name: &fits}, "a@b.c"); err != nil {
+		t.Fatalf("a 100-character name must be accepted: %v", err)
+	}
+	if repo.updated == nil || *repo.updated.Name != fits {
+		t.Errorf("name not passed through: %+v", repo.updated)
+	}
+	tooLong := strings.Repeat("é", 101)
+	if got := statusOf(func() error {
+		_, err := svc.UpdateFramework(context.Background(), 1, model.UpdateFrameworkRequest{Name: &tooLong}, "a@b.c")
+		return err
+	}()); got != http.StatusUnprocessableEntity {
+		t.Errorf("101 characters: status = %d, want 422", got)
+	}
+}
+
+func TestCreateFramework_ValidatesName(t *testing.T) {
+	svc, _ := newFrameworkSvc()
+	for name, in := range map[string]string{"blank": "   ", "too long": strings.Repeat("a", 101)} {
+		_, err := svc.CreateFramework(context.Background(), model.CreateFrameworkRequest{Name: in}, "a@b.c")
+		if got := statusOf(err); got != http.StatusUnprocessableEntity {
+			t.Errorf("%s: status = %d, want 422", name, got)
+		}
 	}
 }

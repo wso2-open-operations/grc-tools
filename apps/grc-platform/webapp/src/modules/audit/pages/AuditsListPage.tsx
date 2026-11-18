@@ -254,7 +254,9 @@ export default function AuditsListPage(): JSX.Element {
               variant="contained"
               startIcon={<Plus size={16} />}
               sx={{ textTransform: "none" }}
-              onClick={() => void navigate(auditPaths.create())}
+              onClick={() =>
+                void navigate(auditPaths.create(frameworkFilter === ALL_FRAMEWORKS ? null : Number(frameworkFilter)))
+              }
             >
               New Audit
             </Button>

@@ -60,7 +60,8 @@ type FrameworkRepository interface {
 	// scope is evaluated at the control level, one level deeper than
 	// ListScoped does for audits.
 	//
-	// status filters by framework status: "ACTIVE", "INACTIVE", or "" for both.
+	// status filters by framework status: "ACTIVE", "ARCHIVED", or "" for both.
+	// Deleted (INACTIVE) frameworks are never returned.
 	List(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int, status string) ([]*model.AuditFramework, error)
 	// GetByID is intentionally unscoped — used internally to validate a
 	// frameworkId reference (e.g. audit creation), which must succeed

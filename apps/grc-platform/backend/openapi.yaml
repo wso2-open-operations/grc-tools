@@ -193,10 +193,10 @@ paths:
       - name: status
         in: query
         required: false
-        description: ACTIVE (default), INACTIVE (archived) or ALL.
+        description: ACTIVE (default), ARCHIVED or ALL (active and archived). Deleted frameworks are never listed.
         schema:
           type: string
-          enum: [ACTIVE, INACTIVE, ALL]
+          enum: [ACTIVE, ARCHIVED, ALL]
       responses:
         '200':
           description: List of frameworks

@@ -37,7 +37,8 @@ type CreateFrameworkRequest struct {
 
 // UpdateFrameworkRequest is the payload for PUT /api/v1/audits/frameworks/{id}.
 // Both fields are optional; only the ones present are changed. Status is
-// ACTIVE or INACTIVE — INACTIVE is how a framework is archived.
+// ACTIVE or ARCHIVED — ARCHIVED is how a framework is archived. INACTIVE means
+// deleted and can only be reached through DELETE.
 type UpdateFrameworkRequest struct {
 	Name   *string `json:"name"`
 	Status *string `json:"status"`
