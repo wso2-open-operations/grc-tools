@@ -92,8 +92,8 @@ type ReminderJob struct {
 	// daily turns on the every-day reminder for dailyStatuses and the
 	// dailyRouteOverrides. Off, the sweep only reminds on the 10/5/0/overdue marks.
 	daily bool
-	// workflow switches Design controls to the ultimate and individual deadline
-	// reminders (see workflow_reminders.go). notifyUltimateLead sends one owner's
+	// workflow switches Design and tracked OE controls to the ultimate and
+	// individual deadline reminders (see workflow_reminders.go). notifyUltimateLead sends one owner's
 	// lead the ultimate-deadline rows; nil leaves the lead out of it.
 	workflow           bool
 	notifyUltimateLead func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error
@@ -175,10 +175,11 @@ func (j *ReminderJob) WithDailyReminders() *ReminderJob {
 	return j
 }
 
-// WithWorkflowReminders switches Design controls to the workflow-aware
-// reminders: the ultimate deadline to the owner and lead, the individual
-// deadline to whoever holds the control. OE controls keep the existing
-// reminders. notifyLead sends an owner's lead the ultimate-deadline rows and
+// WithWorkflowReminders switches Design controls, and OE controls that are being
+// tracked, to the workflow-aware reminders: the ultimate deadline to the owner
+// and lead, the individual deadline to whoever holds the control. An OE control
+// with no hand-off recorded yet keeps the existing reminders (see
+// isWorkflowControl). notifyLead sends an owner's lead the ultimate-deadline rows and
 // only takes effect when WithLeadAlerts has wired the lead lookup.
 func (j *ReminderJob) WithWorkflowReminders(
 	notifyLead func(ctx context.Context, ownerUserID int, leadEmail string, items []model.ReminderItem, cc []string) error,

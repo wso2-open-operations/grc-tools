@@ -218,7 +218,7 @@ func main() {
 	}
 	if cfg.AuditWorkflowRemindersEnabled {
 		reminderJob = reminderJob.WithWorkflowReminders(auditDeps.SendUltimateLeadDigestSync)
-		slog.Info("audit workflow reminders enabled (Design controls: ultimate and individual deadlines)")
+		slog.Info("audit workflow reminders enabled (Design and tracked OE controls: ultimate and individual deadlines)")
 	}
 	auditDeps.TriggerReminderJob = reminderJob.RunOnce
 	audithandler.RegisterRoutes(mux, auditDeps)
