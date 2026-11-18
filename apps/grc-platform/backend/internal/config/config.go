@@ -50,8 +50,8 @@ type Config struct {
 	// AuditReminderDailyEnabled makes the audit statuses waiting on the
 	// compliance team or the auditor remind every day. See AuditReminderDailyDefault.
 	AuditReminderDailyEnabled bool
-	// AuditWorkflowRemindersEnabled switches Design controls to the ultimate and
-	// individual deadline reminders.
+	// AuditWorkflowRemindersEnabled switches Design controls and tracked OE
+	// controls to the ultimate and individual deadline reminders.
 	AuditWorkflowRemindersEnabled bool
 	// SchedulerEnabled turns the background scheduler (internal/scheduler) on
 	// or off. It is the single switch for every daily sweep at once — today
@@ -183,7 +183,7 @@ const AuditReminderCCDefault = false
 const AuditReminderDailyDefault = false
 
 // AuditWorkflowRemindersDefault is the built-in setting for the workflow-aware
-// reminders of Design controls (ultimate and individual deadlines). Off by
+// reminders of Design and tracked OE controls (ultimate and individual deadlines). Off by
 // default, so every environment keeps the existing reminders until it opts in.
 // AUDIT_WORKFLOW_REMINDERS_ENABLED overrides it with exactly "true" or "false".
 const AuditWorkflowRemindersDefault = false
