@@ -100,3 +100,17 @@ func (h *AuditFrameworkHandler) UpdateAuditFramework(w http.ResponseWriter, r *h
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(fw)
 }
+
+// DeleteAuditFramework handles DELETE /audit/frameworks/{id}.
+func (h *AuditFrameworkHandler) DeleteAuditFramework(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, &apierror.ValidationError{Msg: "id must be a positive integer"})
+		return
+	}
+	if err := h.svc.DeleteAuditFramework(r.Context(), id, r.URL.Query().Get("deletedBy")); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

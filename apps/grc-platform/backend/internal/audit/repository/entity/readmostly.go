@@ -21,6 +21,7 @@ package entity
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
@@ -63,14 +64,14 @@ func NewFrameworkRepository(c *entityclient.Client) repository.FrameworkReposito
 	return &frameworkRepo{c: c}
 }
 
-func (r *frameworkRepo) List(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditFramework, error) {
+func (r *frameworkRepo) List(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int, status string) ([]*model.AuditFramework, error) {
 	var all []*model.AuditFramework
 	for offset := 0; ; offset += pageLimit {
 		var resp struct {
 			Frameworks []*model.AuditFramework `json:"frameworks"`
 		}
 		body := map[string]any{
-			"statusKey":    statusActive,
+			"statusKey":    status,
 			"scope":        scope,
 			"userId":       userID,
 			"scopeTeamIds": scopeTeamIDs,
@@ -104,6 +105,26 @@ func (r *frameworkRepo) Create(ctx context.Context, req model.CreateFrameworkReq
 		return nil, err
 	}
 	return &fw, nil
+}
+
+func (r *frameworkRepo) Update(ctx context.Context, id int, req model.UpdateFrameworkRequest, updatedBy string) (*model.AuditFramework, error) {
+	body := map[string]any{"updatedBy": updatedBy}
+	if req.Name != nil {
+		body["name"] = *req.Name
+	}
+	if req.Status != nil {
+		body["status"] = *req.Status
+	}
+	var fw model.AuditFramework
+	if err := r.c.Patch(ctx, fmt.Sprintf("/audit/frameworks/%d", id), body, &fw); err != nil {
+		return nil, err
+	}
+	return &fw, nil
+}
+
+func (r *frameworkRepo) Delete(ctx context.Context, id int, deletedBy string) error {
+	// The entity requires the acting user for the soft-delete audit trail.
+	return r.c.Delete(ctx, fmt.Sprintf("/audit/frameworks/%d?deletedBy=%s", id, url.QueryEscape(deletedBy)))
 }
 
 // ── Products ──────────────────────────────────────────────────────────────────

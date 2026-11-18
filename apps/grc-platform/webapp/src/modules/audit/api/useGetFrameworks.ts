@@ -21,13 +21,22 @@ import type { AuditFramework } from "@modules/audit/types/audit";
 
 export const FRAMEWORKS_QUERY_KEY = ["audit", "frameworks"] as const;
 
-export function useGetFrameworks() {
+/**
+ * ACTIVE (default) is what pickers want: archived frameworks take no new audits.
+ * ALL also returns archived ones, for the Frameworks page and for views that
+ * must keep reaching audits that already exist under an archived framework.
+ */
+export type FrameworkStatusFilter = "ACTIVE" | "ALL";
+
+export function useGetFrameworks(status: FrameworkStatusFilter = "ACTIVE") {
   const authFetch = useAuthApiClient();
 
   return useQuery({
-    queryKey: FRAMEWORKS_QUERY_KEY,
+    // Prefix-matches FRAMEWORKS_QUERY_KEY, so one invalidation covers both variants.
+    queryKey: [...FRAMEWORKS_QUERY_KEY, status],
     queryFn: async (): Promise<AuditFramework[]> => {
-      const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/audits/frameworks`);
+      const url = `${BACKEND_BASE_URL}/api/v1/audits/frameworks${status === "ALL" ? "?status=ALL" : ""}`;
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`Failed to load frameworks (${res.status})`);
       return res.json() as Promise<AuditFramework[]>;
     },

@@ -476,6 +476,38 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+      - Audit Frameworks
+      summary: Delete an audit framework
+      description: >-
+        Soft delete: sets the status to INACTIVE and the framework is treated as
+        not found afterwards. Only allowed while no non-removed audit and no
+        framework control references it; otherwise 409. Creating a framework
+        with the same name brings the deleted one back as ACTIVE.
+      operationId: deleteAuditFramework
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: deletedBy
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Framework still has audits or controls
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /audit/frameworks:
     post:
       tags:
@@ -4476,6 +4508,9 @@ components:
           type: string
         statusKey:
           type: string
+          enum: [ACTIVE, ARCHIVED, INACTIVE]
+          description: >-
+            Omit to get every framework except deleted (INACTIVE) ones.
         scope:
           type: string
           enum: [all, owned, assigned, team, none]
@@ -4510,11 +4545,18 @@ components:
           type: integer
     CreateAuditFrameworkRequest:
       type: object
+      description: >-
+        Returns 409 if the name is taken by an active or archived framework; the
+        message says which, and that an archived one should be restored instead.
+        If it is taken by a deleted (INACTIVE) one, that framework is revived.
+        Renaming onto a name held by an archived or deleted framework also
+        returns 409, with a message saying so.
       properties:
         name:
           type: string
         status:
           type: string
+          enum: [ACTIVE, ARCHIVED]
         createdBy:
           type: string
     UpdateAuditFrameworkRequest:
@@ -4525,7 +4567,9 @@ components:
           nullable: true
         status:
           type: string
+          enum: [ACTIVE, ARCHIVED]
           nullable: true
+          description: INACTIVE (deleted) cannot be set here; use DELETE.
         updatedBy:
           type: string
     AuditProduct:

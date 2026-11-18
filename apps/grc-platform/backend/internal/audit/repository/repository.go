@@ -59,12 +59,19 @@ type FrameworkRepository interface {
 	// has no team/owner/auditor of its own (only its audits' controls do), so
 	// scope is evaluated at the control level, one level deeper than
 	// ListScoped does for audits.
-	List(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditFramework, error)
+	//
+	// status filters by framework status: "ACTIVE", "ARCHIVED", or "" for both.
+	// Deleted (INACTIVE) frameworks are never returned.
+	List(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int, status string) ([]*model.AuditFramework, error)
 	// GetByID is intentionally unscoped — used internally to validate a
 	// frameworkId reference (e.g. audit creation), which must succeed
 	// regardless of the caller's row scope.
 	GetByID(ctx context.Context, id int) (*model.AuditFramework, error)
 	Create(ctx context.Context, req model.CreateFrameworkRequest, createdBy string) (*model.AuditFramework, error)
+	Update(ctx context.Context, id int, req model.UpdateFrameworkRequest, updatedBy string) (*model.AuditFramework, error)
+	// Delete soft-deletes a framework (status INACTIVE) nothing references; the
+	// data service answers 409 while audits or controls still point at it.
+	Delete(ctx context.Context, id int, deletedBy string) error
 }
 
 // ProductRepository is the data-access contract for audit products.

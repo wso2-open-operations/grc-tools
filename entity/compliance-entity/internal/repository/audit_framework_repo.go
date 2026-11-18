@@ -33,7 +33,20 @@ type AuditFrameworkRepository interface {
 	GetAuditFrameworkByID(ctx context.Context, id int) (*domain.AuditFramework, error)
 	CreateAuditFramework(ctx context.Context, req domain.CreateAuditFrameworkRequest) (*domain.AuditFramework, error)
 	UpdateAuditFramework(ctx context.Context, id int, req domain.UpdateAuditFrameworkRequest) (*domain.AuditFramework, error)
+	// DeleteAuditFramework soft-deletes a framework by setting its status to
+	// INACTIVE, recording deletedBy. Returns ConflictError while any non-removed
+	// audit or any framework control still points at it, and NotFoundError for
+	// an unknown or already-deleted id.
+	DeleteAuditFramework(ctx context.Context, id int, deletedBy string) error
 }
+
+// Framework statuses. ARCHIVED hides a framework from new audits but keeps it
+// and its audits; INACTIVE means deleted and is treated as not found everywhere.
+const (
+	frameworkActive   = "ACTIVE"
+	frameworkArchived = "ARCHIVED"
+	frameworkDeleted  = "INACTIVE"
+)
 
 type auditFrameworkRepo struct{ db *sql.DB }
 
@@ -53,6 +66,10 @@ func (r *auditFrameworkRepo) SearchAuditFrameworks(ctx context.Context, req doma
 	if req.StatusKey != "" {
 		where += " AND status = ?"
 		args = append(args, req.StatusKey)
+	} else {
+		// No status filter means every framework that has not been deleted.
+		where += " AND status <> ?"
+		args = append(args, frameworkDeleted)
 	}
 	scopeClause, scopeArgs := frameworkScopeWhere(req.Scope, req.UserID, req.ScopeTeamIDs)
 	where += scopeClause
@@ -87,6 +104,18 @@ func (r *auditFrameworkRepo) SearchAuditFrameworks(ctx context.Context, req doma
 }
 
 func (r *auditFrameworkRepo) GetAuditFrameworkByID(ctx context.Context, id int) (*domain.AuditFramework, error) {
+	f, err := r.getAnyFrameworkByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if f.Status == frameworkDeleted {
+		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("framework %d not found", id)}
+	}
+	return f, nil
+}
+
+// getAnyFrameworkByID reads a framework whatever its status, deleted included.
+func (r *auditFrameworkRepo) getAnyFrameworkByID(ctx context.Context, id int) (*domain.AuditFramework, error) {
 	row := r.db.QueryRowContext(ctx,
 		"SELECT id, name, status, created_at, updated_at FROM audit_framework WHERE id = ?", id)
 	f, err := scanFramework(row)
@@ -102,12 +131,50 @@ func (r *auditFrameworkRepo) GetAuditFrameworkByID(ctx context.Context, id int) 
 func (r *auditFrameworkRepo) CreateAuditFramework(ctx context.Context, req domain.CreateAuditFrameworkRequest) (*domain.AuditFramework, error) {
 	status := req.Status
 	if status == "" {
-		status = "ACTIVE"
+		status = frameworkActive
 	}
+
+	// The name is unique across every status. A deleted framework still holds
+	// its name, so creating the same name brings that row back instead of failing.
+	var existingID int
+	var existingStatus string
+	err := r.db.QueryRowContext(ctx,
+		"SELECT id, status FROM audit_framework WHERE name = ? LIMIT 1", req.Name).Scan(&existingID, &existingStatus)
+	switch {
+	case err == nil && existingStatus == frameworkDeleted:
+		res, err := r.db.ExecContext(ctx,
+			"UPDATE audit_framework SET name = ?, status = ?, updated_by = ? WHERE id = ? AND status = ?",
+			req.Name, status, req.CreatedBy, existingID, frameworkDeleted)
+		if err != nil {
+			if isDuplicateKey(err) {
+				return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+			}
+			return nil, fmt.Errorf("audit_framework.Create revive(%d): %w", existingID, err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			// Another request revived (or renamed) the row first. Report who holds
+			// the name now instead of returning that request's framework as ours.
+			var holderStatus string
+			if err := r.db.QueryRowContext(ctx,
+				"SELECT status FROM audit_framework WHERE name = ? LIMIT 1", req.Name).Scan(&holderStatus); err == nil {
+				return nil, &apierror.ConflictError{Msg: nameTakenMessage(holderStatus)}
+			}
+			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+		}
+		return r.GetAuditFrameworkByID(ctx, existingID)
+	case err == nil:
+		return nil, &apierror.ConflictError{Msg: nameTakenMessage(existingStatus)}
+	case !errors.Is(err, sql.ErrNoRows):
+		return nil, fmt.Errorf("audit_framework.Create name check: %w", err)
+	}
+
 	res, err := r.db.ExecContext(ctx,
 		"INSERT INTO audit_framework (name, status, created_by, updated_by) VALUES (?, ?, ?, ?)",
 		req.Name, status, req.CreatedBy, req.CreatedBy)
 	if err != nil {
+		if isDuplicateKey(err) {
+			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+		}
 		return nil, fmt.Errorf("audit_framework.Create: %w", err)
 	}
 	id, _ := res.LastInsertId()
@@ -115,10 +182,24 @@ func (r *auditFrameworkRepo) CreateAuditFramework(ctx context.Context, req domai
 }
 
 func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, req domain.UpdateAuditFrameworkRequest) (*domain.AuditFramework, error) {
+	// A deleted framework is not found, so it cannot be renamed or restored here.
+	if _, err := r.GetAuditFrameworkByID(ctx, id); err != nil {
+		return nil, err
+	}
 	sets := []string{}
 	args := []any{}
 
 	if req.Name != nil {
+		var clash int
+		var clashStatus string
+		err := r.db.QueryRowContext(ctx,
+			"SELECT id, status FROM audit_framework WHERE name = ? AND id <> ? LIMIT 1", *req.Name, id).Scan(&clash, &clashStatus)
+		if err == nil {
+			return nil, &apierror.ConflictError{Msg: nameTakenMessage(clashStatus)}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("audit_framework.Update(%d) name check: %w", id, err)
+		}
 		sets = append(sets, "name = ?")
 		args = append(args, *req.Name)
 	}
@@ -130,11 +211,67 @@ func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, r
 	args = append(args, req.UpdatedBy)
 	args = append(args, id)
 
+	// The status guard keeps a DELETE that committed after the read above from
+	// being undone here. If it matched nothing, the read-back below answers: a
+	// deleted row is not found, a valid no-op PATCH returns the unchanged row.
+	args = append(args, frameworkDeleted)
 	if _, err := r.db.ExecContext(ctx,
-		"UPDATE audit_framework SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil { // #nosec G202
+		"UPDATE audit_framework SET "+strings.Join(sets, ", ")+" WHERE id = ? AND status <> ?", args...); err != nil { // #nosec G202
+		if isDuplicateKey(err) {
+			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+		}
 		return nil, fmt.Errorf("audit_framework.Update(%d): %w", id, err)
 	}
 	return r.GetAuditFrameworkByID(ctx, id)
+}
+
+func (r *auditFrameworkRepo) DeleteAuditFramework(ctx context.Context, id int, deletedBy string) error {
+	if _, err := r.GetAuditFrameworkByID(ctx, id); err != nil {
+		return err
+	}
+	var audits, controls int
+	// Removed audits are soft-deleted and no longer count.
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM audit WHERE framework_id = ? AND status <> 'REMOVED'", id).Scan(&audits); err != nil {
+		return fmt.Errorf("audit_framework.Delete(%d) count audits: %w", id, err)
+	}
+	if audits > 0 {
+		return &apierror.ConflictError{Msg: "this framework has audits and cannot be deleted; archive it instead"}
+	}
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_framework_control WHERE framework_id = ?", id).Scan(&controls); err != nil {
+		return fmt.Errorf("audit_framework.Delete(%d) count controls: %w", id, err)
+	}
+	if controls > 0 {
+		return &apierror.ConflictError{Msg: "this framework has controls in its library and cannot be deleted; archive it instead"}
+	}
+	// The NOT EXISTS guards repeat the checks above, so an audit created in the
+	// gap between them cannot end up under a deleted framework.
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE audit_framework SET status = ?, updated_by = ?
+		 WHERE id = ? AND status <> ?
+		   AND NOT EXISTS (SELECT 1 FROM audit WHERE framework_id = ? AND status <> 'REMOVED')
+		   AND NOT EXISTS (SELECT 1 FROM audit_framework_control WHERE framework_id = ?)`,
+		frameworkDeleted, deletedBy, id, frameworkDeleted, id, id)
+	if err != nil {
+		return fmt.Errorf("audit_framework.Delete(%d): %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return &apierror.ConflictError{Msg: "this framework is still in use and cannot be deleted; archive it instead"}
+	}
+	return nil
+}
+
+// nameTakenMessage explains a name clash in terms of the status of the framework
+// holding the name, so a hidden (archived or deleted) one is not a mystery.
+func nameTakenMessage(holderStatus string) string {
+	switch holderStatus {
+	case frameworkArchived:
+		return "a framework with this name is archived; restore it instead, or choose another name"
+	case frameworkDeleted:
+		return "this name belongs to a deleted framework; choose another name, or create a framework with this name to bring it back"
+	default:
+		return "a framework with this name already exists"
+	}
 }
 
 // frameworkScopeWhere returns a WHERE fragment (starting with "AND") and its

@@ -187,8 +187,16 @@ paths:
       tags:
       - Audit Frameworks
       summary: List audit frameworks
-      description: Lookup data for the Create Audit form's framework dropdown.
+      description: Lookup data for the Create Audit form's framework dropdown. Returns ACTIVE frameworks unless status says otherwise.
       operationId: listAuditFrameworks
+      parameters:
+      - name: status
+        in: query
+        required: false
+        description: ACTIVE (default), ARCHIVED or ALL (active and archived). Deleted frameworks are never listed.
+        schema:
+          type: string
+          enum: [ACTIVE, ARCHIVED, ALL]
       responses:
         '200':
           description: List of frameworks
@@ -232,6 +240,84 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/audits/frameworks/{id}:
+    put:
+      tags:
+      - Audit Frameworks
+      summary: Rename, archive or restore an audit framework
+      description: Requires AUDIT_MANAGE_FRAMEWORKS. status ARCHIVED archives the framework (hidden from the Create Audit form; existing audits are untouched), ACTIVE restores it. Name must be unique.
+      operationId: updateAuditFramework
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                status:
+                  type: string
+                  enum: [ACTIVE, ARCHIVED]
+      responses:
+        '200':
+          description: Updated framework
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditFramework'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A framework with this name already exists
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+      - Audit Frameworks
+      summary: Delete an audit framework
+      description: >-
+        Requires AUDIT_MANAGE_FRAMEWORKS held at GLOBAL scope (grc-platform-audit-compliance-admin).
+        Soft delete, so the framework is no longer listed or returned. Only allowed while no audit
+        (REMOVED ones excluded) and no framework control references it; otherwise 409 and the caller
+        should archive instead. Creating a framework with the same name brings the deleted one back.
+      operationId: deleteAuditFramework
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Framework still has audits or controls
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/audits/frameworks/controls:

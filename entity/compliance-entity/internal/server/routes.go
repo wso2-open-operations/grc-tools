@@ -217,6 +217,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	mux.HandleFunc("GET /audit/frameworks/{id}", auditFrameworkH.GetAuditFrameworkByID)
 	mux.HandleFunc("POST /audit/frameworks", auditFrameworkH.CreateAuditFramework)
 	mux.HandleFunc("PATCH /audit/frameworks/{id}", auditFrameworkH.UpdateAuditFramework)
+	mux.HandleFunc("DELETE /audit/frameworks/{id}", auditFrameworkH.DeleteAuditFramework)
 
 	// Framework control library (versioned, immutable; nested under frameworks)
 	mux.HandleFunc("GET /audit/frameworks/{id}/controls", frameworkControlH.ListCurrentControls)

@@ -43,6 +43,10 @@ var globalOnlyPrivileges = []string{
 	// Org-wide review authority, checked unscoped in review.go. Keeps
 	// grc-platform-audit-compliance-team GLOBAL-only.
 	"AUDIT_REVIEW_EVIDENCE",
+	// Framework management, including delete, is Compliance Admin at GLOBAL only.
+	// The platform UI only sees the unioned privilege list, so this is what makes
+	// "holds it" mean "holds it everywhere".
+	"AUDIT_MANAGE_FRAMEWORKS",
 }
 
 // GrantService reads and writes role grants.

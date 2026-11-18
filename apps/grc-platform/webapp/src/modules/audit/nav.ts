@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { ClipboardList, LayoutDashboard, ShieldCheck } from "@wso2/oxygen-ui-icons-react";
+import { ClipboardList, LayoutDashboard, Library, ShieldCheck } from "@wso2/oxygen-ui-icons-react";
 import type { NavSection } from "@components/side-nav-bar/types";
 import { AuditPrivilege } from "./privileges";
 import { auditPaths } from "./paths";
@@ -37,6 +37,13 @@ export const auditNav: NavSection = {
       path: auditPaths.dashboard,
       icon: LayoutDashboard,
       requiredPrivilege: AuditPrivilege.ViewInternalComments,
+    },
+    {
+      id: "audit-frameworks",
+      label: "Frameworks",
+      path: auditPaths.frameworks,
+      icon: Library,
+      requiredPrivilege: AuditPrivilege.ViewAudits,
     },
     {
       id: "audit-audits",
