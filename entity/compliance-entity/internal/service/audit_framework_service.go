@@ -92,6 +92,13 @@ func (s *auditFrameworkService) UpdateAuditFramework(ctx context.Context, id int
 		up := strings.ToUpper(*req.Status)
 		req.Status = &up
 	}
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		if trimmed == "" {
+			return domain.AuditFramework{}, &apierror.ValidationError{Msg: "name must not be empty"}
+		}
+		req.Name = &trimmed
+	}
 	if req.UpdatedBy == "" {
 		return domain.AuditFramework{}, &apierror.ValidationError{Msg: "updatedBy is required"}
 	}
@@ -100,4 +107,11 @@ func (s *auditFrameworkService) UpdateAuditFramework(ctx context.Context, id int
 		return domain.AuditFramework{}, err
 	}
 	return *f, nil
+}
+
+func (s *auditFrameworkService) DeleteAuditFramework(ctx context.Context, id int) error {
+	if id <= 0 {
+		return &apierror.ValidationError{Msg: "framework id must be a positive integer"}
+	}
+	return s.repo.DeleteAuditFramework(ctx, id)
 }

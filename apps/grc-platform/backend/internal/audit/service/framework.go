@@ -19,17 +19,29 @@ package service
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 )
 
+// maxFrameworkNameLength mirrors audit_framework.name VARCHAR(100).
+const maxFrameworkNameLength = 100
+
 // FrameworkService defines business operations for audit frameworks, products,
 // and the versioned framework control library.
 type FrameworkService interface {
-	ListFrameworks(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditFramework, error)
+	// ListFrameworks returns frameworks visible to the caller. status is
+	// "ACTIVE" (what dropdowns want), "INACTIVE" (archived), or "" for all.
+	ListFrameworks(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int, status string) ([]*model.AuditFramework, error)
 	CreateFramework(ctx context.Context, req model.CreateFrameworkRequest, createdBy string) (*model.AuditFramework, error)
+	// UpdateFramework renames and/or archives (status INACTIVE) / restores
+	// (status ACTIVE) a framework. Existing audits are never touched.
+	UpdateFramework(ctx context.Context, id int, req model.UpdateFrameworkRequest, updatedBy string) (*model.AuditFramework, error)
+	// DeleteFramework removes a framework that has no audits and no controls;
+	// otherwise the data service answers 409 and the caller should archive.
+	DeleteFramework(ctx context.Context, id int) error
 	ListProducts(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditProduct, error)
 	CreateProduct(ctx context.Context, req model.CreateProductRequest, createdBy string) (*model.AuditProduct, error)
 	// FrameworkInScope reports whether frameworkID has at least one audit
@@ -49,14 +61,14 @@ func NewFrameworkService(frameworkRepo repository.FrameworkRepository, productRe
 	return &frameworkService{frameworkRepo: frameworkRepo, productRepo: productRepo, frameworkControlRepo: frameworkControlRepo}
 }
 
-func (s *frameworkService) ListFrameworks(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditFramework, error) {
-	return s.frameworkRepo.List(ctx, scope, userID, scopeTeamIDs)
+func (s *frameworkService) ListFrameworks(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int, status string) ([]*model.AuditFramework, error) {
+	return s.frameworkRepo.List(ctx, scope, userID, scopeTeamIDs, status)
 }
 
 // FrameworkInScope reuses List (frameworks are a small reference table) rather
 // than adding a dedicated single-ID repo endpoint.
 func (s *frameworkService) FrameworkInScope(ctx context.Context, frameworkID int, scope model.Scope, userID int, scopeTeamIDs []int) (bool, error) {
-	frameworks, err := s.frameworkRepo.List(ctx, scope, userID, scopeTeamIDs)
+	frameworks, err := s.frameworkRepo.List(ctx, scope, userID, scopeTeamIDs, "")
 	if err != nil {
 		return false, err
 	}
@@ -73,6 +85,47 @@ func (s *frameworkService) CreateFramework(ctx context.Context, req model.Create
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name is required"}
 	}
 	return s.frameworkRepo.Create(ctx, req, createdBy)
+}
+
+func (s *frameworkService) UpdateFramework(ctx context.Context, id int, req model.UpdateFrameworkRequest, updatedBy string) (*model.AuditFramework, error) {
+	if req.Name == nil && req.Status == nil {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "nothing to update"}
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name is required"}
+		}
+		if len(name) > maxFrameworkNameLength {
+			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name must be 100 characters or fewer"}
+		}
+		req.Name = &name
+	}
+	if req.Status != nil && *req.Status != "ACTIVE" && *req.Status != "INACTIVE" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "status must be ACTIVE or INACTIVE"}
+	}
+	if updatedBy == "" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "authenticated user email is missing from token — check Asgardeo app email scope"}
+	}
+	fw, err := s.frameworkRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if fw == nil {
+		return nil, &apierror.Error{StatusCode: http.StatusNotFound, Body: "framework not found"}
+	}
+	return s.frameworkRepo.Update(ctx, id, req, updatedBy)
+}
+
+func (s *frameworkService) DeleteFramework(ctx context.Context, id int) error {
+	fw, err := s.frameworkRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if fw == nil {
+		return &apierror.Error{StatusCode: http.StatusNotFound, Body: "framework not found"}
+	}
+	return s.frameworkRepo.Delete(ctx, id)
 }
 
 func (s *frameworkService) ListProducts(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditProduct, error) {

@@ -221,6 +221,7 @@ here).
 | `POST` | `/audit/frameworks/search` | Search frameworks |
 | `GET` | `/audit/frameworks/{id}` | Get framework |
 | `PATCH` | `/audit/frameworks/{id}` | Update framework |
+| `DELETE` | `/audit/frameworks/{id}` | Delete framework (409 while audits or controls reference it) |
 | `POST` | `/audit/frameworks/{id}/controls` | Create a framework control |
 | `GET` | `/audit/frameworks/{id}/controls` | List current controls |
 | `GET` | `/audit/frameworks/{id}/controls/{controlNumber}/versions` | List all versions of a control |

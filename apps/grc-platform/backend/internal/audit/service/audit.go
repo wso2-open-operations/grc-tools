@@ -124,6 +124,10 @@ func (s *auditService) Create(ctx context.Context, req model.CreateAuditRequest,
 	if fw == nil {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "framework not found"}
 	}
+	// An archived framework keeps its existing audits but takes no new ones.
+	if fw.Status != "ACTIVE" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "framework is archived"}
+	}
 	pr, err := s.productRepo.GetByID(ctx, req.ProductID)
 	if err != nil {
 		return nil, err

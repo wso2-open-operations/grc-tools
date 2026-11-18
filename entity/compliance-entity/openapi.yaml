@@ -476,6 +476,29 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+      - Audit Frameworks
+      summary: Delete an audit framework
+      description: Only allowed while no audit (any status) and no framework control references it; otherwise 409.
+      operationId: deleteAuditFramework
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Framework is still referenced by audits or controls
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /audit/frameworks:
     post:
       tags:

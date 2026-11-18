@@ -33,6 +33,11 @@ type AuditFrameworkRepository interface {
 	GetAuditFrameworkByID(ctx context.Context, id int) (*domain.AuditFramework, error)
 	CreateAuditFramework(ctx context.Context, req domain.CreateAuditFrameworkRequest) (*domain.AuditFramework, error)
 	UpdateAuditFramework(ctx context.Context, id int, req domain.UpdateAuditFrameworkRequest) (*domain.AuditFramework, error)
+	// DeleteAuditFramework hard-deletes a framework that nothing references.
+	// Returns ConflictError while any audit (of any status, REMOVED included —
+	// the FK counts soft-deleted rows too) or framework control still points at
+	// it, and NotFoundError for an unknown id.
+	DeleteAuditFramework(ctx context.Context, id int) error
 }
 
 type auditFrameworkRepo struct{ db *sql.DB }
@@ -119,6 +124,15 @@ func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, r
 	args := []any{}
 
 	if req.Name != nil {
+		var clash int
+		err := r.db.QueryRowContext(ctx,
+			"SELECT id FROM audit_framework WHERE name = ? AND id <> ? LIMIT 1", *req.Name, id).Scan(&clash)
+		if err == nil {
+			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("audit_framework.Update(%d) name check: %w", id, err)
+		}
 		sets = append(sets, "name = ?")
 		args = append(args, *req.Name)
 	}
@@ -132,9 +146,40 @@ func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, r
 
 	if _, err := r.db.ExecContext(ctx,
 		"UPDATE audit_framework SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil { // #nosec G202
+		if isDuplicateKey(err) {
+			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+		}
 		return nil, fmt.Errorf("audit_framework.Update(%d): %w", id, err)
 	}
 	return r.GetAuditFrameworkByID(ctx, id)
+}
+
+func (r *auditFrameworkRepo) DeleteAuditFramework(ctx context.Context, id int) error {
+	if _, err := r.GetAuditFrameworkByID(ctx, id); err != nil {
+		return err
+	}
+	var audits, controls int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit WHERE framework_id = ?", id).Scan(&audits); err != nil {
+		return fmt.Errorf("audit_framework.Delete(%d) count audits: %w", id, err)
+	}
+	if audits > 0 {
+		return &apierror.ConflictError{Msg: "this framework has audits and cannot be deleted; archive it instead"}
+	}
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_framework_control WHERE framework_id = ?", id).Scan(&controls); err != nil {
+		return fmt.Errorf("audit_framework.Delete(%d) count controls: %w", id, err)
+	}
+	if controls > 0 {
+		return &apierror.ConflictError{Msg: "this framework has controls in its library and cannot be deleted; archive it instead"}
+	}
+	// The FKs are ON DELETE RESTRICT: a row created between the counts above
+	// and this DELETE trips 1451, mapped to the same 409.
+	if _, err := r.db.ExecContext(ctx, "DELETE FROM audit_framework WHERE id = ?", id); err != nil {
+		if isFKViolation(err) {
+			return &apierror.ConflictError{Msg: "this framework is still in use and cannot be deleted; archive it instead"}
+		}
+		return fmt.Errorf("audit_framework.Delete(%d): %w", id, err)
+	}
+	return nil
 }
 
 // frameworkScopeWhere returns a WHERE fragment (starting with "AND") and its

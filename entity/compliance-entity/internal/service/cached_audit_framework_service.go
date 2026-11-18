@@ -31,7 +31,7 @@ type cachedAuditFrameworkService struct {
 
 // NewCachedAuditFrameworkService wraps inner with a 5-minute in-memory cache on
 // GetAuditFrameworkByID. The cache entry is invalidated when UpdateAuditFramework
-// is called for that ID.
+// or DeleteAuditFramework is called for that ID.
 func NewCachedAuditFrameworkService(inner AuditFrameworkService) AuditFrameworkService {
 	return &cachedAuditFrameworkService{
 		inner: inner,
@@ -66,4 +66,12 @@ func (s *cachedAuditFrameworkService) UpdateAuditFramework(ctx context.Context, 
 	}
 	s.byID.Delete(id)
 	return f, nil
+}
+
+func (s *cachedAuditFrameworkService) DeleteAuditFramework(ctx context.Context, id int) error {
+	if err := s.inner.DeleteAuditFramework(ctx, id); err != nil {
+		return err
+	}
+	s.byID.Delete(id)
+	return nil
 }

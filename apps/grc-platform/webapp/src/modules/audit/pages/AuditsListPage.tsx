@@ -127,6 +127,7 @@ function FrameworkCard({ framework, activeAudits, hasAudits, onClick }: Framewor
               ) : (
                 <Chip label={hasAudits ? "No active audits" : "No audits yet"} size="small" variant="outlined" />
               )}
+              {framework.status === "INACTIVE" && <Chip label="Archived" size="small" variant="outlined" />}
               {overdue > 0 && (
                 <Chip
                   icon={<AlertTriangle size={11} />}
@@ -218,7 +219,7 @@ export default function AuditsListPage(): JSX.Element {
     isError: auditsError,
     refetch: refetchAudits,
   } = useGetAudits();
-  const { data: frameworksData, isLoading: frameworksLoading } = useGetFrameworks();
+  const { data: frameworksData, isLoading: frameworksLoading } = useGetFrameworks("ALL");
   const deleteAudit = useDeleteAudit();
   const updateAuditStatus = useUpdateAuditStatus();
   const canUpdateAudit = can(AuditPrivilege.UpdateAudit);

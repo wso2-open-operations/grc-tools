@@ -119,6 +119,11 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// Lookup data for Create Audit form dropdowns.
 	mux.HandleFunc("GET /api/v1/audits/frameworks", fh.listFrameworks)
 	mux.HandleFunc("POST /api/v1/audits/frameworks", fh.createFramework)
+	// PUT/DELETE on frameworks/{id}: no clash with the audit {id} routes — the
+	// only 2-segment PUT/DELETE patterns are PUT/DELETE /audits/{id} (1 segment)
+	// and PUT /audits/teams/{id} (literal "teams", a different literal).
+	mux.HandleFunc("PUT /api/v1/audits/frameworks/{id}", fh.updateFramework)
+	mux.HandleFunc("DELETE /api/v1/audits/frameworks/{id}", fh.deleteFramework)
 	// frameworkId is a query param (GET) / body field (POST), not a path
 	// segment — a path segment here collides with GET/PUT
 	// /api/v1/audits/{id}/... (see listFrameworkControls).

@@ -53,6 +53,8 @@ var externalVisible = map[string]bool{
 	"GET /api/v1/audits/products":             true,
 	"GET /api/v1/audits/teams":                true,
 	"POST /api/v1/audits/frameworks":          false,
+	"PUT /api/v1/audits/frameworks/{id}":      false,
+	"DELETE /api/v1/audits/frameworks/{id}":   false,
 	"POST /api/v1/audits/frameworks/controls": false,
 	"POST /api/v1/audits/products":            false,
 	"POST /api/v1/audits/teams":               false,

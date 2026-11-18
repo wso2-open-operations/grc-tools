@@ -56,6 +56,7 @@ type AuditFrameworkService interface {
 	GetAuditFrameworkByID(ctx context.Context, id int) (domain.AuditFramework, error)
 	CreateAuditFramework(ctx context.Context, req domain.CreateAuditFrameworkRequest) (domain.AuditFramework, error)
 	UpdateAuditFramework(ctx context.Context, id int, req domain.UpdateAuditFrameworkRequest) (domain.AuditFramework, error)
+	DeleteAuditFramework(ctx context.Context, id int) error
 }
 
 // AuditProductService defines operations on the audit_product entity.

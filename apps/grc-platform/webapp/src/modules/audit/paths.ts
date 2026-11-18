@@ -43,4 +43,5 @@ export const auditPaths = {
     withQuery(`${AUDIT_BASE}/audits/${auditId}`, { control: controlId }),
   activity: (auditId: Id) => `${AUDIT_BASE}/audits/${auditId}/activity`,
   dashboard: `${AUDIT_BASE}/dashboard`,
+  frameworks: `${AUDIT_BASE}/frameworks`,
 };

@@ -19,6 +19,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
@@ -43,7 +44,21 @@ func (h *frameworkHandler) listFrameworks(w http.ResponseWriter, r *http.Request
 	if user != nil {
 		userID = user.UserID
 	}
-	frameworks, err := h.svc.ListFrameworks(ctx, scope, userID, managedTeamIDs(auth.Grants(ctx)))
+	// Default ACTIVE keeps the dropdown contract; the Frameworks page asks for
+	// status=ALL (or INACTIVE) to see and restore archived ones.
+	var status string
+	switch q := strings.ToUpper(r.URL.Query().Get("status")); q {
+	case "", "ACTIVE":
+		status = "ACTIVE"
+	case "INACTIVE":
+		status = "INACTIVE"
+	case "ALL":
+		status = ""
+	default:
+		response.WriteError(w, http.StatusBadRequest, "status must be ACTIVE, INACTIVE or ALL")
+		return
+	}
+	frameworks, err := h.svc.ListFrameworks(ctx, scope, userID, managedTeamIDs(auth.Grants(ctx)), status)
 	if err != nil {
 		response.MapServiceError(ctx, w, err, response.ErrMsgInternal)
 		return
@@ -70,6 +85,49 @@ func (h *frameworkHandler) createFramework(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	response.WriteJSONValue(w, http.StatusCreated, fw)
+}
+
+// updateFramework handles PUT /api/v1/audits/frameworks/{id} — rename, archive
+// (status INACTIVE) or restore (status ACTIVE).
+func (h *frameworkHandler) updateFramework(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
+		return
+	}
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id <= 0 {
+		response.WriteError(w, http.StatusBadRequest, "invalid framework id")
+		return
+	}
+	var req model.UpdateFrameworkRequest
+	if err := response.DecodeJSON(w, r, &req); err != nil {
+		return
+	}
+	actor := auth.FromContext(r.Context()).Subject
+	fw, err := h.svc.UpdateFramework(r.Context(), id, req, actor)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	response.WriteJSONValue(w, http.StatusOK, fw)
+}
+
+// deleteFramework handles DELETE /api/v1/audits/frameworks/{id}. Only an empty
+// framework (no audits, no controls) can go; otherwise 409 and the UI points
+// the user at archive.
+func (h *frameworkHandler) deleteFramework(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
+		return
+	}
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id <= 0 {
+		response.WriteError(w, http.StatusBadRequest, "invalid framework id")
+		return
+	}
+	if err := h.svc.DeleteFramework(r.Context(), id); err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // listProducts handles GET /api/v1/audits/products.
