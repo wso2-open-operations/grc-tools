@@ -152,7 +152,7 @@ func (r *auditFrameworkRepo) CreateAuditFramework(ctx context.Context, req domai
 		}
 		return r.GetAuditFrameworkByID(ctx, existingID)
 	case err == nil:
-		return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+		return nil, &apierror.ConflictError{Msg: nameTakenMessage(existingStatus)}
 	case !errors.Is(err, sql.ErrNoRows):
 		return nil, fmt.Errorf("audit_framework.Create name check: %w", err)
 	}
@@ -180,10 +180,11 @@ func (r *auditFrameworkRepo) UpdateAuditFramework(ctx context.Context, id int, r
 
 	if req.Name != nil {
 		var clash int
+		var clashStatus string
 		err := r.db.QueryRowContext(ctx,
-			"SELECT id FROM audit_framework WHERE name = ? AND id <> ? LIMIT 1", *req.Name, id).Scan(&clash)
+			"SELECT id, status FROM audit_framework WHERE name = ? AND id <> ? LIMIT 1", *req.Name, id).Scan(&clash, &clashStatus)
 		if err == nil {
-			return nil, &apierror.ConflictError{Msg: "a framework with this name already exists"}
+			return nil, &apierror.ConflictError{Msg: nameTakenMessage(clashStatus)}
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("audit_framework.Update(%d) name check: %w", id, err)
@@ -243,6 +244,19 @@ func (r *auditFrameworkRepo) DeleteAuditFramework(ctx context.Context, id int, d
 		return &apierror.ConflictError{Msg: "this framework is still in use and cannot be deleted; archive it instead"}
 	}
 	return nil
+}
+
+// nameTakenMessage explains a name clash in terms of the status of the framework
+// holding the name, so a hidden (archived or deleted) one is not a mystery.
+func nameTakenMessage(holderStatus string) string {
+	switch holderStatus {
+	case frameworkArchived:
+		return "a framework with this name is archived; restore it instead, or choose another name"
+	case frameworkDeleted:
+		return "this name belongs to a deleted framework; choose another name, or create a framework with this name to bring it back"
+	default:
+		return "a framework with this name already exists"
+	}
 }
 
 // frameworkScopeWhere returns a WHERE fragment (starting with "AND") and its

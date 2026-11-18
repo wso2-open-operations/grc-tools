@@ -4546,8 +4546,11 @@ components:
     CreateAuditFrameworkRequest:
       type: object
       description: >-
-        Returns 409 if the name is taken by a live framework. If it is taken by a
-        deleted (INACTIVE) one, that framework is revived instead.
+        Returns 409 if the name is taken by an active or archived framework; the
+        message says which, and that an archived one should be restored instead.
+        If it is taken by a deleted (INACTIVE) one, that framework is revived.
+        Renaming onto a name held by an archived or deleted framework also
+        returns 409, with a message saying so.
       properties:
         name:
           type: string

@@ -19,6 +19,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,6 +183,9 @@ func TestCreateAuditFramework_LiveDuplicateConflicts(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("want ConflictError, got %v", err)
 	}
+	if !strings.Contains(ce.Msg, "archived") || !strings.Contains(ce.Msg, "restore") {
+		t.Errorf("an archived holder should point at restore, got %q", ce.Msg)
+	}
 }
 
 func TestCreateAuditFramework_NewName(t *testing.T) {
@@ -212,12 +216,35 @@ func TestUpdateAuditFramework_DuplicateName(t *testing.T) {
 	repo, mock := newFrameworkRepoMock(t)
 	name := "ISO 27001"
 	expectFrameworkRow(mock, 3, "ACTIVE")
-	mock.ExpectQuery(re("SELECT id FROM audit_framework WHERE name = ? AND id <> ?")).WithArgs(name, 3).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
+	mock.ExpectQuery(re("SELECT id, status FROM audit_framework WHERE name = ? AND id <> ?")).WithArgs(name, 3).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, "ACTIVE"))
 
 	var ce *apierror.ConflictError
 	_, err := repo.UpdateAuditFramework(context.Background(), 3, domain.UpdateAuditFrameworkRequest{Name: &name, UpdatedBy: "a@b.c"})
 	if !errors.As(err, &ce) {
 		t.Fatalf("want ConflictError, got %v", err)
+	}
+	if ce.Msg != "a framework with this name already exists" {
+		t.Errorf("unexpected message: %q", ce.Msg)
+	}
+}
+
+// A name held by a framework the user cannot see must say why, and how to move on.
+func TestUpdateAuditFramework_NameHeldByHiddenFramework(t *testing.T) {
+	for holder, want := range map[string]string{
+		"ARCHIVED": "archived",
+		"INACTIVE": "deleted framework",
+	} {
+		repo, mock := newFrameworkRepoMock(t)
+		name := "SOC2"
+		expectFrameworkRow(mock, 3, "ACTIVE")
+		mock.ExpectQuery(re("SELECT id, status FROM audit_framework WHERE name = ? AND id <> ?")).WithArgs(name, 3).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "status"}).AddRow(9, holder))
+
+		var ce *apierror.ConflictError
+		_, err := repo.UpdateAuditFramework(context.Background(), 3, domain.UpdateAuditFrameworkRequest{Name: &name, UpdatedBy: "a@b.c"})
+		if !errors.As(err, &ce) || !strings.Contains(ce.Msg, want) {
+			t.Errorf("%s holder: want a message mentioning %q, got %v", holder, want, err)
+		}
 	}
 }
