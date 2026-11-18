@@ -117,8 +117,8 @@ func TestEnrichDeadlinesFillsDesignControls(t *testing.T) {
 		*c.PlannedComplianceDate != "2026-11-17" || *c.PlannedAuditorDate != "2026-11-27" {
 		t.Fatalf("dates wrong: %+v", c)
 	}
-	if c.Delayed == nil || !*c.Delayed {
-		t.Fatal("original EY date (27 Nov) passed, should be Delayed")
+	if c.Delayed == nil || *c.Delayed {
+		t.Fatal("EY holds the control inside its own deadline (3 Dec), so the flag is reset")
 	}
 	if len(c.DelayLog) != 6 || c.DelayLog[0].HandledBy != "OWNER" || c.DelayLog[0].Date != "2026-11-08" || c.DelayLog[5].Date != "2026-11-23" {
 		t.Fatalf("delay log wrong: %+v", c.DelayLog)

@@ -313,12 +313,12 @@ func TestEvaluateLateAtEveryStep(t *testing.T) {
 		{"5 Nov, on time", at(time.November, 5, 12, 0), Owner, "2026-11-07", false, []string{}},
 		{"8 Nov, internal late one day", at(time.November, 8, 12, 0), Owner, "2026-11-07", true, []string{"Internal - 11/08"}},
 		{"10 Nov before submit", at(time.November, 10, 9, 0), Owner, "2026-11-07", true, []string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10"}},
-		{"11 Nov, with GRC", at(time.November, 11, 9, 0), Compliance, "2026-11-20", true, []string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10"}},
+		{"11 Nov, with GRC", at(time.November, 11, 9, 0), Compliance, "2026-11-20", false, []string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10"}},
 		{"22 Nov, GRC late", at(time.November, 22, 9, 0), Compliance, "2026-11-20", true,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22"}},
-		{"24 Nov, with EY", at(time.November, 24, 9, 0), Auditor, "2026-12-03", true,
+		{"24 Nov, with EY", at(time.November, 24, 9, 0), Auditor, "2026-12-03", false,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22", "GRC - 11/23"}},
-		{"28 Nov, EY on time but earlier groups were late", at(time.November, 28, 9, 0), Auditor, "2026-12-03", true,
+		{"28 Nov, EY on time but earlier groups were late", at(time.November, 28, 9, 0), Auditor, "2026-12-03", false,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22", "GRC - 11/23"}},
 		{"4 Dec, EY late", at(time.December, 4, 9, 0), Auditor, "2026-12-03", true,
 			[]string{"Internal - 11/08", "Internal - 11/09", "Internal - 11/10", "GRC - 11/21", "GRC - 11/22", "GRC - 11/23", "EY - 12/04"}},
@@ -345,7 +345,7 @@ func TestEvaluateLateAtEveryStep(t *testing.T) {
 			t.Errorf("log = %v, want %v", got, want)
 		}
 		if !ev.Delayed {
-			t.Error("a control where someone was late stays Delayed")
+			t.Error("a completed control where someone was late stays Delayed")
 		}
 		if ev.CurrentHandler != nil {
 			t.Error("a completed control has no current handler")
@@ -564,8 +564,8 @@ func TestOEPlansPerPhase(t *testing.T) {
 	}
 }
 
-// Delayed means someone held the control past their own deadline, whoever it was.
-// A late Owner does not make an on-time EY look late.
+// The delay log names only the group that was late. A late Owner does not make
+// an on-time EY look late, and a completed control stays Delayed because someone was late.
 func TestDelayedBlamesOnlyTheLateGroup(t *testing.T) {
 	stages := []Stage{
 		{ID: 1, Phase: PhasePopulation, HandledBy: Owner, CycleType: Initial, StartedAt: at(time.November, 1, 9, 0), DueDate: day(time.November, 5),
@@ -575,7 +575,7 @@ func TestDelayedBlamesOnlyTheLateGroup(t *testing.T) {
 	}
 	ev := Evaluate(stages, at(time.November, 20, 9, 0))
 	if !ev.Delayed {
-		t.Fatal("the Owner was two days late, so the control is Delayed")
+		t.Fatal("the control is complete and the Owner was late, so it stays Delayed")
 	}
 	if got := logString(ev); !equalStrings(got, []string{"Internal - 11/06", "Internal - 11/07"}) {
 		t.Fatalf("only the Owner is in the log, got %v", got)
@@ -587,16 +587,21 @@ func TestDelayedBlamesOnlyTheLateGroup(t *testing.T) {
 	}
 }
 
-func TestStillDelayedAfterLateOwnerRecovers(t *testing.T) {
+func TestDelayedResetsWhenLateOwnerHandsOn(t *testing.T) {
 	stages := []Stage{
 		{ID: 1, Phase: PhaseEvidence, HandledBy: Owner, CycleType: Initial, StartedAt: at(time.November, 1, 9, 0), DueDate: day(time.November, 5),
 			EndedAt: ptr(at(time.November, 6, 10, 0))},
 		{ID: 2, Phase: PhaseEvidence, HandledBy: Compliance, CycleType: Initial, StartedAt: at(time.November, 6, 10, 0), DueDate: day(time.November, 16)},
 	}
-	if ev := Evaluate(stages, at(time.November, 8, 9, 0)); !ev.Delayed {
-		t.Fatal("one late day in the past still means Delayed")
+	ev := Evaluate(stages, at(time.November, 8, 9, 0))
+	if ev.Delayed {
+		t.Fatal("Compliance is inside its deadline, so the flag resets")
 	}
-	if ev := Evaluate(stages[1:], at(time.November, 8, 9, 0)); ev.Delayed {
-		t.Fatal("a holder inside their deadline is not Delayed")
+	if len(ev.DelayLog) != 1 {
+		t.Fatalf("the Owner's late day stays in the log, got %v", logString(ev))
+	}
+	// Compliance running late turns the flag back on.
+	if ev := Evaluate(stages, at(time.November, 18, 9, 0)); !ev.Delayed {
+		t.Fatal("Compliance past its own deadline is Delayed again")
 	}
 }

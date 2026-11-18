@@ -346,8 +346,10 @@ type Evaluation struct {
 	PlannedComplianceDate *time.Time
 	PlannedAuditorDate    *time.Time
 	PhasePlans            []PhasePlan
-	// Delayed is true when any group held the control past its own deadline,
-	// which is the same as the delay log not being empty.
+	// Delayed is true while the current holder is past their own deadline. It
+	// resets when the control moves on. A completed control has no holder, so it
+	// stays Delayed if anyone was ever late. The delay log is the permanent record
+	// of every late day, whoever was late.
 	Delayed  bool
 	DelayLog []LogEntry
 }
@@ -409,6 +411,10 @@ func Evaluate(stages []Stage, now time.Time) Evaluation {
 			d = AddDays(d, 1)
 		}
 	}
-	ev.Delayed = len(ev.DelayLog) > 0
+	if ev.CurrentDueDate != nil {
+		ev.Delayed = today.After(DayOf(*ev.CurrentDueDate))
+	} else {
+		ev.Delayed = len(ev.DelayLog) > 0
+	}
 	return ev
 }

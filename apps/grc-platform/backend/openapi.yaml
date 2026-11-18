@@ -5551,7 +5551,7 @@ components:
         delayed:
           type: boolean
           nullable: true
-          description: True when any group held the control past its own deadline, i.e. the delay log has at least one entry. It stays true afterwards. The one exception is that applying changed days to open stages (applyToOpenStages) moves their deadlines, and late days are worked out from the deadlines, so an extension can clear lateness that no longer holds.
+          description: True only while the current holder is past their own deadline. It resets when the control moves to the next group. A completed control has no holder, so it stays true if any group was ever late. The delay log keeps every late day, whoever was late, so it still shows where the delay happened.
         ultimateDelayed:
           type: boolean
           nullable: true
