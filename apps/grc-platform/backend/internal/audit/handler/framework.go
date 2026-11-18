@@ -45,17 +45,18 @@ func (h *frameworkHandler) listFrameworks(w http.ResponseWriter, r *http.Request
 		userID = user.UserID
 	}
 	// Default ACTIVE keeps the dropdown contract; the Frameworks page asks for
-	// status=ALL (or INACTIVE) to see and restore archived ones.
+	// status=ALL (or ARCHIVED) to see and restore archived ones. Deleted
+	// frameworks are never listed.
 	var status string
 	switch q := strings.ToUpper(r.URL.Query().Get("status")); q {
 	case "", "ACTIVE":
 		status = "ACTIVE"
-	case "INACTIVE":
-		status = "INACTIVE"
+	case "ARCHIVED":
+		status = "ARCHIVED"
 	case "ALL":
 		status = ""
 	default:
-		response.WriteError(w, http.StatusBadRequest, "status must be ACTIVE, INACTIVE or ALL")
+		response.WriteError(w, http.StatusBadRequest, "status must be ACTIVE, ARCHIVED or ALL")
 		return
 	}
 	frameworks, err := h.svc.ListFrameworks(ctx, scope, userID, managedTeamIDs(auth.Grants(ctx)), status)
@@ -88,7 +89,7 @@ func (h *frameworkHandler) createFramework(w http.ResponseWriter, r *http.Reques
 }
 
 // updateFramework handles PUT /api/v1/audits/frameworks/{id} — rename, archive
-// (status INACTIVE) or restore (status ACTIVE).
+// (status ARCHIVED) or restore (status ACTIVE).
 func (h *frameworkHandler) updateFramework(w http.ResponseWriter, r *http.Request) {
 	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
 		return
@@ -111,9 +112,9 @@ func (h *frameworkHandler) updateFramework(w http.ResponseWriter, r *http.Reques
 	response.WriteJSONValue(w, http.StatusOK, fw)
 }
 
-// deleteFramework handles DELETE /api/v1/audits/frameworks/{id}. Only an empty
-// framework (no audits, no controls) can go; otherwise 409 and the UI points
-// the user at archive.
+// deleteFramework handles DELETE /api/v1/audits/frameworks/{id}. A soft delete
+// (the framework's status becomes INACTIVE): only an empty framework (no audits,
+// no controls) can go; otherwise 409 and the UI points the user at archive.
 func (h *frameworkHandler) deleteFramework(w http.ResponseWriter, r *http.Request) {
 	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
 		return
@@ -123,7 +124,8 @@ func (h *frameworkHandler) deleteFramework(w http.ResponseWriter, r *http.Reques
 		response.WriteError(w, http.StatusBadRequest, "invalid framework id")
 		return
 	}
-	if err := h.svc.DeleteFramework(r.Context(), id); err != nil {
+	actor := auth.FromContext(r.Context()).Subject
+	if err := h.svc.DeleteFramework(r.Context(), id, actor); err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}

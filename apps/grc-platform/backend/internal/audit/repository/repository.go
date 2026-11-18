@@ -68,9 +68,9 @@ type FrameworkRepository interface {
 	GetByID(ctx context.Context, id int) (*model.AuditFramework, error)
 	Create(ctx context.Context, req model.CreateFrameworkRequest, createdBy string) (*model.AuditFramework, error)
 	Update(ctx context.Context, id int, req model.UpdateFrameworkRequest, updatedBy string) (*model.AuditFramework, error)
-	// Delete removes a framework nothing references; the data service answers
-	// 409 while audits or controls still point at it.
-	Delete(ctx context.Context, id int) error
+	// Delete soft-deletes a framework (status INACTIVE) nothing references; the
+	// data service answers 409 while audits or controls still point at it.
+	Delete(ctx context.Context, id int, deletedBy string) error
 }
 
 // ProductRepository is the data-access contract for audit products.

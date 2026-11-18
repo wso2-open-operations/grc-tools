@@ -34,11 +34,16 @@ func NewAuditFrameworkService(repo repository.AuditFrameworkRepository) AuditFra
 	return &auditFrameworkService{repo: repo}
 }
 
-var validAuditFrameworkStatuses = map[string]bool{"ACTIVE": true, "INACTIVE": true}
+// Statuses that can be searched on: ACTIVE, ARCHIVED, or INACTIVE (deleted).
+var validAuditFrameworkStatuses = map[string]bool{"ACTIVE": true, "ARCHIVED": true, "INACTIVE": true}
+
+// Statuses a caller may set on create/update. INACTIVE (deleted) is reached only
+// through DELETE, so a framework cannot be deleted by a status patch.
+var settableAuditFrameworkStatuses = map[string]bool{"ACTIVE": true, "ARCHIVED": true}
 
 func (s *auditFrameworkService) SearchAuditFrameworks(ctx context.Context, req domain.SearchAuditFrameworksRequest) (domain.SearchAuditFrameworksResponse, error) {
 	if req.StatusKey != "" && !validAuditFrameworkStatuses[strings.ToUpper(req.StatusKey)] {
-		return domain.SearchAuditFrameworksResponse{}, &apierror.ValidationError{Msg: "invalid statusKey: must be ACTIVE or INACTIVE"}
+		return domain.SearchAuditFrameworksResponse{}, &apierror.ValidationError{Msg: "invalid statusKey: must be ACTIVE, ARCHIVED or INACTIVE"}
 	}
 	req.StatusKey = strings.ToUpper(req.StatusKey)
 	normalizePagination(&req.Pagination)
@@ -64,11 +69,12 @@ func (s *auditFrameworkService) GetAuditFrameworkByID(ctx context.Context, id in
 }
 
 func (s *auditFrameworkService) CreateAuditFramework(ctx context.Context, req domain.CreateAuditFrameworkRequest) (domain.AuditFramework, error) {
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		return domain.AuditFramework{}, &apierror.ValidationError{Msg: "name is required"}
 	}
-	if req.Status != "" && !validAuditFrameworkStatuses[strings.ToUpper(req.Status)] {
-		return domain.AuditFramework{}, &apierror.ValidationError{Msg: "invalid status: must be ACTIVE or INACTIVE"}
+	if req.Status != "" && !settableAuditFrameworkStatuses[strings.ToUpper(req.Status)] {
+		return domain.AuditFramework{}, &apierror.ValidationError{Msg: "invalid status: must be ACTIVE or ARCHIVED"}
 	}
 	req.Status = strings.ToUpper(req.Status)
 	if req.CreatedBy == "" {
@@ -85,8 +91,8 @@ func (s *auditFrameworkService) UpdateAuditFramework(ctx context.Context, id int
 	if id <= 0 {
 		return domain.AuditFramework{}, &apierror.ValidationError{Msg: "framework id must be a positive integer"}
 	}
-	if req.Status != nil && !validAuditFrameworkStatuses[strings.ToUpper(*req.Status)] {
-		return domain.AuditFramework{}, &apierror.ValidationError{Msg: "invalid status: must be ACTIVE or INACTIVE"}
+	if req.Status != nil && !settableAuditFrameworkStatuses[strings.ToUpper(*req.Status)] {
+		return domain.AuditFramework{}, &apierror.ValidationError{Msg: "invalid status: must be ACTIVE or ARCHIVED"}
 	}
 	if req.Status != nil {
 		up := strings.ToUpper(*req.Status)
@@ -109,9 +115,12 @@ func (s *auditFrameworkService) UpdateAuditFramework(ctx context.Context, id int
 	return *f, nil
 }
 
-func (s *auditFrameworkService) DeleteAuditFramework(ctx context.Context, id int) error {
+func (s *auditFrameworkService) DeleteAuditFramework(ctx context.Context, id int, deletedBy string) error {
 	if id <= 0 {
 		return &apierror.ValidationError{Msg: "framework id must be a positive integer"}
 	}
-	return s.repo.DeleteAuditFramework(ctx, id)
+	if strings.TrimSpace(deletedBy) == "" {
+		return &apierror.ValidationError{Msg: "deletedBy is required"}
+	}
+	return s.repo.DeleteAuditFramework(ctx, id, deletedBy)
 }

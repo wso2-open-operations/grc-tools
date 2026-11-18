@@ -108,7 +108,7 @@ func (h *AuditFrameworkHandler) DeleteAuditFramework(w http.ResponseWriter, r *h
 		writeServiceError(w, r, &apierror.ValidationError{Msg: "id must be a positive integer"})
 		return
 	}
-	if err := h.svc.DeleteAuditFramework(r.Context(), id); err != nil {
+	if err := h.svc.DeleteAuditFramework(r.Context(), id, r.URL.Query().Get("deletedBy")); err != nil {
 		writeServiceError(w, r, err)
 		return
 	}

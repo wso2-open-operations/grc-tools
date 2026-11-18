@@ -23,10 +23,10 @@ import { AUDIT_DASHBOARD_QUERY_KEY } from "@modules/audit/api/useGetDashboard";
 import { extractErrorMessage } from "@modules/audit/api/apiError";
 import type { AuditFramework } from "@modules/audit/types/audit";
 
-/** Omitted fields are left as they are. INACTIVE archives the framework; ACTIVE restores it. */
+/** Omitted fields are left as they are. ARCHIVED archives the framework; ACTIVE restores it. */
 export interface UpdateFrameworkFields {
   name?: string;
-  status?: "ACTIVE" | "INACTIVE";
+  status?: "ACTIVE" | "ARCHIVED";
 }
 
 /** Renames, archives or restores a framework. Its audits are never touched. */

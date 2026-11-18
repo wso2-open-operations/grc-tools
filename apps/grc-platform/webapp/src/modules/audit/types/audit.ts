@@ -52,7 +52,7 @@ export type ControlScope = "COMMON" | "PRODUCT_SPECIFIC";
 export interface AuditFramework {
   id: number;
   name: string;
-  /** ACTIVE, or INACTIVE once archived. */
+  /** ACTIVE, or ARCHIVED once archived. Deleted frameworks are never returned. */
   status?: string;
 }
 

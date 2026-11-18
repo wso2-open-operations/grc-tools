@@ -247,7 +247,7 @@ paths:
       tags:
       - Audit Frameworks
       summary: Rename, archive or restore an audit framework
-      description: Requires AUDIT_MANAGE_FRAMEWORKS. status INACTIVE archives the framework (hidden from the Create Audit form; existing audits are untouched), ACTIVE restores it. Name must be unique.
+      description: Requires AUDIT_MANAGE_FRAMEWORKS. status ARCHIVED archives the framework (hidden from the Create Audit form; existing audits are untouched), ACTIVE restores it. Name must be unique.
       operationId: updateAuditFramework
       parameters:
       - name: id
@@ -267,7 +267,7 @@ paths:
                   maxLength: 100
                 status:
                   type: string
-                  enum: [ACTIVE, INACTIVE]
+                  enum: [ACTIVE, ARCHIVED]
       responses:
         '200':
           description: Updated framework
@@ -293,7 +293,7 @@ paths:
       tags:
       - Audit Frameworks
       summary: Delete an audit framework
-      description: Requires AUDIT_MANAGE_FRAMEWORKS. Only allowed while no audit (any status) and no framework control references it; otherwise 409 and the caller should archive instead.
+      description: Requires AUDIT_MANAGE_FRAMEWORKS. Soft delete: the framework is no longer listed or returned. Only allowed while no audit (REMOVED ones excluded) and no framework control references it; otherwise 409 and the caller should archive instead. Creating a framework with the same name brings the deleted one back.
       operationId: deleteAuditFramework
       parameters:
       - name: id

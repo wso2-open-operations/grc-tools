@@ -132,7 +132,7 @@ type AuditFramework struct {
 // SearchAuditFrameworksRequest is the payload for POST /audit/frameworks/search.
 type SearchAuditFrameworksRequest struct {
 	SearchQuery string `json:"searchQuery"`
-	StatusKey   string `json:"statusKey"` // ACTIVE | INACTIVE | "" (all)
+	StatusKey   string `json:"statusKey"` // ACTIVE | ARCHIVED | INACTIVE (deleted) | "" (all except deleted)
 	// Scope/UserID apply the same row-scoping rule as controls/audits (see
 	// audit_dashboard_repo.go's scopeWhere): a framework has no team of its own,
 	// so it matches when it has at least one audit with at least one control in

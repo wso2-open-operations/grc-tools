@@ -33,15 +33,17 @@ const maxFrameworkNameLength = 100
 // and the versioned framework control library.
 type FrameworkService interface {
 	// ListFrameworks returns frameworks visible to the caller. status is
-	// "ACTIVE" (what dropdowns want), "INACTIVE" (archived), or "" for all.
+	// "ACTIVE" (what dropdowns want), "ARCHIVED", or "" for every framework that
+	// has not been deleted.
 	ListFrameworks(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int, status string) ([]*model.AuditFramework, error)
 	CreateFramework(ctx context.Context, req model.CreateFrameworkRequest, createdBy string) (*model.AuditFramework, error)
-	// UpdateFramework renames and/or archives (status INACTIVE) / restores
+	// UpdateFramework renames and/or archives (status ARCHIVED) / restores
 	// (status ACTIVE) a framework. Existing audits are never touched.
 	UpdateFramework(ctx context.Context, id int, req model.UpdateFrameworkRequest, updatedBy string) (*model.AuditFramework, error)
-	// DeleteFramework removes a framework that has no audits and no controls;
-	// otherwise the data service answers 409 and the caller should archive.
-	DeleteFramework(ctx context.Context, id int) error
+	// DeleteFramework soft-deletes (status INACTIVE) a framework that has no
+	// audits and no controls; otherwise the data service answers 409 and the
+	// caller should archive.
+	DeleteFramework(ctx context.Context, id int, deletedBy string) error
 	ListProducts(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditProduct, error)
 	CreateProduct(ctx context.Context, req model.CreateProductRequest, createdBy string) (*model.AuditProduct, error)
 	// FrameworkInScope reports whether frameworkID has at least one audit
@@ -101,8 +103,8 @@ func (s *frameworkService) UpdateFramework(ctx context.Context, id int, req mode
 		}
 		req.Name = &name
 	}
-	if req.Status != nil && *req.Status != "ACTIVE" && *req.Status != "INACTIVE" {
-		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "status must be ACTIVE or INACTIVE"}
+	if req.Status != nil && *req.Status != "ACTIVE" && *req.Status != "ARCHIVED" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "status must be ACTIVE or ARCHIVED"}
 	}
 	if updatedBy == "" {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "authenticated user email is missing from token — check Asgardeo app email scope"}
@@ -117,7 +119,10 @@ func (s *frameworkService) UpdateFramework(ctx context.Context, id int, req mode
 	return s.frameworkRepo.Update(ctx, id, req, updatedBy)
 }
 
-func (s *frameworkService) DeleteFramework(ctx context.Context, id int) error {
+func (s *frameworkService) DeleteFramework(ctx context.Context, id int, deletedBy string) error {
+	if deletedBy == "" {
+		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "authenticated user email is missing from token — check Asgardeo app email scope"}
+	}
 	fw, err := s.frameworkRepo.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -125,7 +130,7 @@ func (s *frameworkService) DeleteFramework(ctx context.Context, id int) error {
 	if fw == nil {
 		return &apierror.Error{StatusCode: http.StatusNotFound, Body: "framework not found"}
 	}
-	return s.frameworkRepo.Delete(ctx, id)
+	return s.frameworkRepo.Delete(ctx, id, deletedBy)
 }
 
 func (s *frameworkService) ListProducts(ctx context.Context, scope model.Scope, userID int, scopeTeamIDs []int) ([]*model.AuditProduct, error) {

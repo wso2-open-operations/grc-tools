@@ -56,7 +56,13 @@ func (s *cachedAuditFrameworkService) GetAuditFrameworkByID(ctx context.Context,
 }
 
 func (s *cachedAuditFrameworkService) CreateAuditFramework(ctx context.Context, req domain.CreateAuditFrameworkRequest) (domain.AuditFramework, error) {
-	return s.inner.CreateAuditFramework(ctx, req)
+	f, err := s.inner.CreateAuditFramework(ctx, req)
+	if err != nil {
+		return domain.AuditFramework{}, err
+	}
+	// A create can revive a deleted framework, so drop any stale entry for its id.
+	s.byID.Delete(f.ID)
+	return f, nil
 }
 
 func (s *cachedAuditFrameworkService) UpdateAuditFramework(ctx context.Context, id int, req domain.UpdateAuditFrameworkRequest) (domain.AuditFramework, error) {
@@ -68,8 +74,8 @@ func (s *cachedAuditFrameworkService) UpdateAuditFramework(ctx context.Context, 
 	return f, nil
 }
 
-func (s *cachedAuditFrameworkService) DeleteAuditFramework(ctx context.Context, id int) error {
-	if err := s.inner.DeleteAuditFramework(ctx, id); err != nil {
+func (s *cachedAuditFrameworkService) DeleteAuditFramework(ctx context.Context, id int, deletedBy string) error {
+	if err := s.inner.DeleteAuditFramework(ctx, id, deletedBy); err != nil {
 		return err
 	}
 	s.byID.Delete(id)

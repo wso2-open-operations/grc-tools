@@ -21,6 +21,7 @@ package entity
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
@@ -121,8 +122,9 @@ func (r *frameworkRepo) Update(ctx context.Context, id int, req model.UpdateFram
 	return &fw, nil
 }
 
-func (r *frameworkRepo) Delete(ctx context.Context, id int) error {
-	return r.c.Delete(ctx, fmt.Sprintf("/audit/frameworks/%d", id))
+func (r *frameworkRepo) Delete(ctx context.Context, id int, deletedBy string) error {
+	// The entity requires the acting user for the soft-delete audit trail.
+	return r.c.Delete(ctx, fmt.Sprintf("/audit/frameworks/%d?deletedBy=%s", id, url.QueryEscape(deletedBy)))
 }
 
 // ── Products ──────────────────────────────────────────────────────────────────

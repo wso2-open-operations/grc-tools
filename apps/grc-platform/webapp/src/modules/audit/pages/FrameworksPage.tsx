@@ -48,7 +48,7 @@ const STATUS_LABELS: Record<StatusFilter, string> = { ACTIVE: "Active", ARCHIVED
 
 function matchesStatus(f: AuditFramework, sf: StatusFilter): boolean {
   if (sf === "ALL") return true;
-  return sf === "ARCHIVED" ? f.status === "INACTIVE" : f.status !== "INACTIVE";
+  return sf === "ARCHIVED" ? f.status === "ARCHIVED" : f.status !== "ARCHIVED";
 }
 
 export default function FrameworksPage(): JSX.Element {
@@ -70,10 +70,7 @@ export default function FrameworksPage(): JSX.Element {
   const frameworks = frameworksData ?? [];
   // REMOVED audits are soft-deleted, so they don't count towards what a user sees.
   const audits = (auditsData?.items ?? []).filter((a) => a.status !== "REMOVED");
-  const auditCounts = (id: number) => {
-    const mine = audits.filter((a) => a.framework.id === id);
-    return { total: mine.length, active: mine.filter((a) => a.status === "ACTIVE").length };
-  };
+  const auditsOf = (id: number) => audits.filter((a) => a.framework.id === id);
 
   const q = search.trim().toLowerCase();
   const bySearch = frameworks.filter((f) => !q || f.name.toLowerCase().includes(q));
@@ -83,9 +80,9 @@ export default function FrameworksPage(): JSX.Element {
 
   // Archive is reversible, so no confirmation dialog — just a result snackbar.
   const handleArchiveToggle = (framework: AuditFramework) => {
-    const archiving = framework.status !== "INACTIVE";
+    const archiving = framework.status !== "ARCHIVED";
     updateFramework.mutate(
-      { frameworkId: framework.id, fields: { status: archiving ? "INACTIVE" : "ACTIVE" } },
+      { frameworkId: framework.id, fields: { status: archiving ? "ARCHIVED" : "ACTIVE" } },
       {
         onSuccess: () =>
           setSnack({
@@ -97,8 +94,8 @@ export default function FrameworksPage(): JSX.Element {
     );
   };
 
-  const deleteTarget = frameworkToDelete ? auditCounts(frameworkToDelete.id) : null;
-  const deleteBlocked = (deleteTarget?.total ?? 0) > 0;
+  const deleteTargetAudits = frameworkToDelete ? auditsOf(frameworkToDelete.id).length : 0;
+  const deleteBlocked = deleteTargetAudits > 0;
   const closeDelete = () => {
     setFrameworkToDelete(null);
     deleteFramework.reset();
@@ -191,13 +188,11 @@ export default function FrameworksPage(): JSX.Element {
       {!isLoading && displayed.length > 0 && (
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)" }, gap: 2.5 }}>
           {displayed.map((f) => {
-            const counts = auditCounts(f.id);
             return (
               <FrameworkManageCard
                 key={f.id}
                 framework={f}
-                auditCount={counts.total}
-                activeAuditCount={counts.active}
+                audits={auditsOf(f.id)}
                 canManage={canManage}
                 onEdit={() => {
                   setFrameworkToEdit(f);
@@ -228,13 +223,14 @@ export default function FrameworksPage(): JSX.Element {
           <DialogContentText>
             {deleteBlocked ? (
               <>
-                <strong>{frameworkToDelete?.name}</strong> has {deleteTarget?.total} audit
-                {deleteTarget?.total === 1 ? "" : "s"} and cannot be deleted. Archive it instead — its existing audits
+                <strong>{frameworkToDelete?.name}</strong> has {deleteTargetAudits} audit
+                {deleteTargetAudits === 1 ? "" : "s"} and cannot be deleted. Archive it instead — its existing audits
                 are kept and it is hidden from the new-audit form.
               </>
             ) : (
               <>
-                <strong>{frameworkToDelete?.name}</strong> will be permanently deleted. This cannot be undone.
+                <strong>{frameworkToDelete?.name}</strong> will be deleted and no longer shown. Creating a framework with
+                the same name later brings it back.
               </>
             )}
           </DialogContentText>

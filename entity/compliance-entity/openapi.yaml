@@ -480,7 +480,11 @@ paths:
       tags:
       - Audit Frameworks
       summary: Delete an audit framework
-      description: Only allowed while no audit (any status) and no framework control references it; otherwise 409.
+      description: >-
+        Soft delete: sets the status to INACTIVE and the framework is treated as
+        not found afterwards. Only allowed while no non-removed audit and no
+        framework control references it; otherwise 409. Creating a framework
+        with the same name brings the deleted one back as ACTIVE.
       operationId: deleteAuditFramework
       parameters:
       - name: id
@@ -488,6 +492,11 @@ paths:
         required: true
         schema:
           type: integer
+      - name: deletedBy
+        in: query
+        required: true
+        schema:
+          type: string
       responses:
         '204':
           description: Deleted
@@ -496,7 +505,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Framework is still referenced by audits or controls
+          description: Framework still has audits or controls
         '500':
           $ref: '#/components/responses/InternalServerError'
   /audit/frameworks:
@@ -4499,6 +4508,9 @@ components:
           type: string
         statusKey:
           type: string
+          enum: [ACTIVE, ARCHIVED, INACTIVE]
+          description: >-
+            Omit to get every framework except deleted (INACTIVE) ones.
         scope:
           type: string
           enum: [all, owned, assigned, team, none]
@@ -4533,11 +4545,15 @@ components:
           type: integer
     CreateAuditFrameworkRequest:
       type: object
+      description: >-
+        Returns 409 if the name is taken by a live framework. If it is taken by a
+        deleted (INACTIVE) one, that framework is revived instead.
       properties:
         name:
           type: string
         status:
           type: string
+          enum: [ACTIVE, ARCHIVED]
         createdBy:
           type: string
     UpdateAuditFrameworkRequest:
@@ -4548,7 +4564,9 @@ components:
           nullable: true
         status:
           type: string
+          enum: [ACTIVE, ARCHIVED]
           nullable: true
+          description: INACTIVE (deleted) cannot be set here; use DELETE.
         updatedBy:
           type: string
     AuditProduct:
