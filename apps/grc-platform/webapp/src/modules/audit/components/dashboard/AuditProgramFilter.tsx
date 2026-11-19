@@ -18,6 +18,7 @@ import { FormControl, MenuItem, Select } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { Audit } from "@modules/audit/types/audit";
 import { ALL_PROGRAMS } from "@modules/audit/utils/assigneeProgress";
+import { auditDisplayName } from "@modules/audit/utils/format";
 
 interface AuditProgramFilterProps {
   audits: Audit[];
@@ -31,7 +32,7 @@ interface AuditProgramFilterProps {
 // Only ACTIVE audits are listed: the dashboard counts active audits only, so a
 // completed or archived audit would always show an empty view.
 export default function AuditProgramFilter({ audits, value, onChange }: AuditProgramFilterProps): JSX.Element {
-  const sorted = audits.filter((a) => a.status === "ACTIVE").sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = audits.filter((a) => a.status === "ACTIVE").sort((a, b) => auditDisplayName(a).localeCompare(auditDisplayName(b)));
   return (
     <FormControl size="small" sx={{ width: 150 }}>
       <Select
@@ -42,7 +43,7 @@ export default function AuditProgramFilter({ audits, value, onChange }: AuditPro
       >
         <MenuItem value={ALL_PROGRAMS} dense>All programs</MenuItem>
         {sorted.map((a) => (
-          <MenuItem key={a.id} value={String(a.id)} dense>{a.name}</MenuItem>
+          <MenuItem key={a.id} value={String(a.id)} dense>{auditDisplayName(a)}</MenuItem>
         ))}
       </Select>
     </FormControl>
