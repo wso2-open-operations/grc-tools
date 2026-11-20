@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -289,12 +290,26 @@ func buildActionPlanPrompt(req SuggestActionPlanRequest) string {
 	return b.String()
 }
 
-// escapeRiskDataClose strips the literal closing tag of the <risk_data>
-// block from untrusted risk text before it's written into the prompt — so a
-// risk description containing "</risk_data>" can't close the untrusted block
+// riskDataCloseTag matches a closing </risk_data> tag in any letter case and
+// with spaces around the slash or the name, e.g. "</RISK_DATA>" or "< / risk_data >".
+var riskDataCloseTag = regexp.MustCompile(`(?i)<\s*/\s*risk_data\s*>`)
+
+// escapeRiskDataClose strips the closing tag of the <risk_data> block from
+// untrusted risk text before it's written into the prompt — so a risk
+// description containing "</risk_data>" can't close the untrusted block
 // early and have the rest of its own text read back as instructions.
+//
+// The match ignores letter case and tolerates spaces. It repeats until
+// nothing is left, because removing one tag can join its neighbours into a
+// new one ("</risk_</risk_data>data>" would otherwise become "</risk_data>").
 func escapeRiskDataClose(s string) string {
-	return strings.ReplaceAll(s, "</risk_data>", "")
+	for {
+		out := riskDataCloseTag.ReplaceAllString(s, "")
+		if out == s {
+			return s
+		}
+		s = out
+	}
 }
 
 // writeUntrustedRiskNotice tells the model that the <risk_data> block that
