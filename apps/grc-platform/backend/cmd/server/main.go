@@ -279,7 +279,7 @@ func main() {
 		sweeps := []scheduler.Sweep{
 			{Name: "overdue-risk-escalation", Run: escalationJob.RunOnce},
 			{Name: "risk-due-date-reminders", Run: riskReminderJob.RunOnce},
-			{Name: "risk-likelihood-recheck", Run: likelihoodRecheckJob.RunOnce},
+			{Name: "risk-likelihood-recheck", Run: likelihoodRecheckJob.RunScheduled},
 			{Name: "audit-due-date-reminders", Run: reminderJob.RunOnce},
 		}
 		if runDirectorySync != nil {

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"runtime/debug"
 	"sync/atomic"
 	"time"
@@ -83,6 +84,10 @@ type LikelihoodRecheckJob struct {
 	check   likelihoodChecker
 	enabled func() bool
 	running atomic.Bool
+
+	// startDelay picks how long RunScheduled waits before sweeping. It is a
+	// field so tests can make it instant and deterministic.
+	startDelay func() time.Duration
 }
 
 // NewLikelihoodRecheckJob constructs a LikelihoodRecheckJob. enabled is
@@ -95,7 +100,48 @@ func NewLikelihoodRecheckJob(
 	check likelihoodChecker,
 	enabled func() bool,
 ) *LikelihoodRecheckJob {
-	return &LikelihoodRecheckJob{risks: risks, detail: detail, check: check, enabled: enabled}
+	return &LikelihoodRecheckJob{risks: risks, detail: detail, check: check, enabled: enabled, startDelay: randomStartDelay}
+}
+
+// maxStartDelay bounds the random wait before a scheduled sweep begins.
+const maxStartDelay = 10 * time.Minute
+
+func randomStartDelay() time.Duration {
+	return time.Duration(rand.Int63n(int64(maxStartDelay)))
+}
+
+// RunScheduled is what the daily scheduler calls. Production runs several
+// backend replicas and every one fires this sweep at the same wall-clock
+// time. The "already checked this quarter" test reads the database, but two
+// replicas moving through the same risks in step would both pass it before
+// either has saved a result, and both would make the paid call. Each replica
+// therefore waits a random time first, so one trails the other and finds the
+// risks already checked.
+//
+// This lowers the chance of a duplicate check, it does not rule it out: two
+// replicas that happen to pick start times within one model call of each
+// other still overlap, until the next daily run skips what was recorded. An
+// exact guarantee needs a database claim like risk_reminder's.
+//
+// It does nothing, and does not wait, when the job is switched off or the
+// window is closed. The manual trigger calls RunOnce directly and never waits.
+func (j *LikelihoodRecheckJob) RunScheduled(ctx context.Context) error {
+	if !j.enabled() {
+		return nil
+	}
+	if _, quarterEnd := quarterBounds(time.Now().UTC()); !inRecheckWindow(time.Now().UTC(), quarterEnd) {
+		return nil
+	}
+	if d := j.startDelay(); d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+	return j.RunOnce(ctx)
 }
 
 // RunOnce runs the sweep synchronously and returns its error, if any.
