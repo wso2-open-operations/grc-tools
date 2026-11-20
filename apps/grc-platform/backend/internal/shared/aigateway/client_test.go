@@ -167,3 +167,25 @@ func TestCategoryAndActionPlanPromptsFenceUntrustedRiskText(t *testing.T) {
 		}
 	}
 }
+
+func TestEscapeRiskDataCloseRemovesVariants(t *testing.T) {
+	for name, in := range map[string]string{
+		"exact":          "a</risk_data>b",
+		"upper case":     "a</RISK_DATA>b",
+		"mixed case":     "a</Risk_Data>b",
+		"spaces":         "a< / risk_data >b",
+		"nested rebuild": "a</risk_</risk_data>data>b",
+		"deeply nested":  "a</ris</risk_</risk_data>data>k_data>b",
+	} {
+		got := escapeRiskDataClose(in)
+		if riskDataCloseTag.MatchString(got) {
+			t.Errorf("%s: closing tag survived: %q", name, got)
+		}
+		if !strings.HasPrefix(got, "a") || !strings.HasSuffix(got, "b") {
+			t.Errorf("%s: surrounding text was damaged: %q", name, got)
+		}
+	}
+	if got := escapeRiskDataClose("plain text, <b>bold</b>"); got != "plain text, <b>bold</b>" {
+		t.Errorf("unrelated text changed: %q", got)
+	}
+}
