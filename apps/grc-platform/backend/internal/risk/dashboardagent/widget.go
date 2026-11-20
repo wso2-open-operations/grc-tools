@@ -192,7 +192,7 @@ func Starters() []Starter {
 		{
 			ID:          "ai-acceptance",
 			Title:       "AI acceptance rate",
-			Description: "How often users accept the AI category, likelihood and action-plan suggestions.",
+			Description: "How often users accept the AI category, likelihood and action-plan suggestions. Self-reported: based on what the web app records, not independently verified.",
 			Widget: Widget{Title: "AI suggestion acceptance", Visual: VisualTable, Spec: Spec{
 				Dataset:    "ai_suggestions",
 				Measures:   []string{"suggestion_count", "acceptance_rate"},

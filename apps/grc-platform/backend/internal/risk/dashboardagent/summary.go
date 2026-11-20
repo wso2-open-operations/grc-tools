@@ -230,7 +230,7 @@ func measureSentence(col Column, value any) string {
 		}
 		return fmt.Sprintf("%d AI suggestions were accepted.", n)
 	case "acceptance_rate":
-		return fmt.Sprintf("Users accepted %s of AI suggestions.", formatValue(col, v))
+		return fmt.Sprintf("Users accepted %s of AI suggestions (self-reported by the web app, not independently verified).", formatValue(col, v))
 	case "audit_count":
 		return countSentence(n, "There is 1 audit.", "There are %d audits.")
 	case "control_count":

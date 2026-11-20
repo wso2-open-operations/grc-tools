@@ -193,7 +193,7 @@ var datasets = []DatasetDef{
 	},
 	{
 		ID:    "ai_suggestions",
-		Label: "AI suggestions that a user decided on",
+		Label: "AI suggestions that a user decided on (as reported by the web app)",
 		Fields: []FieldDef{
 			{ID: "feature", Label: "Suggestion type", Kind: KindText, Group: true, Allowed: []string{"CATEGORY", "LIKELIHOOD", "ACTION_PLAN"}},
 			{ID: "status", Label: "Outcome", Kind: KindText, Group: true, Allowed: []string{"ACCEPTED", "OVERRIDDEN"}},

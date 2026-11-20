@@ -446,7 +446,7 @@ func TestSummarize(t *testing.T) {
 			"several measures",
 			Spec{Dataset: "ai_suggestions"},
 			&Result{Columns: []Column{col("suggestion_count", "measure", KindInt, "n"), col("acceptance_rate", "measure", KindNumber, "Acceptance rate")}, Rows: [][]any{{float64(40), 0.425}}},
-			"There are 40 AI suggestions. Users accepted 42.5% of AI suggestions.",
+			"There are 40 AI suggestions. Users accepted 42.5% of AI suggestions (self-reported by the web app, not independently verified).",
 		},
 		{
 			"breakdown with a total and a largest group",
@@ -897,5 +897,28 @@ func TestRateSentences(t *testing.T) {
 	col.ID = "rejection_rate"
 	if got := measureSentence(col, 0.5); got != "50% of evidence submissions were rejected." {
 		t.Errorf("%q", got)
+	}
+}
+
+// Acceptance figures come from the "used" and decision values the web app
+// sends back, so every place they are shown says they are self-reported.
+func TestAcceptanceStatisticsAreMarkedSelfReported(t *testing.T) {
+	var found bool
+	for _, w := range Starters() {
+		if w.ID != "ai-acceptance" {
+			continue
+		}
+		found = true
+		if !strings.Contains(w.Description, "Self-reported") {
+			t.Errorf("ai-acceptance description is not marked self-reported: %q", w.Description)
+		}
+	}
+	if !found {
+		t.Fatal("ai-acceptance view not found")
+	}
+	for _, ds := range Datasets() {
+		if ds.ID == "ai_suggestions" && !strings.Contains(ds.Label, "reported by the web app") {
+			t.Errorf("ai_suggestions label is not marked self-reported: %q", ds.Label)
+		}
 	}
 }
