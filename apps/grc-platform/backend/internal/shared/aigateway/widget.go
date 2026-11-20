@@ -249,7 +249,18 @@ func clip(s string, max int) string {
 // cannot close its own block and have the rest read as instructions.
 var untrustedTags = regexp.MustCompile(`(?i)<\s*/\s*(user_request|conversation|current_widget)\s*>`)
 
-func untrusted(s string) string { return untrustedTags.ReplaceAllString(s, "") }
+// untrusted removes closing tags until none is left. A single pass is not
+// enough: removing the inner tag of "</conv</conversation>ersation>" joins the
+// pieces around it into a new "</conversation>".
+func untrusted(s string) string {
+	for {
+		out := untrustedTags.ReplaceAllString(s, "")
+		if out == s {
+			return s
+		}
+		s = out
+	}
+}
 
 // writeWidgetCatalog describes the datasets, fields and measures the model may
 // use. It is the same for every hub; only the datasets in req differ.
