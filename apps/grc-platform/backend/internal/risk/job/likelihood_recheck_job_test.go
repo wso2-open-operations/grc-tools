@@ -17,6 +17,8 @@
 package job
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -107,4 +109,54 @@ func TestBuildSuggestRequest(t *testing.T) {
 			t.Errorf("got %+v", req.ComplianceReferenceIDs)
 		}
 	})
+}
+
+func TestRunScheduledDoesNothingWhenDisabled(t *testing.T) {
+	called := false
+	j := &LikelihoodRecheckJob{
+		enabled:    func() bool { return false },
+		startDelay: func() time.Duration { called = true; return time.Hour },
+	}
+	if err := j.RunScheduled(context.Background()); err != nil {
+		t.Fatalf("RunScheduled: %v", err)
+	}
+	if called {
+		t.Error("a disabled job must not wait")
+	}
+}
+
+// Outside the re-check window the job must return at once without waiting;
+// inside it, the start delay must be honoured and a cancelled context must
+// end the wait. Either branch is valid on any date.
+func TestRunScheduledWaitsOnlyInsideWindow(t *testing.T) {
+	now := time.Now().UTC()
+	_, quarterEnd := quarterBounds(now)
+	inWindow := inRecheckWindow(now, quarterEnd)
+
+	called := false
+	j := &LikelihoodRecheckJob{
+		enabled:    func() bool { return true },
+		startDelay: func() time.Duration { called = true; return time.Hour },
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := j.RunScheduled(ctx)
+
+	if !inWindow {
+		if err != nil || called {
+			t.Errorf("outside the window: want nil error and no wait, got err=%v waited=%v", err, called)
+		}
+		return
+	}
+	if !called || !errors.Is(err, context.Canceled) {
+		t.Errorf("inside the window: want a wait that ends on cancel, got err=%v waited=%v", err, called)
+	}
+}
+
+func TestRandomStartDelayIsBounded(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		if d := randomStartDelay(); d < 0 || d >= maxStartDelay {
+			t.Fatalf("delay %v outside [0, %v)", d, maxStartDelay)
+		}
+	}
 }
