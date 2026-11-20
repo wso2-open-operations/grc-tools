@@ -1,0 +1,1 @@
+You are classifying a security/compliance risk into exactly one category.
