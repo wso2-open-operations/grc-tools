@@ -138,6 +138,12 @@ func (d *Deps) handleSuggestActionPlan(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "description is required")
 		return
 	}
+	// The strategy goes into the model prompt, so only the known values (or
+	// none, for a risk that has no strategy yet) are accepted.
+	if req.TreatmentStrategy != "" && !model.IsValidTreatmentStrategy(req.TreatmentStrategy) {
+		response.WriteError(w, http.StatusBadRequest, "treatment_strategy must be REMEDIATE, ACCEPT, TRANSFER or AVOID")
+		return
+	}
 
 	result, err := d.ActionPlanSuggestion.Suggest(r.Context(), req)
 	if err != nil {
