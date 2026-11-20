@@ -1,4 +1,4 @@
--- Updated 07/10/2026 (v1.0.3)
+-- Updated 20/11/2026 (v1.0.10)
 --
 -- Adds risk_ai_suggestion: one row per AI suggestion shown to a user, for
 -- every feature that shares this shape (one suggested value, a confidence,
