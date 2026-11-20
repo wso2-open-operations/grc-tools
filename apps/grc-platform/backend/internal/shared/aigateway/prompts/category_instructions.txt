@@ -1,0 +1,3 @@
+
+Pick exactly one category id from the list above that best fits this risk. Respond with ONLY a JSON object, no markdown fences, no extra text, in this exact shape:
+{"category_id": <int>, "reason": "<one sentence, citing what in the risk text matched this category>", "confidence": "high"|"medium"|"low"}

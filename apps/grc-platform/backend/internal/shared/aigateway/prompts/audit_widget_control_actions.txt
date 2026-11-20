@@ -1,0 +1,2 @@
+
+For controls, answer instead with one of: {"action": "open_control", "control": "<control number>", "audit": "<audit name or empty>"} or {"action": "explain_control", "control": "<control number>", "audit": "<audit name or empty>"} or {"action": "compare_controls", "control": "<number>", "audit": "<audit or empty>", "control2": "<number>", "audit2": "<audit or empty>"}

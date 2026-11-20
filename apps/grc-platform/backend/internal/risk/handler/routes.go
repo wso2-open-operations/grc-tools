@@ -20,9 +20,11 @@ package handler
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/dashboardagent"
 	riskservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/routeguard"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/scim"
@@ -44,6 +46,38 @@ type Deps struct {
 	History    riskservice.HistoryService
 	Compliance riskservice.ComplianceReferenceService
 	Category   riskservice.RiskCategoryService
+	// CategorySuggestion powers POST /api/v1/risks/categories/suggest and the
+	// decision-recording call in handleCreateRisk/handleUpdateRisk. Always
+	// non-nil (unlike most optional Deps fields) — RecordDecision must be
+	// safely callable unconditionally from both of those, and it already
+	// no-ops when no suggestion was shown, so there is nothing AI-gateway-
+	// specific for it to fail on even when the feature is off.
+	// CategorySuggestionEnabled gates the HTTP endpoint only — see
+	// handleSuggestCategory.
+	CategorySuggestion        riskservice.CategorySuggestionService
+	CategorySuggestionEnabled bool
+	// LikelihoodSuggestion/LikelihoodSuggestionEnabled mirror
+	// CategorySuggestion/CategorySuggestionEnabled exactly — always non-nil,
+	// independent enable switch (AI_LIKELIHOOD_ENABLED, deliberately separate
+	// from AI_CATEGORIZATION_ENABLED — see config.AIGatewayConfig's doc
+	// comment for why).
+	LikelihoodSuggestion        riskservice.LikelihoodSuggestionService
+	LikelihoodSuggestionEnabled bool
+	// ActionPlanSuggestion/ActionPlanSuggestionEnabled mirror
+	// CategorySuggestion/CategorySuggestionEnabled exactly — always non-nil,
+	// independent enable switch (AI_ACTION_PLAN_ENABLED, deliberately
+	// separate from the other two — see config.AIGatewayConfig's doc comment
+	// for why).
+	ActionPlanSuggestion        riskservice.ActionPlanSuggestionService
+	ActionPlanSuggestionEnabled bool
+	// DashboardAgent runs validated dashboard widget specs; DashboardAgentEnabled
+	// gates the HTTP endpoint only (404 when off). dashboardAgentLimiter is the
+	// per-user request cap, created by RegisterRoutes.
+	DashboardAgent        riskservice.DashboardAgentService
+	DashboardAgentEnabled bool
+	dashboardAgentLimiter *dashboardagent.Limiter
+	// dashboardAgentInterpretLimiter caps the model calls, tighter than the queries.
+	dashboardAgentInterpretLimiter *dashboardagent.Limiter
 	// Register-template lookups (RISK_MODULE_DESIGN.md §14), served by the
 	// generic handlers in lookup.go.
 	Platforms       riskservice.LookupService
@@ -110,6 +144,11 @@ type Deps struct {
 	// plain function for the same no-import-cycle reason as
 	// TriggerEscalationJob. Nil disables the manual-trigger endpoint.
 	TriggerReminderJob func(ctx context.Context) error
+	// TriggerLikelihoodRecheckJob runs the quarterly Likelihood re-check sweep
+	// on demand — wired in cmd/server/main.go to the job's RunOnce, same
+	// no-import-cycle reasoning as TriggerReminderJob. Nil disables the
+	// manual-trigger endpoint.
+	TriggerLikelihoodRecheckJob func(ctx context.Context) error
 	// ActivityLog records reference-data mutations to admin_activity_log.
 	ActivityLog *adminactivity.Client
 }
@@ -123,8 +162,15 @@ type Deps struct {
 // precedence over the {id} wildcard, so the two groups never collide.
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	d := &deps
+	if d.dashboardAgentLimiter == nil {
+		d.dashboardAgentLimiter = dashboardagent.NewLimiter(dashboardAgentRatePerMinute, time.Minute)
+	}
+	if d.dashboardAgentInterpretLimiter == nil {
+		d.dashboardAgentInterpretLimiter = dashboardagent.NewLimiter(dashboardAgentInterpretRatePerMinute, time.Minute)
+	}
 	ejh := &escalationJobHandler{trigger: deps.TriggerEscalationJob}
 	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
+	lrjh := &likelihoodRecheckJobHandler{trigger: deps.TriggerLikelihoodRecheckJob}
 
 	// Teams
 	mux.HandleFunc("GET /api/v1/risks/teams", d.handleListTeams)
@@ -147,6 +193,9 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	mux.HandleFunc("POST /api/v1/risks/categories", d.handleCreateRiskCategory)
 	mux.HandleFunc("PUT /api/v1/risks/categories/{id}", d.handleUpdateRiskCategory)
 	mux.HandleFunc("DELETE /api/v1/risks/categories/{id}", d.handleDeleteRiskCategory)
+	mux.HandleFunc("POST /api/v1/risks/categories/suggest", d.handleSuggestCategory)
+	mux.HandleFunc("POST /api/v1/risks/likelihood/suggest", d.handleSuggestLikelihood)
+	mux.HandleFunc("POST /api/v1/risks/action-plans/suggest", d.handleSuggestActionPlan)
 
 	// Register-template lookups: platforms, customers, products, deployment types
 	for _, k := range d.lookupKinds() {
@@ -208,6 +257,12 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// risk, so it sits under /api/v1/risks/ (cf. GET /api/v1/audits/dashboard).
 	mux.HandleFunc("GET /api/v1/risks/dashboard", d.handleDashboard)
 
+	// Dashboard agent: runs one validated widget spec. Internal users only — the
+	// route is not external-visible, and a caller with no risk visibility gets a 404.
+	mux.HandleFunc("GET /api/v1/risks/dashboard-agent/starters", d.handleDashboardAgentStarters)
+	mux.HandleFunc("POST /api/v1/risks/dashboard-agent/interpret", d.handleDashboardAgentInterpret)
+	mux.HandleFunc("POST /api/v1/risks/dashboard-agent/query", d.handleDashboardAgentQuery)
+
 	// Analytics — module-level aggregate view, same rationale as dashboard.
 	mux.HandleFunc("GET /api/v1/risks/analytics/summary", d.handleAnalyticsSummary)
 	// Audit trail — history across risks, behind Risk Hub's Audit Trail page.
@@ -238,6 +293,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// "reminders" first segment, like "escalations" above, so it never
 	// collides with the /{id} routes.
 	mux.HandleFunc("POST /api/v1/risks/reminders/run", rjh.run)
+	mux.HandleFunc("POST /api/v1/risks/likelihood/recheck/run", lrjh.run)
 
 	// Full risk history — every workflow event and field edit, behind the
 	// drawer's History tab.

@@ -43,8 +43,11 @@ var externalVisible = map[string]bool{
 
 	// ── Audit Hub: landing pages ─────────────────────────────────────────────
 	// Internal-only: the dashboard page is hidden from external auditors.
-	"GET /api/v1/audits/dashboard":  false,
-	"GET /api/v1/audits/work-queue": false,
+	"GET /api/v1/audits/dashboard":                  false,
+	"GET /api/v1/audits/dashboard-agent/starters":   false,
+	"POST /api/v1/audits/dashboard-agent/interpret": false,
+	"POST /api/v1/audits/dashboard-agent/query":     false,
+	"GET /api/v1/audits/work-queue":                 false,
 
 	// ── Audit Hub: lookups ───────────────────────────────────────────────────
 	// Gated on AUDIT_VIEW_AUDITS, which the auditor holds — not admin-only.
@@ -172,6 +175,9 @@ var externalVisible = map[string]bool{
 	"POST /api/v1/risks/deployment-types":                           false,
 	"PUT /api/v1/risks/deployment-types/{id}":                       false,
 	"DELETE /api/v1/risks/deployment-types/{id}":                    false,
+	"POST /api/v1/risks/categories/suggest":                         false,
+	"POST /api/v1/risks/likelihood/suggest":                         false,
+	"POST /api/v1/risks/action-plans/suggest":                       false,
 	"GET /api/v1/risks/users":                                       false,
 	"POST /api/v1/risks/users/resolve":                              false,
 	"GET /api/v1/risks/me/involvement":                              false,
@@ -207,6 +213,10 @@ var externalVisible = map[string]bool{
 	"GET /api/v1/risks/{id}/escalations":                            false,
 	"POST /api/v1/risks/escalations/run":                            false,
 	"POST /api/v1/risks/reminders/run":                              false,
+	"POST /api/v1/risks/likelihood/recheck/run":                     false,
+	"POST /api/v1/risks/dashboard-agent/query":                      false,
+	"POST /api/v1/risks/dashboard-agent/interpret":                  false,
+	"GET /api/v1/risks/dashboard-agent/starters":                    false,
 	"GET /api/v1/risks/{id}/history":                                false,
 	"POST /api/v1/risks/{id}/escalations/{escalationId}/comment":    false,
 	"POST /api/v1/risks/{id}/evidence":                              false,

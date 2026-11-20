@@ -59,6 +59,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskActionPlanRepo := repository.NewRiskActionPlanRepository(db)
 	riskActionStepRepo := repository.NewRiskActionStepRepository(db)
 	riskComplianceRefRepo := repository.NewRiskComplianceRefRepository(db)
+	riskAISuggestionRepo := repository.NewRiskAISuggestionRepository(db)
 	riskEscalationRepo := repository.NewRiskEscalationRepository(db)
 	riskChangeLogRepo := repository.NewRiskChangeLogRepository(db)
 	riskEvidenceRepo := repository.NewRiskEvidenceRepository(db)
@@ -68,6 +69,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	grantRepo := repository.NewGrantRepository(db)
 	riskDashboardRepo := repository.NewRiskDashboardRepository(db)
 	riskAnalyticsRepo := repository.NewRiskAnalyticsRepository(db)
+	widgetQueryRepo := repository.NewWidgetQueryRepository(db)
 	adminActivityLogRepo := repository.NewAdminActivityLogRepository(db)
 
 	// ── Services ─────────────────────────────────────────────────────────────
@@ -95,6 +97,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskComplianceRefSvc := service.NewRiskComplianceRefService(riskComplianceRefRepo)
 	riskEscalationSvc := service.NewRiskEscalationService(riskEscalationRepo, riskSvc)
 	riskChangeLogSvc := service.NewRiskChangeLogService(riskChangeLogRepo)
+	riskAISuggestionSvc := service.NewRiskAISuggestionService(riskAISuggestionRepo)
 	// riskActionPlanSvc depends on the services above for its completion
 	// cascade, which now only notifies — resolving the escalation and reverting
 	// the risk moved to the escalation comment flow in the GRC backend.
@@ -111,6 +114,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	grantSvc := service.NewGrantService(grantRepo)
 	riskDashboardSvc := service.NewRiskDashboardService(riskDashboardRepo)
 	riskAnalyticsSvc := service.NewRiskAnalyticsService(riskAnalyticsRepo)
+	widgetQuerySvc := service.NewWidgetQueryService(widgetQueryRepo)
 	adminActivityLogSvc := service.NewAdminActivityLogService(adminActivityLogRepo)
 
 	// ── Handlers ─────────────────────────────────────────────────────────────
@@ -139,6 +143,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskComplianceRefH := handler.NewRiskComplianceRefHandler(riskComplianceRefSvc)
 	riskEscalationH := handler.NewRiskEscalationHandler(riskEscalationSvc)
 	riskChangeLogH := handler.NewRiskChangeLogHandler(riskChangeLogSvc)
+	riskAISuggestionH := handler.NewRiskAISuggestionHandler(riskAISuggestionSvc)
 	riskEvidenceH := handler.NewRiskEvidenceHandler(riskEvidenceSvc)
 	riskAssessmentH := handler.NewRiskAssessmentHandler(riskAssessmentSvc)
 	riskReminderH := handler.NewRiskReminderHandler(riskReminderSvc)
@@ -146,6 +151,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	grantH := handler.NewGrantHandler(grantSvc)
 	riskDashboardH := handler.NewRiskDashboardHandler(riskDashboardSvc)
 	riskAnalyticsH := handler.NewRiskAnalyticsHandler(riskAnalyticsSvc)
+	widgetQueryH := handler.NewWidgetQueryHandler(widgetQuerySvc)
 	adminActivityLogH := handler.NewAdminActivityLogHandler(adminActivityLogSvc)
 
 	// ── Routes ───────────────────────────────────────────────────────────────
@@ -338,6 +344,12 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 		mux.HandleFunc("DELETE "+path+"/{id}", h.DeleteRiskLookup)
 	}
 
+	// Risk AI suggestions (auto-categorisation, likelihood prediction, action
+	// plan description — see risk_ai_suggestion's schema)
+	mux.HandleFunc("GET /risk/ai-suggestions", riskAISuggestionH.ListRiskAISuggestions)
+	mux.HandleFunc("POST /risk/ai-suggestions", riskAISuggestionH.CreateRiskAISuggestion)
+	mux.HandleFunc("PATCH /risk/ai-suggestions/{id}/decide", riskAISuggestionH.DecideRiskAISuggestion)
+
 	// Risk compliance references
 	mux.HandleFunc("POST /risk/compliance-references/search", riskReferenceH.SearchRiskReferences)
 	mux.HandleFunc("GET /risk/compliance-references/{id}", riskReferenceH.GetRiskReferenceByID)
@@ -349,6 +361,8 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	mux.HandleFunc("GET /risks/next-sequence-number", riskH.NextSequenceNumber)
 	mux.HandleFunc("GET /role-privileges", privilegeH.RolePrivilegeMap)
 	mux.HandleFunc("POST /risk/dashboard/search", riskDashboardH.Summary)
+	mux.HandleFunc("POST /risk/widgets/query", widgetQueryH.Run)
+	mux.HandleFunc("POST /audit/widgets/query", widgetQueryH.RunAudit)
 	mux.HandleFunc("POST /risk/analytics/search", riskAnalyticsH.Summary)
 	mux.HandleFunc("POST /risks/search", riskH.SearchRisks)
 	mux.HandleFunc("GET /risks/{id}", riskH.GetRiskByID)

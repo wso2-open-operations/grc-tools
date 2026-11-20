@@ -102,6 +102,25 @@ const (
 	RiskAcceptorWSO2     = "WSO2"
 )
 
+// The four treatment strategies a risk can have.
+const (
+	TreatmentRemediate = "REMEDIATE"
+	TreatmentAccept    = "ACCEPT"
+	TreatmentTransfer  = "TRANSFER"
+	TreatmentAvoid     = "AVOID"
+)
+
+// IsValidTreatmentStrategy reports whether v is one of the four treatment
+// strategies. The empty string is not valid here; callers that allow "no
+// strategy yet" check for it themselves.
+func IsValidTreatmentStrategy(v string) bool {
+	switch v {
+	case TreatmentRemediate, TreatmentAccept, TreatmentTransfer, TreatmentAvoid:
+		return true
+	}
+	return false
+}
+
 // IsValidRiskAcceptor reports whether v is a value the risk_acceptor column
 // accepts.
 func IsValidRiskAcceptor(v string) bool {

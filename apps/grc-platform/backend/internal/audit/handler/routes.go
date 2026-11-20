@@ -19,12 +19,14 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/aivalidation"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/repository"
 	auditservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/dashboardagent"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/routeguard"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/adminactivity"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/applink"
@@ -91,10 +93,24 @@ type Deps struct {
 	TriggerReminderJob func(ctx context.Context) error
 	// ActivityLog records Audit Team mutations to admin_activity_log.
 	ActivityLog *adminactivity.Client
+
+	// DashboardAgent is the Audit Hub assistant; DashboardAgentEnabled gates its
+	// HTTP endpoints only (404 when off). The limiters are the per-user request
+	// caps, created by RegisterRoutes.
+	DashboardAgent            auditservice.DashboardAgentService
+	DashboardAgentEnabled     bool
+	assistantLimiter          *dashboardagent.Limiter
+	assistantInterpretLimiter *dashboardagent.Limiter
 }
 
 // RegisterRoutes mounts all Audit Hub routes onto mux.
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
+	if deps.assistantLimiter == nil {
+		deps.assistantLimiter = dashboardagent.NewLimiter(assistantRatePerMinute, time.Minute)
+	}
+	if deps.assistantInterpretLimiter == nil {
+		deps.assistantInterpretLimiter = dashboardagent.NewLimiter(assistantInterpretRatePerMinute, time.Minute)
+	}
 	ah := &auditHandler{svc: deps.Audit}
 	ch := &controlHandler{svc: deps.Control, auditSvc: deps.Audit, trail: deps.Trail, notify: &deps}
 	ddh := &deadlineDaysHandler{svc: deps.DeadlineDays}
@@ -115,6 +131,13 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// Dashboard.
 	mux.HandleFunc("GET /api/v1/audits/dashboard", dh.getDashboard)
 	mux.HandleFunc("GET /api/v1/audits/work-queue", dh.getWorkQueue)
+
+	// Assistant: builds one validated widget for a question. Internal users only
+	// (the routes are not external-visible), and a caller with no audit
+	// visibility gets a 404.
+	mux.HandleFunc("GET /api/v1/audits/dashboard-agent/starters", deps.handleAssistantStarters)
+	mux.HandleFunc("POST /api/v1/audits/dashboard-agent/interpret", deps.handleAssistantInterpret)
+	mux.HandleFunc("POST /api/v1/audits/dashboard-agent/query", deps.handleAssistantQuery)
 
 	// Lookup data for Create Audit form dropdowns.
 	mux.HandleFunc("GET /api/v1/audits/frameworks", fh.listFrameworks)

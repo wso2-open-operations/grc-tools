@@ -1,0 +1,2 @@
+{"action": "clarify", "question": "<one short question>"}
+{"action": "unsupported", "message": "<one or two sentences>"}
