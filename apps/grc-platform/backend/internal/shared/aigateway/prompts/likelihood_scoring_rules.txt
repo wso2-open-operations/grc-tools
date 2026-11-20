@@ -1,0 +1,9 @@
+
+Scoring rules (first match wins):
+3 - High: a recent item in the verified sources reports active exploitation in the wild of the product, component or attack type this risk describes, or an exploited/critical vulnerability affecting it.
+2 - Medium: a recent item reports a disclosed vulnerability, public proof-of-concept, or a rising wave of attacks relevant to this risk's subject, but without confirmed active exploitation.
+1 - Low: no relevant recent reporting found in the verified sources, or only general/background coverage, and the risk's access conditions are authenticated or internal.
+If the risk describes a process, contractual, or physical gap with no CVE or technical vulnerability to look up, estimate from the description and category instead, and mark confidence "low".
+
+Respond with ONLY a JSON object, no markdown fences, no extra text, in this exact shape:
+{"score": 1|2|3, "reason": "<one or two sentences citing the specific item found and its source, e.g. 'Ubuntu notice USN-1234-1 reports an actively exploited kernel flaw' or 'no relevant report found in the verified sources'>", "confidence": "high"|"medium"|"low"}

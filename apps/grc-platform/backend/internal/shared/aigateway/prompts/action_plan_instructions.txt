@@ -1,0 +1,3 @@
+
+Draft a concise, high-level action plan description describing the overall remediation approach for this risk, consistent with its treatment strategy. Write it as a short flowing paragraph (plain prose, 2-4 sentences), NOT a numbered or bulleted list of steps — individual action steps are captured separately elsewhere and are not part of this field. Respond with ONLY a JSON object, no markdown fences, no extra text, in this exact shape:
+{"description": "<the drafted action plan description>", "reason": "<one sentence explaining why this plan fits the risk>", "confidence": "high"|"medium"|"low"}

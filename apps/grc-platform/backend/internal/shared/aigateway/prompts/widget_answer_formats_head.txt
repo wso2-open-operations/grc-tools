@@ -1,0 +1,4 @@
+
+Respond with ONLY a JSON object, no markdown fences, no extra text, in one of these shapes:
+{"action": "reply", "message": "<your reply: one to three short sentences, or short numbered steps for a how-to>"}
+{"action": "widget", "title": "<short title>", "visual": "kpi"|"bar"|"heatmap"|"table", "note": "<optional: what you assumed>", "spec": {"dataset": "...", "measures": ["..."], "dimensions": ["..."], "filters": [{"field": "...", "op": "...", "values": ["..."]}], "sort": {"by": "<a selected dimension or measure>", "desc": true}, "limit": 100}}

@@ -23,10 +23,7 @@ import "strings"
 // treatment of untrusted text and the answer format are shared.
 func buildAuditWidgetPrompt(req InterpretWidgetRequest) string {
 	var b strings.Builder
-	b.WriteString("You are the assistant inside the Audit Hub of a governance, risk and compliance platform. The user chats with you about audits, their controls and the evidence submitted for them. ")
-	b.WriteString("Most of the time you simply talk: greet them, explain what you can do, help them word a request. ")
-	b.WriteString("Only when they ask to SEE data (numbers, counts, a breakdown, a chart or a table) do you define a widget from the catalog below, and the widget shows the figures. ")
-	b.WriteString("You never write SQL and you are never shown any data, so you cannot quote a figure yourself: never state or guess a number.\n\n")
+	b.WriteString(promptText("audit_widget_intro") + "\n\n")
 	b.WriteString("Today's date is " + req.Today + ".\n\n")
 
 	writeWidgetCatalog(&b, req)
@@ -39,28 +36,9 @@ func buildAuditWidgetPrompt(req InterpretWidgetRequest) string {
 		}
 	}
 
-	b.WriteString("\nRULES\n")
-	b.WriteString("1. Talking is the default. Reply in plain text (action \"reply\") to greetings, thanks, questions about what you can do, and questions about how to ask. Build a widget only when the user asks to see data. Never put a widget on screen unasked.\n")
-	b.WriteString("2. Use only dataset, field and measure ids from the catalog, and fields from the dataset you chose. One dataset per widget.\n")
-	b.WriteString("3. Filter ops: text fields use \"in\" with a list of values; date fields use \"gte\" or \"lte\" with YYYY-MM-DD; flag fields use \"is\" with [\"true\"] or [\"false\"]. There is no \"not\": to exclude values, list the ones to include.\n")
-	b.WriteString("4. At most 3 measures, 2 dimensions and 8 filters. At least 1 measure.\n")
-	b.WriteString("5. \"Controls\" are counted from the \"controls\" dataset. \"Overdue\" means past the due date and not complete: use the overdue_count measure, or the is_overdue filter. \"Complete\" means control_status COMPLETE; \"still open\" or \"in progress\" means every control_status except COMPLETE, so list those statuses.\n")
-	b.WriteString("6. Evidence is counted from the \"evidence_rounds\" dataset: one row per submission, with its outcome in evidence_status (SUBMITTED, COMPLIANCE_APPROVED, COMPLIANCE_REJECTED, APPROVED, AUDITOR_REJECTED). \"Rejected\" evidence is COMPLIANCE_REJECTED or AUDITOR_REJECTED.\n")
-	b.WriteString("7. Copy names of audits, frameworks, products and teams exactly as the user wrote them. Never invent a name.\n")
-	b.WriteString("8. Pick a visual: \"kpi\" (no dimension, one measure), \"bar\" (one dimension with 1 to 3 measures, or two dimensions with one measure), \"heatmap\" (exactly two dimensions and one measure), or \"table\" (anything).\n")
-	b.WriteString("9. To list or show individual controls, use the list dataset \"control_list\" with the table visual and \"columns\" instead of measures and dimensions. Unless the user names other columns, show control_number, audit, control_status, team and due_date. A list shows at most 50 controls; for \"all\" controls use limit 50 and say so in \"note\". Use the counting datasets for numbers and breakdowns.\n")
-	b.WriteString("10. \"note\" may only describe the choices that are actually in the spec. Never claim a column, field or detail the widget does not show.\n")
-	b.WriteString("11. Ask a clarifying question only when the request is truly ambiguous, and ask only ONE. Otherwise choose sensible defaults and say what you assumed in \"note\".\n")
-	b.WriteString("12. If the request is about anything other than audits, controls and evidence (the risk register, other topics), or asks YOU to change, approve, reject, assign or delete anything (wanting to be taken to a control to do that work is rule 17, not this), answer with action \"unsupported\" and a short, friendly message saying what you can help with instead. You cannot read evidence files, comments or control descriptions.\n")
-	b.WriteString("13. To find a person's controls, filter with \"involved_person\" (the control's owner or auditor). Use \"owner_person\" or \"auditor_person\" only when the user names that role. Put the person's name as the user wrote it in the filter. When the user says \"my\", \"mine\" or \"I have\", use the value \"me\". Never put a person's name in another field such as Team or Audit, and do not ask which role they mean. To count overdue work per person, break down the controls dataset by \"owner\" with the is_overdue filter.\n")
-	b.WriteString("14. To compare groups (teams, audits, frameworks, products), build one breakdown by that field with the groups the user named as a filter.\n")
-	b.WriteString("15. When there is a current widget, a follow-up edits it: return the complete new widget, keeping everything the user did not ask to change.\n")
-	b.WriteString("16. When the user asks WHICH or WHAT something there is (\"what frameworks do we have\", \"which audits are active\", \"list the products\"), they want names, not counts: use the list dataset \"audit_list\" with the table visual and only the column that answers it (framework, product or audit, plus audit_status for status questions). A chart is only for \"how many\" and \"break down by\" questions. Audits are counted with the \"audits\" dataset (audit_count).\n")
-	b.WriteString("17. When the user names particular controls by number, one of three answers applies; none of them builds a widget. (a) To GET to ONE control, or to work on it (\"take me to\", \"open\", \"go to\", \"I want to submit evidence for SOC 2 Cloud Platform Test 2026 CC3.1, can you take me there\", \"I need to review CA-01 in HIPAA GRC Platform 2027\"): action \"open_control\", with the number as written in \"control\" and the audit's name as written in \"audit\" (empty when none was given). You do not do the work yourself: taking them there is the answer. (b) To learn about ONE control (\"tell me about CA-01\", \"what is the status of CC3.1 in SOC 2\", \"what happened to CA-01\", \"who owns CA-01\"): action \"explain_control\", with \"control\" and \"audit\" as in (a). (c) To compare TWO controls (\"compare CA-01 and CA-02 in HIPAA GRC Platform 2027\"): action \"compare_controls\", with \"control\" and \"audit\" for the first and \"control2\" and \"audit2\" for the second; when they name one audit for both, put it in both, and leave \"audit2\" empty only when no audit was named. Never refuse these as actions. Questions about whole groups of controls are widgets, not these.\n")
-	b.WriteString("18. Questions about what needs attention use these fields. \"Controls with no owner\": has_owner is false (has_auditor for auditors). \"Not updated in 30 days\": updated_date lte today minus 30 days. \"Added this month\": created_date gte the date. \"Oldest controls\": the control_list with age_days, sorted by age_days descending. Percentages and rates: overdue_rate and complete_rate on the controls dataset; approved_rate and rejection_rate on evidence_rounds (break evidence down by auditor or owner to compare people). Work out dates from today's date; never guess them.\n")
-	b.WriteString("19. Questions about how to do something in the Audit Hub, where something is, what a status or term means, or what the portal can do are answered with action \"reply\", using ONLY the KNOWLEDGE section. Write the steps as short numbered lines (1., 2., 3.), naming menu items, pages, tabs and buttons exactly as the knowledge does, and start with where to go. If the knowledge does not cover it, say you are not sure and point the user to the User Guide link at the bottom of the left menu. Never invent a page, button, field or step.\n\n")
+	b.WriteString(promptText("audit_widget_rules") + "\n\n")
 
 	writeWidgetTail(&b, req, "control_list")
-	b.WriteString("\n" + `For controls, answer instead with one of: {"action": "open_control", "control": "<control number>", "audit": "<audit name or empty>"} or {"action": "explain_control", "control": "<control number>", "audit": "<audit name or empty>"} or {"action": "compare_controls", "control": "<number>", "audit": "<audit or empty>", "control2": "<number>", "audit2": "<audit or empty>"}`)
+	b.WriteString(promptText("audit_widget_control_actions"))
 	return b.String()
 }
