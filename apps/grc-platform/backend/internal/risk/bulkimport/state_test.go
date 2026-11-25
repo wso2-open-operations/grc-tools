@@ -1,0 +1,500 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package bulkimport
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+type stateStub struct {
+	t           *testing.T
+	risks       []Risk
+	escalations map[int][]Escalation
+	plans       map[int][]ActionPlanView
+	grants      map[int][]Grant
+	assessments map[int][]Assessment
+	pageSize    int // force small pages to exercise paging; 0 = honour the request
+
+	searchCalls int
+}
+
+func pathID(path, prefix, suffix string) int {
+	n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix))
+	return n
+}
+
+func (s *stateStub) client(t *testing.T) *EntityClient {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/risks/search":
+			s.searchCalls++
+			var req SearchRisksRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			lim := req.Pagination.Limit
+			if s.pageSize > 0 && s.pageSize < lim {
+				lim = s.pageSize
+			}
+			off := req.Pagination.Offset
+			end := off + lim
+			if end > len(s.risks) {
+				end = len(s.risks)
+			}
+			var page []Risk
+			if off < len(s.risks) {
+				page = s.risks[off:end]
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"risks": page, "total": len(s.risks), "limit": lim, "offset": off,
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/escalations"):
+			id := pathID(r.URL.Path, "/risks/", "/escalations")
+			_ = json.NewEncoder(w).Encode(map[string]any{"escalations": s.escalations[id]})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/action-plans"):
+			id := pathID(r.URL.Path, "/risks/", "/action-plans")
+			_ = json.NewEncoder(w).Encode(map[string]any{"plans": s.plans[id]})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/assessments"):
+			id := pathID(r.URL.Path, "/risks/", "/assessments")
+			_ = json.NewEncoder(w).Encode(map[string]any{"assessments": s.assessments[id]})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/grants/user/"):
+			id, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/grants/user/"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"userId": id, "grants": s.grants[id]})
+		default:
+			s.t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewEntityClient(srv.URL, 5*time.Second)
+}
+
+const testMigrationDate = "2026-09-15"
+
+func markerRisk(id int, title string, sr, year int, quarter, status string) Risk {
+	return Risk{
+		ID: id, RiskTitle: title, SourceRegID: sr, RiskYear: year, RiskQuarter: quarter,
+		WorkflowStatus: status, CreatedBy: marker,
+	}
+}
+
+// baseRow is an APPROVED row wired to sheetTestRefData ids: owner 100 /
+// assigner 101 / mgmt 102, source register 8 (Legal), assignment team 1.
+func baseRow(migID int, title, status string) Row {
+	return Row{
+		Template:    templateManagedServices,
+		MigrationID: migID, CSVLine: migID + 1, RiskTitle: title,
+		RiskYear: 2025, RiskQuarter: "Q3",
+		SourceRegisterID: 8, AssignmentTeamID: 1,
+		OwnerID: 100, AssignerID: 101, ManagementApproverID: 102,
+		WorkflowStatus: status, ImplementationDate: "2020-01-01",
+		TreatmentStrategy: "REMEDIATE",
+		GrossLikelihood:   2, GrossImpact: 2, ResidualLikelihood: 2, ResidualImpact: 2,
+	}
+}
+
+func ownerAssignerGrants() map[int][]Grant {
+	return map[int][]Grant{
+		100: {{RoleID: 10, ScopeType: "RISK_TEAM", ScopeID: 1}},
+		101: {{RoleID: 11, ScopeType: "RISK_TEAM", ScopeID: 8}},
+	}
+}
+
+func run6(t *testing.T, s *stateStub, rd RefData, rows []Row) (map[int]ResumeState, *Report) {
+	t.Helper()
+	rep := NewReport()
+	prog, err := reconstructState(context.Background(), s.client(t), rd, testMigrationDate, rows, rep)
+	if err != nil {
+		t.Fatalf("reconstructState: %v", err)
+	}
+	return prog, rep
+}
+
+// TestSearchMarkerRisks_AllRowsInvalidSkipsSearch: when every row has an
+// unresolved natural-key component (verify.go passes rejected rows through
+// unfiltered), searchMarkerRisks must not fall back to an unscoped search —
+// an empty SearchRisksRequest omits its filters entirely and the entity
+// treats that as "no restriction," which would otherwise page through the
+// whole risks table for a result set that can never match any of these rows.
+func TestSearchMarkerRisks_AllRowsInvalidSkipsSearch(t *testing.T) {
+	s := &stateStub{t: t, risks: []Risk{markerRisk(1, "Unrelated risk", 8, 2025, "Q3", "APPROVED")}}
+	rows := []Row{
+		{MigrationID: 1, CSVLine: 2, RiskTitle: "no source register", SourceRegisterID: 0, RiskYear: 2025, RiskQuarter: "Q3"},
+		{MigrationID: 2, CSVLine: 3, RiskTitle: "no year", SourceRegisterID: 8, RiskYear: 0, RiskQuarter: "Q3"},
+		{MigrationID: 3, CSVLine: 4, RiskTitle: "bad quarter", SourceRegisterID: 8, RiskYear: 2025, RiskQuarter: ""},
+	}
+
+	got, err := searchMarkerRisks(context.Background(), s.client(t), rows)
+	if err != nil {
+		t.Fatalf("searchMarkerRisks: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d risks, want 0", len(got))
+	}
+	if s.searchCalls != 0 {
+		t.Errorf("searchCalls = %d, want 0 — no row has a valid natural-key component to search on", s.searchCalls)
+	}
+}
+
+func TestReconstructState_NoneAndCreated_WithPaging(t *testing.T) {
+	rd := sheetTestRefData(t)
+	s := &stateStub{
+		t:        t,
+		pageSize: 2, // 3 risks over pages of 2 -> two search calls
+		risks: []Risk{
+			markerRisk(1, "filler-a", 8, 2025, "Q3", "APPROVED"),
+			markerRisk(2, "filler-b", 8, 2025, "Q3", "CLOSED"),
+			markerRisk(3, "Created risk", 8, 2025, "Q3", "PENDING_COMPLIANCE_REVIEW"),
+		},
+		escalations: map[int][]Escalation{},
+	}
+	rows := []Row{
+		baseRow(1, "Ghost risk", "APPROVED"),   // no marker match
+		baseRow(2, "Created risk", "APPROVED"), // matched, status not yet walked
+	}
+
+	prog, rep := run6(t, s, rd, rows)
+	if rep.HasFindings() {
+		t.Fatalf("unexpected findings: %+v", rep.findings)
+	}
+	if prog[1].Progress != ProgressNone {
+		t.Errorf("row 1 = %v, want ProgressNone", prog[1])
+	}
+	if prog[2].Progress != ProgressCreated {
+		t.Errorf("row 2 = %v, want ProgressCreated", prog[2])
+	}
+	if s.searchCalls != 2 {
+		t.Errorf("searchCalls = %d, want 2 (paged)", s.searchCalls)
+	}
+}
+
+func TestReconstructState_ApprovedStages(t *testing.T) {
+	rd := sheetTestRefData(t)
+
+	tests := []struct {
+		name        string
+		status      string // matched risk's workflow_status
+		implDate    string
+		escalations []Escalation
+		grants      map[int][]Grant
+		want        RowProgress
+	}{
+		{"overdue, no escalation -> StatusWalked", "APPROVED", "2020-01-01", nil, nil, ProgressStatusWalked},
+		{"overdue, open marker escalation, grants missing -> Escalated", "APPROVED", "2020-01-01",
+			[]Escalation{{ID: 1, Status: "OPEN", CreatedBy: marker}}, nil, ProgressEscalated},
+		{"not overdue, grants missing -> Escalated", "APPROVED", "2099-01-01", nil, nil, ProgressEscalated},
+		{"not overdue, grants present -> Complete", "APPROVED", "2099-01-01", nil, ownerAssignerGrants(), ProgressComplete},
+		{"status not yet walked -> Created", "PENDING_COMPLIANCE_REVIEW", "2099-01-01", nil, ownerAssignerGrants(), ProgressCreated},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &stateStub{
+				t:           t,
+				risks:       []Risk{markerRisk(50, "Stage risk", 8, 2025, "Q3", tc.status)},
+				escalations: map[int][]Escalation{50: tc.escalations},
+				grants:      tc.grants,
+			}
+			row := baseRow(1, "Stage risk", "APPROVED")
+			row.ImplementationDate = tc.implDate
+
+			prog, rep := run6(t, s, rd, []Row{row})
+			if rep.HasFindings() {
+				t.Fatalf("unexpected findings: %+v", rep.findings)
+			}
+			if prog[1].Progress != tc.want {
+				t.Errorf("got %v, want %v", prog[1], tc.want)
+			}
+		})
+	}
+}
+
+func TestReconstructState_ConditionalManagementGrant(t *testing.T) {
+	rd := sheetTestRefData(t)
+	s := &stateStub{
+		t:     t,
+		risks: []Risk{markerRisk(60, "ACCEPT high", 8, 2025, "Q3", "APPROVED")},
+		grants: map[int][]Grant{
+			100: {{RoleID: 10, ScopeType: "RISK_TEAM", ScopeID: 1}},
+			101: {{RoleID: 11, ScopeType: "RISK_TEAM", ScopeID: 8}},
+			// 102 (management) has no GLOBAL grant yet
+		},
+	}
+	row := baseRow(1, "ACCEPT high", "APPROVED")
+	row.ImplementationDate = "2099-01-01" // not overdue
+	row.TreatmentStrategy = "ACCEPT"
+	row.GrossLikelihood, row.GrossImpact = 3, 3 // 9 >= 7 -> management grant required
+	row.ResidualLikelihood, row.ResidualImpact = 3, 3
+
+	prog, _ := run6(t, s, rd, []Row{row})
+	if prog[1].Progress != ProgressEscalated {
+		t.Fatalf("missing management grant should hold at ProgressEscalated, got %v", prog[1])
+	}
+
+	// Add the management GLOBAL grant -> now complete.
+	s.grants[102] = []Grant{{RoleID: 12, ScopeType: "GLOBAL", ScopeID: 0}}
+	prog, _ = run6(t, s, rd, []Row{row})
+	if prog[1].Progress != ProgressComplete {
+		t.Fatalf("with all three grants -> want ProgressComplete, got %v", prog[1])
+	}
+}
+
+func TestReconstructState_ResidualAssessmentOutstanding(t *testing.T) {
+	rd := sheetTestRefData(t)
+	s := &stateStub{
+		t:     t,
+		risks: []Risk{markerRisk(70, "Residual differs", 8, 2025, "Q3", "APPROVED")},
+		grants: map[int][]Grant{
+			100: {{RoleID: 10, ScopeType: "RISK_TEAM", ScopeID: 1}},
+			101: {{RoleID: 11, ScopeType: "RISK_TEAM", ScopeID: 8}},
+		},
+	}
+	row := baseRow(1, "Residual differs", "APPROVED")
+	row.ImplementationDate = "2099-01-01"             // not overdue — isolate the assessment gate
+	row.ResidualLikelihood, row.ResidualImpact = 3, 3 // differs from Gross (2,2)
+
+	prog, _ := run6(t, s, rd, []Row{row})
+	if prog[1].Progress == ProgressComplete {
+		t.Fatalf("residual assessment not yet written — must not report ProgressComplete, got %v", prog[1])
+	}
+	if prog[1].HasAssessment {
+		t.Errorf("HasAssessment should be false, got %v", prog[1])
+	}
+
+	// A marker-authored assessment already exists -> now complete.
+	s.assessments = map[int][]Assessment{70: {{ID: 1, AssessedBy: marker}}}
+	prog, _ = run6(t, s, rd, []Row{row})
+	if prog[1].Progress != ProgressComplete {
+		t.Fatalf("assessment present -> want ProgressComplete, got %v", prog[1])
+	}
+	if !prog[1].HasAssessment {
+		t.Errorf("HasAssessment should be true, got %v", prog[1])
+	}
+}
+
+func TestReconstructState_ClosedBucket(t *testing.T) {
+	rd := sheetTestRefData(t)
+
+	for _, tc := range []struct {
+		name   string
+		plans  []ActionPlanView
+		want   RowProgress
+		status string
+	}{
+		{"status at CLOSED, plan pending -> StatusWalked", []ActionPlanView{{ID: 1, PlanType: "STANDARD", Status: "PENDING"}}, ProgressStatusWalked, "CLOSED"},
+		{"status at CLOSED, plan completed -> Complete", []ActionPlanView{{ID: 1, PlanType: "STANDARD", Status: "COMPLETED"}}, ProgressComplete, "CLOSED"},
+		{"status not at CLOSED -> Created", []ActionPlanView{{ID: 1, PlanType: "STANDARD", Status: "COMPLETED"}}, ProgressCreated, "APPROVED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &stateStub{
+				t:     t,
+				risks: []Risk{markerRisk(70, "Closed risk", 8, 2025, "Q3", tc.status)},
+				plans: map[int][]ActionPlanView{70: tc.plans},
+			}
+			row := baseRow(1, "Closed risk", "CLOSED")
+			prog, rep := run6(t, s, rd, []Row{row})
+			if rep.HasFindings() {
+				t.Fatalf("unexpected findings: %+v", rep.findings)
+			}
+			if prog[1].Progress != tc.want {
+				t.Errorf("got %v, want %v", prog[1], tc.want)
+			}
+		})
+	}
+}
+
+func TestReconstructState_NaturalKeyCollisions(t *testing.T) {
+	rd := sheetTestRefData(t)
+
+	t.Run("two pending rows on one key", func(t *testing.T) {
+		s := &stateStub{t: t}
+		rows := []Row{
+			baseRow(1, "Same title", "APPROVED"),
+			baseRow(2, "Same title", "APPROVED"),
+		}
+		prog, rep := run6(t, s, rd, rows)
+		rej := rep.RejectedMigrationIDs()
+		if _, ok := rej[1]; !ok {
+			t.Errorf("row 1 not rejected")
+		}
+		if _, ok := rej[2]; !ok {
+			t.Errorf("row 2 not rejected")
+		}
+		if _, ok := prog[1]; ok {
+			t.Errorf("collided row must not get a progress entry")
+		}
+	})
+
+	t.Run("two marker risks on one key", func(t *testing.T) {
+		s := &stateStub{
+			t: t,
+			risks: []Risk{
+				markerRisk(80, "Dup risk", 8, 2025, "Q3", "APPROVED"),
+				markerRisk(81, "Dup risk", 8, 2025, "Q3", "APPROVED"),
+			},
+		}
+		prog, rep := run6(t, s, rd, []Row{baseRow(1, "Dup risk", "APPROVED")})
+		if _, ok := rep.RejectedMigrationIDs()[1]; !ok {
+			t.Errorf("row matching two marker risks should be rejected; findings=%+v", rep.findings)
+		}
+		if _, ok := prog[1]; ok {
+			t.Errorf("row must not get a progress entry")
+		}
+	})
+}
+
+func TestStatusAtLeast(t *testing.T) {
+	if !statusAtLeast("APPROVED", "APPROVED") {
+		t.Error("equal should be >=")
+	}
+	if !statusAtLeast("CLOSED", "APPROVED") {
+		t.Error("CLOSED is past APPROVED")
+	}
+	if statusAtLeast("PENDING_COMPLIANCE_REVIEW", "APPROVED") {
+		t.Error("PENDING_COMPLIANCE_REVIEW is before APPROVED")
+	}
+	if statusAtLeast("ESCALATED", "APPROVED") {
+		t.Error("a state off the migration path must not count as >=")
+	}
+}
+
+// withCustomer stamps the customer name the entity's /risks/search returns on
+// a marker risk (domain.Risk.CustomerName).
+func withCustomer(r Risk, name string) Risk {
+	r.CustomerName = &name
+	return r
+}
+
+// TestReconstructState_CustomerIsPartOfTheKey: two customers can carry the same
+// risk title in the same register, year and quarter. Resume must tell them
+// apart by customer, or the second one is rejected as a duplicate / matched to
+// the first customer's risk.
+func TestReconstructState_CustomerIsPartOfTheKey(t *testing.T) {
+	rd := sheetTestRefData(t)
+	rowFor := func(mig int, customer string) Row {
+		r := baseRow(mig, "TLS 1.0 enabled", "APPROVED")
+		r.Customer = customer
+		return r
+	}
+
+	t.Run("same title, different customers, are not a collision", func(t *testing.T) {
+		s := &stateStub{t: t}
+		prog, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")})
+		if len(rep.RejectedMigrationIDs()) != 0 {
+			t.Fatalf("rejected %v; findings=%+v", rep.RejectedMigrationIDs(), rep.findings)
+		}
+		for _, id := range []int{1, 2} {
+			if prog[id].Progress != ProgressNone {
+				t.Errorf("row %d progress = %v, want ProgressNone", id, prog[id].Progress)
+			}
+		}
+	})
+
+	t.Run("same title, same customer, is still a collision (case and spacing ignored)", func(t *testing.T) {
+		s := &stateStub{t: t}
+		_, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "  bankone ")})
+		rej := rep.RejectedMigrationIDs()
+		if _, ok := rej[1]; !ok {
+			t.Errorf("row 1 not rejected")
+		}
+		if _, ok := rej[2]; !ok {
+			t.Errorf("row 2 not rejected")
+		}
+	})
+
+	t.Run("an existing risk for one customer does not match another customer's row", func(t *testing.T) {
+		s := &stateStub{t: t, risks: []Risk{
+			withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "PENDING_RISK_OWNER_APPROVAL"), "BankOne"),
+		}}
+		prog, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")})
+		if len(rep.RejectedMigrationIDs()) != 0 {
+			t.Fatalf("rejected %v; findings=%+v", rep.RejectedMigrationIDs(), rep.findings)
+		}
+		if prog[1].RiskID != 80 {
+			t.Errorf("BankOne row should resume risk 80, got %+v", prog[1])
+		}
+		if prog[2].Progress != ProgressNone || prog[2].RiskID != 0 {
+			t.Errorf("Bank Of China row must not match BankOne's risk, got %+v", prog[2])
+		}
+	})
+
+	t.Run("one marker risk per customer, each row finds its own", func(t *testing.T) {
+		s := &stateStub{t: t, risks: []Risk{
+			withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "PENDING_RISK_OWNER_APPROVAL"), "BankOne"),
+			withCustomer(markerRisk(81, "TLS 1.0 enabled", 8, 2025, "Q3", "PENDING_RISK_OWNER_APPROVAL"), "Bank Of China"),
+		}}
+		prog, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")})
+		if len(rep.RejectedMigrationIDs()) != 0 {
+			t.Fatalf("two risks sharing a title across customers must not read as duplicates; findings=%+v", rep.findings)
+		}
+		if prog[1].RiskID != 80 || prog[2].RiskID != 81 {
+			t.Errorf("risk ids: row 1 -> %d, row 2 -> %d, want 80 and 81", prog[1].RiskID, prog[2].RiskID)
+		}
+	})
+}
+
+// TestRejectDuplicateKeys: two rows on one natural key are indistinguishable on
+// resume. The real run rejects them in reconstructState; the dry run must report
+// the same thing, or a clean dry run is followed by a real run that rejects rows.
+func TestRejectDuplicateKeys(t *testing.T) {
+	rowFor := func(mig int, customer, title string, year int) Row {
+		r := baseRow(mig, title, "APPROVED")
+		r.Customer, r.RiskYear = customer, year
+		return r
+	}
+
+	t.Run("same key rejects every row on it", func(t *testing.T) {
+		rep := NewReport()
+		rejectDuplicateKeys([]Row{
+			rowFor(1, "BankOne", "TLS", 2025),
+			rowFor(2, "  bankone ", "TLS", 2025),
+			rowFor(3, "BankOne", "Other title", 2025),
+		}, rep)
+		rej := rep.RejectedMigrationIDs()
+		if _, ok := rej[1]; !ok {
+			t.Errorf("row 1 not rejected")
+		}
+		if _, ok := rej[2]; !ok {
+			t.Errorf("row 2 not rejected")
+		}
+		if _, ok := rej[3]; ok {
+			t.Errorf("row 3 is on its own key and must not be rejected")
+		}
+		got := findingsFor(rep.findings, "natural key")
+		if len(got) != 2 || !strings.Contains(got[0].Detail, "customer") {
+			t.Errorf("findings = %+v, want two 'natural key' REJECTs naming the customer", got)
+		}
+	})
+
+	t.Run("a different customer or year is a different key", func(t *testing.T) {
+		rep := NewReport()
+		rejectDuplicateKeys([]Row{
+			rowFor(1, "BankOne", "TLS", 2025),
+			rowFor(2, "Bank Of China", "TLS", 2025),
+			rowFor(3, "BankOne", "TLS", 2026),
+		}, rep)
+		if len(rep.findings) != 0 {
+			t.Errorf("findings = %+v, want none", rep.findings)
+		}
+	})
+}
