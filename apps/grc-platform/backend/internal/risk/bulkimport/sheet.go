@@ -217,8 +217,18 @@ func parseSheet(r io.Reader, refs RefData, tgt Target) ([]Row, []Finding, error)
 // case. It errors if any expected column is missing.
 func mapHeader(header []string, template string) (map[string]int, error) {
 	got := make(map[string]int, len(header))
+	var repeated []string
 	for i, h := range header {
-		got[normHeader(h)] = i
+		key := normHeader(h)
+		if _, seen := got[key]; seen && key != "" && recognisedColumns[key] {
+			// The last column would win and the first be ignored, so a filled
+			// column could hide behind a blank one of the same name.
+			repeated = append(repeated, h)
+		}
+		got[key] = i
+	}
+	if len(repeated) > 0 {
+		return nil, fmt.Errorf("csv has the column %q more than once; keep one", strings.TrimSpace(repeated[0]))
 	}
 	var missing []string
 	for _, want := range requiredHeaders(template) {
@@ -231,6 +241,19 @@ func mapHeader(header []string, template string) (map[string]int, error) {
 	}
 	return got, nil
 }
+
+// recognisedColumns are the headers a sheet is read by, normalised. A column
+// nobody reads may repeat harmlessly; one of these may not.
+var recognisedColumns = func() map[string]bool {
+	m := map[string]bool{normHeader("Source Register"): true}
+	for _, h := range baseHeaders {
+		m[normHeader(h)] = true
+	}
+	for _, h := range allTemplateColumns {
+		m[normHeader(h)] = true
+	}
+	return m
+}()
 
 func normHeader(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
@@ -260,16 +283,23 @@ func stripBOM(r io.Reader) io.Reader {
 }
 
 // isSkippable drops the legend row and fully blank rows (plan §4).
-func isSkippable(rec []string, idx map[string]int) bool {
-	joined := strings.ToLower(strings.Join(rec, ""))
-	if strings.TrimSpace(joined) == "" {
+func isSkippable(rec []string, _ map[string]int) bool {
+	filled := 0
+	var only string
+	for _, c := range rec {
+		if t := strings.TrimSpace(c); t != "" {
+			filled++
+			only = t
+		}
+	}
+	if filled == 0 {
 		return true
 	}
-	if strings.Contains(joined, "required fields are coloured") {
-		return true
-	}
-	// A row with neither a Year nor a Risk Title is not a data row.
-	return get(rec, idx, "Year") == "" && get(rec, idx, "Risk Title") == ""
+	// The legend an exported sheet carries is one cell of text. A row that merely
+	// mentions it is a risk, and every other row with data goes on to validation,
+	// even one missing its Year and Risk Title: dropping it silently would lose a
+	// risk without a word. mapRow rejects it with the reasons.
+	return filled == 1 && strings.Contains(strings.ToLower(only), "required fields are coloured")
 }
 
 // mapRow applies every rule in plan §6: the value transforms in transform.go
@@ -297,10 +327,14 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData, tgt Target
 	}
 
 	// Migration ID first, so every finding below can carry it.
-	if n, err := parseIntish(get(rec, idx, "Migration ID")); err == nil {
-		row.MigrationID = n
-	} else {
+	// Positive, because 0 is what the duplicate check and the resume maps read as
+	// "no ID": two rows that both said 0 would overwrite each other's state.
+	if n, err := parseIntish(get(rec, idx, "Migration ID")); err != nil {
 		reject("Migration ID", "missing or non-integer")
+	} else if n <= 0 {
+		reject("Migration ID", fmt.Sprintf("%d is not a positive whole number", n))
+	} else {
+		row.MigrationID = n
 	}
 
 	// ── verbatim text ──────────────────────────────────────────────────────

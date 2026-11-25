@@ -788,3 +788,126 @@ func TestRun_DryRunNarrativeStatesThePlan(t *testing.T) {
 		t.Errorf("report.txt:\n%s", out.String())
 	}
 }
+
+// ── review fixes: rows and columns must not vanish or collide silently ──────
+
+func TestMigrationID_MustBePositive(t *testing.T) {
+	rd := templateRefData(t, nil)
+	for _, id := range []string{"0", "0.0", "-3"} {
+		_, fs := parseTemplate(t, templateStandard, rd, plainRow(map[string]string{"Migration ID": id}))
+		wantRejectContaining(t, fs, "Migration ID", "positive")
+	}
+	_, fs := parseTemplate(t, templateStandard, rd, plainRow(map[string]string{"Migration ID": "3.0"}))
+	if len(fs) != 0 {
+		t.Errorf("3.0 is a valid Migration ID: %+v", fs)
+	}
+}
+
+// Two rows that both carry ID 0 used to slip past the duplicate check (0 meant
+// "unset") and then overwrote each other's resume state.
+func TestMigrationID_ZeroTwiceIsRejectedNotMerged(t *testing.T) {
+	rd := templateRefData(t, nil)
+	_, fs := parseTemplate(t, templateStandard, rd,
+		plainRow(map[string]string{"Migration ID": "0"}),
+		plainRow(map[string]string{"Risk Title": "Other", "Migration ID": "0"}))
+	if got := rejectsFor(fs, "Migration ID"); len(got) < 2 {
+		t.Errorf("both rows must be rejected, got %+v", got)
+	}
+}
+
+func TestMapHeader_DuplicateRecognisedColumnIsRefused(t *testing.T) {
+	base := TemplateHeaders(templateStandard)
+	for _, dup := range []string{"Risk Title", "risk  title", "Customer", "Source Register"} {
+		header := append(append([]string{}, base...), dup)
+		if !contains(base, dup) && normHeader(dup) != normHeader("Risk Title") {
+			header = append(header, dup) // not in the base header: repeat it so it appears twice
+		}
+		_, err := mapHeader(header, templateStandard)
+		if err == nil || !strings.Contains(err.Error(), "more than once") {
+			t.Errorf("duplicate %q: err = %v, want it refused", dup, err)
+		}
+	}
+	// Blank header cells and columns nobody reads may repeat freely.
+	header := append(append([]string{}, base...), "", "", "Notes", "Notes")
+	if _, err := mapHeader(header, templateStandard); err != nil {
+		t.Errorf("repeated blank or unknown columns are harmless: %v", err)
+	}
+}
+
+// A populated column hiding behind a second, blank one of the same name used to
+// pass the wrong-template check, because the last column won.
+func TestStandard_DuplicateForeignColumnCannotHideData(t *testing.T) {
+	rd := templateRefData(t, nil)
+	header := append(TemplateHeaders(templateStandard), "Customer", "Customer")
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	_ = w.Write(header)
+	rec := make([]string, len(header))
+	for i, h := range header {
+		rec[i] = plainRow(nil)[h]
+	}
+	rec[len(rec)-2] = "BankOne"
+	_ = w.Write(rec)
+	w.Flush()
+	_, _, err := parseSheet(strings.NewReader(buf.String()), rd, Target{RegisterID: idStdReg, Name: "Asgardeo", Template: templateStandard})
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Fatalf("err = %v, want the duplicate column refused", err)
+	}
+}
+
+func TestIsSkippable(t *testing.T) {
+	header := TemplateHeaders(templateStandard)
+	idx, err := mapHeader(header, templateStandard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := func(cells map[string]string) []string {
+		r := make([]string, len(header))
+		for i, h := range header {
+			r[i] = cells[h]
+		}
+		return r
+	}
+	for _, tc := range []struct {
+		name string
+		rec  []string
+		want bool
+	}{
+		{"fully blank", rec(nil), true},
+		{"whitespace only", rec(map[string]string{"Year": "  ", "Remarks": " "}), true},
+		{"the legend row", rec(map[string]string{"Quarter": "Required fields are coloured in yellow. Do not edit the header row."}), true},
+		{"the legend in another column, with different case", rec(map[string]string{"Risk Title": "REQUIRED FIELDS ARE COLOURED"}), true},
+		{"a risk whose description mentions the legend", rec(map[string]string{
+			"Year": "2025", "Risk Title": "T", "Risk Description": "required fields are coloured in the form"}), false},
+		{"data but no year and no title", rec(map[string]string{"Risk Owner": "a@wso2.com", "Migration ID": "7"}), false},
+		{"an ordinary row", rec(map[string]string{"Year": "2025", "Risk Title": "T"}), false},
+	} {
+		if got := isSkippable(tc.rec, idx); got != tc.want {
+			t.Errorf("%s: isSkippable = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A row with data but no Year and no Risk Title is rejected with reasons. It
+// used to be dropped without a word, so the admin never learned a row was lost.
+func TestParse_RowWithDataButNoYearOrTitleIsRejectedNotDropped(t *testing.T) {
+	rd := templateRefData(t, nil)
+	rows, fs := parseTemplate(t, templateStandard, rd,
+		plainRow(map[string]string{"Year": "", "Risk Title": "", "Migration ID": "4"}))
+	if len(rows) != 1 {
+		t.Fatalf("the row was dropped: rows = %d", len(rows))
+	}
+	wantRejectContaining(t, fs, "Risk Title", "empty")
+	if len(rejectsFor(fs, "Year")) == 0 {
+		t.Errorf("a missing Year must be a finding too: %+v", fs)
+	}
+}
+
+func TestParse_RiskMentioningTheLegendIsImportedNotDropped(t *testing.T) {
+	rd := templateRefData(t, nil)
+	rows, fs := parseTemplate(t, templateStandard, rd,
+		plainRow(map[string]string{"Risk Description": "Required fields are coloured in yellow on the form"}))
+	if len(rows) != 1 || len(fs) != 0 {
+		t.Errorf("rows = %d, findings = %+v", len(rows), fs)
+	}
+}
