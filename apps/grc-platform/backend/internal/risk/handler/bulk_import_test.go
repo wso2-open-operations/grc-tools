@@ -44,6 +44,9 @@ type fakeBulkImporter struct {
 	// report builds the report a run returns; nil means a clean, empty one.
 	report func(dryRun bool) *bulkimport.Report
 	runErr error
+	// failDryRun and failImport fail only that mode, so a test can have a dry run
+	// succeed and the import after it fail.
+	failDryRun, failImport bool
 	// gate, when non-nil, holds every Run until it is closed.
 	gate chan struct{}
 
@@ -67,6 +70,9 @@ func (f *fakeBulkImporter) Run(_ context.Context, req bulkimport.Request) (*bulk
 	f.mu.Unlock()
 	if f.runErr != nil {
 		return nil, f.runErr
+	}
+	if (req.DryRun && f.failDryRun) || (!req.DryRun && f.failImport) {
+		return nil, errors.Join(bulkimport.ErrStructural, errors.New("entity unavailable"))
 	}
 	rep := bulkimport.NewReport()
 	if f.report != nil {
@@ -472,6 +478,57 @@ func TestBulkImport_AnImportSpendsItsAuthorisation(t *testing.T) {
 	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("a second import of the same file: status = %d, want 422 (run the dry run again)", rec.Code)
+	}
+}
+
+// An import that fails part-way keeps its dry run approval, so the admin can run
+// the same file again to continue without a new dry run. The pipeline resumes, so
+// nothing is written twice.
+func TestBulkImport_FailedImportKeepsItsApprovalSoTheRetryIsAccepted(t *testing.T) {
+	f := &fakeBulkImporter{failImport: true}
+	h := newTestBulkHandler(f)
+	ctx := adminCtx(t)
+
+	waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
+
+	failed := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, importFields()...).ID)
+	if failed.Status != bulkImportStatusFailed || failed.Importable {
+		t.Fatalf("the import should have failed: %+v", failed)
+	}
+
+	// The approval is still there: the same file is accepted again, with no new dry run.
+	f.failImport = false
+	retried := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, importFields()...).ID)
+	if retried.Mode != bulkImportModeImport || retried.Status != bulkImportStatusDone {
+		t.Errorf("the retry = %+v, want a finished import", retried)
+	}
+	if f.runCount() != 3 { // the dry run, the import that failed, and the retry
+		t.Errorf("runs = %d, want 3", f.runCount())
+	}
+
+	// And once an import has succeeded the approval is spent.
+	rec := httptest.NewRecorder()
+	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("a third import: status = %d, want 422 (the approval was spent by the successful one)", rec.Code)
+	}
+}
+
+// A dry run that fails approves nothing: only a finished, clean one does.
+func TestBulkImport_FailedDryRunDoesNotAuthoriseAnImport(t *testing.T) {
+	f := &fakeBulkImporter{failDryRun: true}
+	h := newTestBulkHandler(f)
+	ctx := adminCtx(t)
+
+	failed := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
+	if failed.Status != bulkImportStatusFailed || failed.Importable {
+		t.Fatalf("the dry run should have failed: %+v", failed)
+	}
+
+	rec := httptest.NewRecorder()
+	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("import after a failed dry run: status = %d, want 422", rec.Code)
 	}
 }
 

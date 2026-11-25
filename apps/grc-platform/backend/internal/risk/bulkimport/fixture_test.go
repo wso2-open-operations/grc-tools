@@ -158,6 +158,12 @@ type fakeEntity struct {
 	// entity would never have accepted on a Managed Services risk.
 	complianceRefsByRisk map[int][]int
 
+	// failCreateAfter makes POST /risks answer 500 once that many risks have been
+	// created (0 = never); failNextPatch makes the next PATCH /risks/{id} answer
+	// 500 once. Together they stop a run part-way, the way an entity outage would.
+	failCreateAfter int
+	failNextPatch   bool
+
 	nextRiskID int
 	nextUserID int
 }
@@ -249,6 +255,10 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_ = enc.Encode(map[string]int{"id": fe.nextUserID})
 
+	case r.Method == http.MethodPost && p == "/risks" && fe.failCreateAfter > 0 && len(fe.createdRisks) >= fe.failCreateAfter:
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":500,"message":"entity unavailable"}`))
+
 	case r.Method == http.MethodPost && p == "/risks":
 		var body CreateRiskRequest
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -324,6 +334,11 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 				"steps": fakeActionSteps(body.ActionSteps),
 			},
 		})
+
+	case r.Method == http.MethodPatch && strings.HasPrefix(p, "/risks/") && fe.failNextPatch:
+		fe.failNextPatch = false
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":500,"message":"entity unavailable"}`))
 
 	case r.Method == http.MethodPatch && strings.HasPrefix(p, "/risks/"):
 		id, _ := strconv.Atoi(strings.TrimPrefix(p, "/risks/"))
