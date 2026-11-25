@@ -112,6 +112,11 @@ type Deps struct {
 	TriggerReminderJob func(ctx context.Context) error
 	// ActivityLog records reference-data mutations to admin_activity_log.
 	ActivityLog *adminactivity.Client
+	// BulkImport runs the Compliance Admin's historical-register import
+	// (bulk_import.go). Nil when no directory is configured (local dev without
+	// SCIM credentials): the import cannot resolve a single person without one,
+	// so its routes answer 503 rather than reject every row.
+	BulkImport BulkImporter
 }
 
 // RegisterRoutes mounts all Risk Hub routes onto mux.
@@ -125,6 +130,14 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	d := &deps
 	ejh := &escalationJobHandler{trigger: deps.TriggerEscalationJob}
 	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
+	bih := newBulkImportHandler(deps.BulkImport)
+
+	// Bulk risk import (Compliance Admin, RISK_BULK_UPLOAD held GLOBAL). Literal
+	// first segment, so these never collide with the {id} routes.
+	mux.HandleFunc("GET /api/v1/risks/bulk-import/template", bih.handleTemplate)
+	mux.HandleFunc("POST /api/v1/risks/bulk-import", bih.handleStart)
+	mux.HandleFunc("GET /api/v1/risks/bulk-import/jobs/{id}", bih.handleJob)
+	mux.HandleFunc("GET /api/v1/risks/bulk-import/jobs/{id}/{artifact}", bih.handleArtifact)
 
 	// Teams
 	mux.HandleFunc("GET /api/v1/risks/teams", d.handleListTeams)
