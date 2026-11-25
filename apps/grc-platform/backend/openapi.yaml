@@ -46,6 +46,7 @@ tags:
 - name: Risk Reminders
 - name: Risk History
 - name: Risk Evidence
+- name: Risk Bulk Import
 - name: Users
 - name: Admin
 - name: Meta
@@ -3589,6 +3590,196 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/risks/bulk-import/template:
+    get:
+      tags:
+      - Risk Bulk Import
+      summary: Download the CSV template for a register
+      description: The header row for the register's template and nothing else, so no example row can be imported by mistake. Only the columns that template needs (compliance references for STANDARD, Platform for AGGREGATED, Customer, Deployment Type, Product and Environment for MANAGED_SERVICES). Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).
+      operationId: downloadBulkImportTemplate
+      parameters:
+      - name: register_id
+        in: query
+        required: true
+        description: The source register the file will be imported into.
+        schema:
+          type: integer
+          minimum: 1
+      responses:
+        '200':
+          description: CSV header row (UTF-8 with BOM)
+          headers:
+            Content-Disposition:
+              description: attachment; filename=risk-import-template-<register>.csv
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/BulkImportUnavailable'
+  /api/v1/risks/bulk-import:
+    post:
+      tags:
+      - Risk Bulk Import
+      summary: Start a bulk import dry run or import
+      description: 'Multipart form upload (fields: register_id, mode, file, acknowledge_warnings (optional)). Starts a background job and answers 202 with it; read progress and the result from the job route. A dry_run reads the whole file and reports every problem without writing anything. An import is accepted only for a file whose dry run, by the same caller and into the same register, finished with nothing rejected within the last 30 minutes (matched on the file''s SHA-256); if that dry run had warnings, acknowledge_warnings must be "true". One run at a time. Limits: 5 MiB, 1000 rows, .csv text only. Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).'
+      operationId: startBulkImport
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - register_id
+              - mode
+              - file
+              properties:
+                register_id:
+                  type: integer
+                  minimum: 1
+                  description: The source register to import into. The file does not name one.
+                mode:
+                  type: string
+                  enum:
+                  - dry_run
+                  - import
+                acknowledge_warnings:
+                  type: string
+                  enum:
+                  - 'true'
+                  description: Required for an import whose dry run reported warnings.
+                file:
+                  type: string
+                  format: binary
+                  description: The CSV, saved as UTF-8.
+      responses:
+        '202':
+          description: The job was accepted and is running
+          headers:
+            Location:
+              description: /api/v1/risks/bulk-import/jobs/{id}
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkImportJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Another import is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The file is larger than 5 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: The file is not a .csv text file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: The register could not be used, or an import was requested without a clean dry run of this file (or without acknowledging its warnings)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/BulkImportUnavailable'
+  /api/v1/risks/bulk-import/jobs/{id}:
+    get:
+      tags:
+      - Risk Bulk Import
+      summary: Get a bulk import job
+      description: Progress while it runs; the counts, findings and available downloads once it has finished. Jobs are kept for 24 hours. Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).
+      operationId: getBulkImportJob
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkImportJob'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/BulkImportUnavailable'
+  /api/v1/risks/bulk-import/jobs/{id}/{artifact}:
+    get:
+      tags:
+      - Risk Bulk Import
+      summary: Download a bulk import result file
+      description: errors.csv (every finding), report.txt (the narrative, including the plan and the risk codes a run would assign) or risk_codes.csv (the risk number of every migrated row). Cells that echo the sheet are neutralised against spreadsheet formulas. Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).
+      operationId: downloadBulkImportResult
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: artifact
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - errors
+          - report
+          - risk-codes
+      responses:
+        '200':
+          description: The file
+          headers:
+            Content-Disposition:
+              description: attachment; filename=errors.csv, report.txt or risk_codes.csv
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/BulkImportUnavailable'
   /api/v1/risks/{id}:
     get:
       tags:
@@ -4982,6 +5173,12 @@ components:
             $ref: '#/components/schemas/Error'
     InternalServerError:
       description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BulkImportUnavailable:
+      description: Bulk risk import is not available in this environment (no identity directory is configured), or the register list could not be read right now
       content:
         application/json:
           schema:
@@ -8009,6 +8206,125 @@ components:
         description:
           type: string
     # --- Risk Evidence --------------------------------------------------------
+    BulkImportCounts:
+      type: object
+      description: The headline numbers of a run. to_write and already_done are set by a dry run (plan_known), and say what an import would write and what an earlier import already completed.
+      properties:
+        migrated:
+          type: integer
+        skipped:
+          type: integer
+        rejects:
+          type: integer
+        warnings:
+          type: integer
+        mismatches:
+          type: integer
+        to_write:
+          type: integer
+        already_done:
+          type: integer
+        plan_known:
+          type: boolean
+    BulkImportFinding:
+      type: object
+      properties:
+        migration_id:
+          type: integer
+        csv_row:
+          type: integer
+          description: 1-based line in the file, 0 when the finding is not about one row.
+        risk_title:
+          type: string
+        severity:
+          type: string
+          enum:
+          - REJECT
+          - WARN
+          - MISMATCH
+        failure:
+          type: string
+          description: The column or check the finding is about.
+        detail:
+          type: string
+    BulkImportJob:
+      type: object
+      description: One dry run or import. Kept for 24 hours.
+      properties:
+        id:
+          type: string
+        mode:
+          type: string
+          enum:
+          - dry_run
+          - import
+        status:
+          type: string
+          enum:
+          - running
+          - succeeded
+          - failed
+        phase:
+          type: string
+          description: While running - preflight, parse, resolve, write or verify.
+        done:
+          type: integer
+        total:
+          type: integer
+        register_id:
+          type: integer
+        register_name:
+          type: string
+        template:
+          type: string
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
+        file_name:
+          type: string
+        file_sha256:
+          type: string
+        outcome:
+          type: string
+          enum:
+          - clean
+          - completed_with_findings
+          - aborted
+        rows:
+          type: integer
+        error:
+          type: string
+          description: Why a run failed. For a failure on the platform's side this is a job reference to quote, not the cause.
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        counts:
+          $ref: '#/components/schemas/BulkImportCounts'
+        importable:
+          type: boolean
+          description: True on a finished dry run with nothing rejected, until importable_until - the window in which the same file may be imported.
+        importable_until:
+          type: string
+          format: date-time
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkImportFinding'
+        findings_truncated:
+          type: boolean
+          description: True when there were more than 1000 findings; errors.csv has them all.
+        downloads:
+          type: array
+          items:
+            type: string
+            enum:
+            - errors
+            - report
+            - risk-codes
     RiskEvidence:
       type: object
       properties:
