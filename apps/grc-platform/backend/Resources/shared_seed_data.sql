@@ -316,6 +316,12 @@ INSERT INTO privilege (privilege_name, module, status) VALUES
   -- filters on status = 'ACTIVE', so they simply stop resolving.
   ('RISK_CREATE_MANAGEMENT_ACTION_PLAN', 'RISK', 'INACTIVE'),
   ('RISK_COMPLETE_ACTION_STEPS',   'RISK', 'ACTIVE'),
+  -- RISK_BULK_UPLOAD gates the Compliance Admin's bulk risk import (the
+  -- /api/v1/risks/bulk-import routes). Granted only to
+  -- grc-platform-risk-compliance-admin below, and the backend requires it held
+  -- GLOBAL: the import provisions user rows and writes role grants, one of them
+  -- GLOBAL, so a register-scoped grant of this role must not be able to run it.
+  ('RISK_BULK_UPLOAD',             'RISK', 'ACTIVE'),
   -- Audit Hub (12 privileges). Coarse booleans only — row scope (all / team /
   -- owned / assigned) is DERIVED from these at request time, never expressed
   -- here — see deriveScopes in internal/audit/handler/dashboard.go. In
@@ -390,7 +396,8 @@ JOIN   privilege p ON p.privilege_name IN ('MANAGE_USERS', 'MANAGE_RISK_HUB', 'M
 WHERE  r.role_name = 'grc-platform-admin'
 ON DUPLICATE KEY UPDATE is_active = TRUE;
 
--- grc-platform-risk-compliance-admin → 20 Risk Hub privileges. No longer 23:
+-- grc-platform-risk-compliance-admin → 21 Risk Hub privileges (the 20 below plus
+-- RISK_BULK_UPLOAD). No longer 23:
 -- RISK_MANAGE_TEAMS/SCORES/COMPLIANCE_REFS moved to the Admin Console's
 -- MANAGE_RISK_HUB, held only by grc-platform-admin — see the deactivation
 -- block above. This role keeps every other Risk Hub privilege; only
@@ -403,7 +410,7 @@ JOIN   privilege p ON p.privilege_name IN (
   'RISK_OWNER_APPROVE', 'RISK_MANAGEMENT_APPROVE', 'RISK_COMPLIANCE_APPROVE',
   'RISK_OWNER_REJECT', 'RISK_MANAGEMENT_REJECT', 'RISK_COMPLIANCE_REJECT',
   'RISK_COMPLETE', 'RISK_CLOSE', 'RISK_ESCALATE', 'RISK_ASSESS',
-  'RISK_MANAGE_ACTION_PLANS', 'RISK_VIEW_ANALYTICS'
+  'RISK_MANAGE_ACTION_PLANS', 'RISK_VIEW_ANALYTICS', 'RISK_BULK_UPLOAD'
 ) AND p.status = 'ACTIVE'
 WHERE  r.role_name = 'grc-platform-risk-compliance-admin'
 ON DUPLICATE KEY UPDATE is_active = TRUE;

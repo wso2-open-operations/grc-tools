@@ -123,6 +123,39 @@ func HasPrivilegeIn(ctx context.Context, priv string, teamID int) bool {
 	return grant.FromContext(ctx).HasIn(priv, teamID)
 }
 
+// HasGlobalPrivilege returns true if the caller holds priv through a GLOBAL
+// grant — not merely in some team's scope, which HasPrivilege would also accept.
+//
+// For actions whose effects outrun any one register: a scoped holder of the
+// privilege must not be able to use it to reach beyond their scope. Local dev
+// (no privilege store configured) allows everything, like the other checks.
+func HasGlobalPrivilege(ctx context.Context, priv string) bool {
+	if middleware.UserInfoFromContext(ctx) == nil {
+		return false
+	}
+	if privilege.FromContext(ctx) == nil {
+		// Local dev allow-all mode.
+		return true
+	}
+	return grant.FromContext(ctx).HasGlobal(priv)
+}
+
+// RequireGlobalPrivilege writes a 403 JSON response and returns false when the
+// caller does not hold priv at GLOBAL scope.
+func RequireGlobalPrivilege(ctx context.Context, w http.ResponseWriter, priv string) bool {
+	if HasGlobalPrivilege(ctx, priv) {
+		return true
+	}
+
+	response.WriteError(
+		w,
+		http.StatusForbidden,
+		response.ErrMsgForbidden,
+	)
+
+	return false
+}
+
 // RequirePrivilegeIn writes a 403 JSON response and returns false when the
 // caller lacks priv in the given team's scope. Use it after the unscoped guard
 // wherever a handler knows which team governs the object:
