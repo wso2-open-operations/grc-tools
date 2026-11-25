@@ -28,6 +28,33 @@ import (
 // is reported as not found: the platform never picks a winner.
 type EmailLookup func(ctx context.Context, email string) (uuid string, found bool, err error)
 
+// cachedLookup remembers every answer for the life of one run, including "no such
+// account". A run looks each person up in several passes (validation, the dry-run
+// plan, provisioning); sharing one cache makes them agree: a person accepted by
+// the validation pass cannot be rejected by the provisioning pass because the
+// directory changed in between, which would leave a user row behind for a file
+// that then fails. It also asks the directory once per person, not once per pass.
+// An error is not remembered, so a failed lookup is tried again.
+func cachedLookup(l EmailLookup) EmailLookup {
+	type answer struct {
+		uuid  string
+		found bool
+	}
+	seen := map[string]answer{}
+	return func(ctx context.Context, email string) (string, bool, error) {
+		key := strings.ToLower(strings.TrimSpace(email))
+		if a, ok := seen[key]; ok {
+			return a.uuid, a.found, nil
+		}
+		uuid, found, err := l(ctx, key)
+		if err != nil {
+			return "", false, err
+		}
+		seen[key] = answer{uuid, found}
+		return uuid, found, nil
+	}
+}
+
 // Resolver turns a work email into a compliance-entity user.id, via:
 //
 //	email --(directory lookup)--> uuid --(GET /users/by-uuid, else POST /users)--> user.id

@@ -210,7 +210,8 @@ func (s *Service) Run(ctx context.Context, req Request) (*Result, error) {
 	// pass has found nothing to reject: no file with a bad row in it may write
 	// anything, not even a user row.
 	report(Progress{Phase: "resolve", Total: len(rows)})
-	check := NewResolver(s.entity, s.lookup, true)
+	lookup := cachedLookup(s.lookup)
+	check := NewResolver(s.entity, lookup, true)
 	resolveFindings, err := check.Apply(ctx, rows)
 	if err != nil {
 		s.log.Error("bulk import identity resolution failed — re-run to resume", "err", err)
@@ -230,7 +231,7 @@ func (s *Service) Run(ctx context.Context, req Request) (*Result, error) {
 
 	if req.DryRun {
 		if rep.Counts().Rejects == 0 {
-			if err := s.planRun(ctx, refs, opts, rows, rep); err != nil {
+			if err := s.planRun(ctx, lookup, refs, opts, rows, rep); err != nil {
 				return fail(err)
 			}
 		}
@@ -249,7 +250,7 @@ func (s *Service) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	// ── Provision: email → uuid → user.id, creating user rows (§6) ───────────
-	provision := NewResolver(s.entity, s.lookup, false)
+	provision := NewResolver(s.entity, lookup, false)
 	provisionFindings, err := provision.Apply(ctx, rows)
 	if err != nil {
 		s.log.Error("bulk import identity resolution failed — re-run to resume", "err", err)
@@ -316,11 +317,16 @@ func (s *Service) Run(ctx context.Context, req Request) (*Result, error) {
 //
 // The report it builds along the way is thrown away: dryRunChecks has already
 // recorded every finding this would repeat.
-func (s *Service) planRun(ctx context.Context, rd RefData, opts Options, rows []Row, rep *Report) error {
+func (s *Service) planRun(ctx context.Context, lookup EmailLookup, rd RefData, opts Options, rows []Row, rep *Report) error {
 	withIDs := append([]Row(nil), rows...)
-	if _, err := NewReadOnlyResolver(s.entity, s.lookup).Apply(ctx, withIDs); err != nil {
+	// The run's shared lookup, so this pass sees the same people validation did.
+	// Anything it still rejects is kept: a plan must not call a row ready that a
+	// real run would refuse.
+	found, err := NewReadOnlyResolver(s.entity, lookup).Apply(ctx, withIDs)
+	if err != nil {
 		return fmt.Errorf("identity lookup: %w", err)
 	}
+	rep.Add(found...)
 	pending := selectMigratable(withIDs, rep)
 	state, err := reconstructState(ctx, s.entity, rd, opts.MigrationDate, pending, NewReport())
 	if err != nil {
