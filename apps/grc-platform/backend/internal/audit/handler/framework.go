@@ -34,7 +34,8 @@ type frameworkHandler struct {
 
 // listFrameworks handles GET /api/v1/audits/frameworks.
 func (h *frameworkHandler) listFrameworks(w http.ResponseWriter, r *http.Request) {
-	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+	// Internal-only: external auditors must not read the framework catalog.
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewInternalComments) {
 		return
 	}
 	ctx := r.Context()
@@ -188,7 +189,8 @@ func (h *frameworkHandler) createProduct(w http.ResponseWriter, r *http.Request)
 // opposite positions, which net/http's ServeMux refuses to register as
 // ambiguous (panics at startup, not a graceful fallback).
 func (h *frameworkHandler) listFrameworkControls(w http.ResponseWriter, r *http.Request) {
-	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
+	// Internal-only, like listFrameworks.
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewInternalComments) {
 		return
 	}
 	id, err := strconv.Atoi(r.URL.Query().Get("frameworkId"))

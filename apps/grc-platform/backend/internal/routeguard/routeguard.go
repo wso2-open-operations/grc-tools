@@ -48,8 +48,10 @@ var externalVisible = map[string]bool{
 
 	// ── Audit Hub: lookups ───────────────────────────────────────────────────
 	// Gated on AUDIT_VIEW_AUDITS, which the auditor holds — not admin-only.
-	"GET /api/v1/audits/frameworks":           true,
-	"GET /api/v1/audits/frameworks/controls":  true,
+	// Frameworks are the exception: internal-only (AUDIT_VIEW_INTERNAL_COMMENTS),
+	// the Frameworks page is hidden from external auditors.
+	"GET /api/v1/audits/frameworks":           false,
+	"GET /api/v1/audits/frameworks/controls":  false,
 	"GET /api/v1/audits/products":             true,
 	"GET /api/v1/audits/teams":                true,
 	"POST /api/v1/audits/frameworks":          false,

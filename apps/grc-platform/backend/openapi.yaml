@@ -188,7 +188,7 @@ paths:
       tags:
       - Audit Frameworks
       summary: List audit frameworks
-      description: Lookup data for the Create Audit form's framework dropdown. Returns ACTIVE frameworks unless status says otherwise.
+      description: Lookup data for the Create Audit form's framework dropdown. Returns ACTIVE frameworks unless status says otherwise. Internal-only: requires AUDIT_VIEW_INTERNAL_COMMENTS (403 for external auditors).
       operationId: listAuditFrameworks
       parameters:
       - name: status
@@ -326,7 +326,7 @@ paths:
       tags:
       - Audit Framework Controls
       summary: List current controls for a framework
-      description: frameworkId is a query param, not a path segment — a path segment here would collide with GET /api/v1/audits/{id}/controls/{controlId} (net/http's ServeMux treats the two as an ambiguous registration).
+      description: frameworkId is a query param, not a path segment — a path segment here would collide with GET /api/v1/audits/{id}/controls/{controlId} (net/http's ServeMux treats the two as an ambiguous registration). Internal-only: requires AUDIT_VIEW_INTERNAL_COMMENTS (403 for external auditors).
       operationId: listAuditFrameworkControls
       parameters:
       - $ref: '#/components/parameters/FrameworkId'

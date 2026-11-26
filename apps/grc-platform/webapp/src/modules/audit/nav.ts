@@ -43,7 +43,8 @@ export const auditNav: NavSection = {
       label: "Frameworks",
       path: auditPaths.frameworks,
       icon: Library,
-      requiredPrivilege: AuditPrivilege.ViewAudits,
+      // Internal-only, same proxy as the dashboard: external auditors don't see Frameworks.
+      requiredPrivilege: AuditPrivilege.ViewInternalComments,
     },
     {
       id: "audit-audits",
