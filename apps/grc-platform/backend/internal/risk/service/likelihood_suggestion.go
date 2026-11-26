@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -212,30 +213,37 @@ func (s *likelihoodSuggestionService) RecordDecision(ctx context.Context, riskID
 	return nil
 }
 
-// resolvePendingSuggestion decides any existing unresolved (SUGGESTED)
-// LIKELIHOOD row for riskID against finalScore — ACCEPTED if the pending
-// suggestion's score matches what was actually saved, OVERRIDDEN otherwise.
-// No-op if there isn't one. This is what makes PendingSuggestion (the
-// in-risk reminder) eventually clear: without it, a row written by
-// CreateUnresolvedSuggestion stays SUGGESTED forever, since nothing else
-// ever decides it.
+// resolvePendingSuggestion decides every existing unresolved (SUGGESTED)
+// LIKELIHOOD row for riskID against finalScore — ACCEPTED if that row's
+// score matches what was actually saved, OVERRIDDEN otherwise. No-op if there
+// are none. This is what makes PendingSuggestion (the in-risk reminder)
+// eventually clear: without it, a row written by CreateUnresolvedSuggestion
+// stays SUGGESTED forever, since nothing else ever decides it.
+//
+// A risk left unreassessed across quarters can hold one such row per quarter,
+// so all of them are decided, not just the newest; otherwise the next
+// risk-detail request would show an older row as pending again. A row whose
+// decision fails stays SUGGESTED so a later save retries it, and the other
+// rows are still attempted.
 func (s *likelihoodSuggestionService) resolvePendingSuggestion(ctx context.Context, riskID int, finalScore int, decidedBy string) error {
-	pending, err := s.PendingSuggestion(ctx, riskID)
+	pending, err := s.suggestionRepo.ListByRisk(ctx, riskID, model.SuggestionFeatureLikelihood, string(model.SuggestionStatusSuggested))
 	if err != nil {
-		return err
-	}
-	if pending == nil {
-		return nil
+		return fmt.Errorf("pending likelihood suggestion: %w", err)
 	}
 
-	status := model.SuggestionStatusOverridden
-	if pendingScore, err := strconv.Atoi(pending.SuggestedValue); err == nil && pendingScore == finalScore {
-		status = model.SuggestionStatusAccepted
+	var errs []error
+	for _, row := range pending {
+		status := model.SuggestionStatusOverridden
+		if pendingScore, err := strconv.Atoi(row.SuggestedValue); err == nil && pendingScore == finalScore {
+			status = model.SuggestionStatusAccepted
+		}
+		if err := s.suggestionRepo.Decide(ctx, row.ID, model.DecideSuggestionRequest{
+			Status: status,
+		}, decidedBy); err != nil {
+			errs = append(errs, fmt.Errorf("decide suggestion %d: %w", row.ID, err))
+		}
 	}
-
-	return s.suggestionRepo.Decide(ctx, pending.ID, model.DecideSuggestionRequest{
-		Status: status,
-	}, decidedBy)
+	return errors.Join(errs...)
 }
 
 func (s *likelihoodSuggestionService) PendingSuggestion(ctx context.Context, riskID int) (*model.Suggestion, error) {

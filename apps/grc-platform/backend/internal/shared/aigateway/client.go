@@ -242,6 +242,11 @@ func (c *Client) SuggestActionPlan(ctx context.Context, req SuggestActionPlanReq
 	if err != nil {
 		return nil, fmt.Errorf("aigateway: suggest action plan: %w", err)
 	}
+	// A reply with only a reason and a confidence would parse and validate,
+	// then reach the form as a successful suggestion with no text in it.
+	if strings.TrimSpace(out.Description) == "" {
+		return nil, fmt.Errorf("aigateway: suggest action plan: model returned an empty description")
+	}
 	return &SuggestActionPlanResult{
 		Description: out.Description,
 		Reason:      out.Reason,
@@ -327,13 +332,13 @@ func buildLikelihoodPrompt(req SuggestLikelihoodRequest) string {
 	b.WriteString("Risk Description: " + escapeRiskDataClose(req.Description) + "\n")
 	b.WriteString("Impact Description: " + escapeRiskDataClose(req.ImpactDescription) + "\n")
 	if req.CategoryName != "" {
-		b.WriteString("Risk Category: " + req.CategoryName + "\n")
+		b.WriteString("Risk Category: " + escapeRiskDataClose(req.CategoryName) + "\n")
 	}
 	if len(req.ComplianceReferenceNames) > 0 {
-		b.WriteString("Security Compliance Reference(s): " + strings.Join(req.ComplianceReferenceNames, ", ") + "\n")
+		b.WriteString("Security Compliance Reference(s): " + escapeRiskDataClose(strings.Join(req.ComplianceReferenceNames, ", ")) + "\n")
 	}
 	if req.SourceRegisterName != "" {
-		b.WriteString("Source Register (the WSO2 team/product this risk belongs to, for background context only — not itself evidence of likelihood): " + req.SourceRegisterName + "\n")
+		b.WriteString("Source Register (the WSO2 team/product this risk belongs to, for background context only — not itself evidence of likelihood): " + escapeRiskDataClose(req.SourceRegisterName) + "\n")
 	}
 	b.WriteString("</risk_data>\n")
 	b.WriteString(promptText("likelihood_scoring_rules"))

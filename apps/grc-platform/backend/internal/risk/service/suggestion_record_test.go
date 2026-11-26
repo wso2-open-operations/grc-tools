@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -168,5 +169,64 @@ func TestActionPlanRecordDecision(t *testing.T) {
 				t.Fatalf("decided = %+v, want status %s", repo.decided, tc.wantStatus)
 			}
 		})
+	}
+}
+
+// pendingLikelihoodRepo returns the given SUGGESTED rows and records which
+// rows were decided and how. failID, when set, makes that row's Decide fail.
+type pendingLikelihoodRepo struct {
+	fakeSuggestionRepo
+	pending []model.Suggestion
+	failID  int
+	decides map[int]model.SuggestionStatus
+}
+
+func (f *pendingLikelihoodRepo) ListByRisk(context.Context, int, string, string) ([]model.Suggestion, error) {
+	return f.pending, nil
+}
+
+func (f *pendingLikelihoodRepo) Decide(_ context.Context, id int, req model.DecideSuggestionRequest, _ string) error {
+	if id == f.failID {
+		return errors.New("boom")
+	}
+	if f.decides == nil {
+		f.decides = map[int]model.SuggestionStatus{}
+	}
+	f.decides[id] = req.Status
+	return nil
+}
+
+// A risk left unreassessed for two quarters holds two SUGGESTED rows. The
+// reassessment must decide both, or the older one comes back as a reminder.
+func TestLikelihoodRecordDecisionResolvesEveryPendingRow(t *testing.T) {
+	repo := &pendingLikelihoodRepo{pending: []model.Suggestion{
+		{ID: 11, SuggestedValue: "3"}, // newest
+		{ID: 10, SuggestedValue: "2"}, // older quarter
+	}}
+	s := &likelihoodSuggestionService{suggestionRepo: repo}
+	if err := s.RecordDecision(context.Background(), 1, nil, 2, "user-1"); err != nil {
+		t.Fatalf("RecordDecision: %v", err)
+	}
+	if repo.decides[11] != model.SuggestionStatusOverridden || repo.decides[10] != model.SuggestionStatusAccepted {
+		t.Fatalf("decides = %+v, want 11 OVERRIDDEN and 10 ACCEPTED", repo.decides)
+	}
+}
+
+// One failed decision must not stop the others, and must surface so the row
+// stays SUGGESTED for a later save to retry.
+func TestLikelihoodRecordDecisionKeepsGoingWhenOneRowFails(t *testing.T) {
+	repo := &pendingLikelihoodRepo{
+		pending: []model.Suggestion{{ID: 11, SuggestedValue: "3"}, {ID: 10, SuggestedValue: "2"}},
+		failID:  11,
+	}
+	s := &likelihoodSuggestionService{suggestionRepo: repo}
+	if err := s.RecordDecision(context.Background(), 1, nil, 2, "user-1"); err == nil {
+		t.Fatal("expected the failed decision to be reported")
+	}
+	if _, ok := repo.decides[10]; !ok {
+		t.Fatalf("the other row was not decided: %+v", repo.decides)
+	}
+	if _, ok := repo.decides[11]; ok {
+		t.Fatalf("the failing row should stay undecided: %+v", repo.decides)
 	}
 }
