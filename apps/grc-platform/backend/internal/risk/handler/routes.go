@@ -135,9 +135,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// Bulk risk import (Compliance Admin, RISK_BULK_UPLOAD held GLOBAL). Literal
 	// first segment, so these never collide with the {id} routes.
 	mux.HandleFunc("GET /api/v1/risks/bulk-import/template", bih.handleTemplate)
-	mux.HandleFunc("POST /api/v1/risks/bulk-import", bih.handleStart)
-	mux.HandleFunc("GET /api/v1/risks/bulk-import/jobs/{id}", bih.handleJob)
-	mux.HandleFunc("GET /api/v1/risks/bulk-import/jobs/{id}/{artifact}", bih.handleArtifact)
+	mux.HandleFunc("POST /api/v1/risks/bulk-import", bih.handleRun)
 
 	// Teams
 	mux.HandleFunc("GET /api/v1/risks/teams", d.handleListTeams)

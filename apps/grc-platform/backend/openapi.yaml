@@ -3631,9 +3631,9 @@ paths:
     post:
       tags:
       - Risk Bulk Import
-      summary: Start a bulk import dry run or import
-      description: 'Multipart form upload (fields: register_id, mode, file, acknowledge_warnings (optional)). Starts a background job and answers 202 with it; read progress and the result from the job route. A dry_run reads the whole file and reports every problem without writing anything. An import is accepted only for a file whose dry run, by the same caller and into the same register, finished with nothing rejected within the last 30 minutes (matched on the file''s SHA-256); if that dry run had warnings, acknowledge_warnings must be "true". One run at a time. Limits: 5 MiB, 1000 rows, .csv text only. Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).'
-      operationId: startBulkImport
+      summary: Run a bulk import dry run or import
+      description: 'Multipart form upload (fields: register_id, mode, file, acknowledge_warnings (optional)). The request stays open and the response is a stream of newline-delimited JSON events (BulkImportEvent): progress while the run works, a ping when it is quiet, and one final result or error. A stream that ends without a result or error was cut off; run the same file again. A dry_run reads the whole file and reports every problem without writing anything. An import re-validates the whole file the same way and writes nothing if any row is rejected, or if it finds warnings and acknowledge_warnings is not "true". If the connection closes, the run stops; an import resumes where it stopped when the same file is run again. One run at a time. Limits: 5 MiB, 1000 rows, .csv text only. Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).'
+      operationId: runBulkImport
       requestBody:
         required: true
         content:
@@ -3658,23 +3658,18 @@ paths:
                   type: string
                   enum:
                   - 'true'
-                  description: Required for an import whose dry run reported warnings.
+                  description: Lets an import proceed past warnings the admin has reviewed in a dry run.
                 file:
                   type: string
                   format: binary
                   description: The CSV, saved as UTF-8.
       responses:
-        '202':
-          description: The job was accepted and is running
-          headers:
-            Location:
-              description: /api/v1/risks/bulk-import/jobs/{id}
-              schema:
-                type: string
+        '200':
+          description: The run started. The body is a stream of events; problems with the file or the run arrive as an error event, not a status code.
           content:
-            application/json:
+            application/x-ndjson:
               schema:
-                $ref: '#/components/schemas/BulkImportJob'
+                $ref: '#/components/schemas/BulkImportEvent'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3700,84 +3695,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The register could not be used, or an import was requested without a clean dry run of this file (or without acknowledging its warnings)
+          description: The register could not be used
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '503':
-          $ref: '#/components/responses/BulkImportUnavailable'
-  /api/v1/risks/bulk-import/jobs/{id}:
-    get:
-      tags:
-      - Risk Bulk Import
-      summary: Get a bulk import job
-      description: Progress while it runs; the counts, findings and available downloads once it has finished. Jobs are kept for 24 hours. Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).
-      operationId: getBulkImportJob
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkImportJob'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '503':
-          $ref: '#/components/responses/BulkImportUnavailable'
-  /api/v1/risks/bulk-import/jobs/{id}/{artifact}:
-    get:
-      tags:
-      - Risk Bulk Import
-      summary: Download a bulk import result file
-      description: errors.csv (every finding), report.txt (the narrative, including the plan and the risk codes a run would assign) or risk_codes.csv (the risk number of every migrated row). Cells that echo the sheet are neutralised against spreadsheet formulas. Requires RISK_BULK_UPLOAD held GLOBAL (Compliance Admin).
-      operationId: downloadBulkImportResult
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: artifact
-        in: path
-        required: true
-        schema:
-          type: string
-          enum:
-          - errors
-          - report
-          - risk-codes
-      responses:
-        '200':
-          description: The file
-          headers:
-            Content-Disposition:
-              description: attachment; filename=errors.csv, report.txt or risk_codes.csv
-              schema:
-                type: string
-          content:
-            text/csv:
-              schema:
-                type: string
-            text/plain:
-              schema:
-                type: string
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/BulkImportUnavailable'
   /api/v1/risks/{id}:
@@ -8247,30 +8169,39 @@ components:
           description: The column or check the finding is about.
         detail:
           type: string
-    BulkImportJob:
+    BulkImportEvent:
       type: object
-      description: One dry run or import. Kept for 24 hours.
+      description: One line of the run stream. Every line has a type. Exactly one of result or error ends a complete stream.
+      required:
+      - type
       properties:
-        id:
+        type:
           type: string
+          enum:
+          - progress
+          - ping
+          - result
+          - error
+        phase:
+          type: string
+          description: progress - preflight, parse, resolve, write or verify.
+        done:
+          type: integer
+          description: progress - rows done in this phase.
+        total:
+          type: integer
+          description: progress - rows in this phase, when known.
+        message:
+          type: string
+          description: error - what to tell the admin. For a failure on the platform's side this is generic and quotes the reference.
+        reference:
+          type: string
+          description: error - quote this to the platform team; the cause is in the server log under it.
         mode:
           type: string
           enum:
           - dry_run
           - import
-        status:
-          type: string
-          enum:
-          - running
-          - succeeded
-          - failed
-        phase:
-          type: string
-          description: While running - preflight, parse, resolve, write or verify.
-        done:
-          type: integer
-        total:
-          type: integer
         register_id:
           type: integer
         register_name:
@@ -8293,38 +8224,28 @@ components:
           - aborted
         rows:
           type: integer
-        error:
-          type: string
-          description: Why a run failed. For a failure on the platform's side this is a job reference to quote, not the cause.
-        started_at:
-          type: string
-          format: date-time
-        finished_at:
-          type: string
-          format: date-time
         counts:
           $ref: '#/components/schemas/BulkImportCounts'
-        importable:
-          type: boolean
-          description: True on a finished dry run with nothing rejected, until importable_until - the window in which the same file may be imported.
-        importable_until:
-          type: string
-          format: date-time
         findings:
           type: array
           items:
             $ref: '#/components/schemas/BulkImportFinding'
         findings_truncated:
           type: boolean
-          description: True when there were more than 1000 findings; errors.csv has them all.
-        downloads:
-          type: array
-          items:
-            type: string
-            enum:
-            - errors
-            - report
-            - risk-codes
+          description: True when there were more than 1000 findings; errors_csv has them all.
+        files:
+          type: object
+          description: result - the downloads, as text. A file with nothing to say is omitted. Cells that echo the sheet are neutralised against spreadsheet formulas.
+          properties:
+            errors_csv:
+              type: string
+              description: Every finding.
+            report:
+              type: string
+              description: The narrative, including the plan and the risk codes a run would assign.
+            risk_codes_csv:
+              type: string
+              description: The risk number of every migrated row.
     RiskEvidence:
       type: object
       properties:

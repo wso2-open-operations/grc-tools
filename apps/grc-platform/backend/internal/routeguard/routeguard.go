@@ -209,8 +209,6 @@ var externalVisible = map[string]bool{
 	// Bulk risk import: Compliance Admin only (RISK_BULK_UPLOAD, GLOBAL).
 	"GET /api/v1/risks/bulk-import/template":                     false,
 	"POST /api/v1/risks/bulk-import":                             false,
-	"GET /api/v1/risks/bulk-import/jobs/{id}":                    false,
-	"GET /api/v1/risks/bulk-import/jobs/{id}/{artifact}":         false,
 	"POST /api/v1/risks/reminders/run":                           false,
 	"GET /api/v1/risks/{id}/history":                             false,
 	"POST /api/v1/risks/{id}/escalations/{escalationId}/comment": false,

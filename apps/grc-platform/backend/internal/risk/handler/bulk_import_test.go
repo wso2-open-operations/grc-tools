@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -36,43 +37,72 @@ import (
 )
 
 // fakeBulkImporter stands in for bulkimport.Service: the pipeline has its own
-// tests, so these cover what the HTTP layer adds — who may call, the dry-run-
-// first rule, the one-at-a-time guard, and how a job is reported.
+// tests, so these cover what the HTTP layer adds: who may call, how a run is
+// streamed, the one-at-a-time guard, and what happens when the client goes away.
 type fakeBulkImporter struct {
 	target    bulkimport.Target
 	targetErr error
 	// report builds the report a run returns; nil means a clean, empty one.
 	report func(dryRun bool) *bulkimport.Report
 	runErr error
-	// failDryRun and failImport fail only that mode, so a test can have a dry run
-	// succeed and the import after it fail.
-	failDryRun, failImport bool
+	// progress is reported, in order, before the run finishes.
+	progress []bulkimport.Progress
+	// pause holds a run for this long before it finishes.
+	pause time.Duration
 	// gate, when non-nil, holds every Run until it is closed.
 	gate chan struct{}
+	// holdUntilCancel makes Run wait for its context to end, as a long run does.
+	holdUntilCancel bool
+	// started is closed when the first Run begins.
+	started chan struct{}
+	// panicRun makes Run panic.
+	panicRun bool
 
-	mu    sync.Mutex
-	runs  []bulkimport.Request
-	files [][]byte
+	mu      sync.Mutex
+	runs    []bulkimport.Request
+	files   [][]byte
+	ctxErrs []error
 }
 
 func (f *fakeBulkImporter) LoadTarget(_ context.Context, _ int) (bulkimport.Target, error) {
 	return f.target, f.targetErr
 }
 
-func (f *fakeBulkImporter) Run(_ context.Context, req bulkimport.Request) (*bulkimport.Result, error) {
-	if f.gate != nil {
-		<-f.gate
-	}
+func (f *fakeBulkImporter) Run(ctx context.Context, req bulkimport.Request) (*bulkimport.Result, error) {
 	data, _ := io.ReadAll(req.CSV)
 	f.mu.Lock()
 	f.runs = append(f.runs, req)
 	f.files = append(f.files, data)
+	if f.started != nil {
+		select {
+		case <-f.started:
+		default:
+			close(f.started)
+		}
+	}
 	f.mu.Unlock()
+
+	if f.panicRun {
+		panic("boom")
+	}
+	for _, p := range f.progress {
+		req.Progress(p)
+	}
+	if f.gate != nil {
+		<-f.gate
+	}
+	if f.holdUntilCancel {
+		<-ctx.Done()
+		f.mu.Lock()
+		f.ctxErrs = append(f.ctxErrs, ctx.Err())
+		f.mu.Unlock()
+		return nil, errors.Join(bulkimport.ErrStructural, ctx.Err())
+	}
+	if f.pause > 0 {
+		time.Sleep(f.pause)
+	}
 	if f.runErr != nil {
 		return nil, f.runErr
-	}
-	if (req.DryRun && f.failDryRun) || (!req.DryRun && f.failImport) {
-		return nil, errors.Join(bulkimport.ErrStructural, errors.New("entity unavailable"))
 	}
 	rep := bulkimport.NewReport()
 	if f.report != nil {
@@ -87,11 +117,19 @@ func (f *fakeBulkImporter) runCount() int {
 	return len(f.runs)
 }
 
+func (f *fakeBulkImporter) lastRun() bulkimport.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.runs[len(f.runs)-1]
+}
+
 func newTestBulkHandler(f *fakeBulkImporter) *bulkImportHandler {
 	if f.target.RegisterID == 0 {
 		f.target = bulkimport.Target{RegisterID: 3, Name: "Asgardeo", Template: "STANDARD"}
 	}
-	return newBulkImportHandler(f)
+	h := newBulkImportHandler(f)
+	h.heartbeat = time.Hour // a test that wants pings sets its own
+	return h
 }
 
 // complianceAdminGlobal is what the seed gives the Compliance Admin for this
@@ -122,7 +160,7 @@ func multipartBody(t *testing.T, fileName, fileBody string, fields ...formField)
 	return &buf, w.FormDataContentType()
 }
 
-func startReq(t *testing.T, ctx context.Context, fileName, fileBody string, fields ...formField) *http.Request {
+func runReq(t *testing.T, ctx context.Context, fileName, fileBody string, fields ...formField) *http.Request {
 	t.Helper()
 	body, ct := multipartBody(t, fileName, fileBody, fields...)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/risks/bulk-import", body).WithContext(ctx)
@@ -140,46 +178,81 @@ func importFields(extra ...formField) []formField {
 
 const sampleCSV = "Year,Quarter\n2025,Q1\n"
 
-func decodeJob(t *testing.T, rec *httptest.ResponseRecorder) jobResponse {
-	t.Helper()
-	var j jobResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil {
-		t.Fatalf("response is not a job: %v\n%s", err, rec.Body.String())
-	}
-	return j
+// streamLine is one line of a run's response.
+type streamLine struct {
+	Type string
+	raw  []byte
 }
 
-// start submits a file and returns the accepted job.
-func start(t *testing.T, h *bulkImportHandler, ctx context.Context, body string, fields ...formField) jobResponse {
+func (l streamLine) as(t *testing.T, v any) {
+	t.Helper()
+	if err := json.Unmarshal(l.raw, v); err != nil {
+		t.Fatalf("line is not the expected event: %v\n%s", err, l.raw)
+	}
+}
+
+// events reads a finished run's response as its lines.
+func events(t *testing.T, rec *httptest.ResponseRecorder) []streamLine {
+	t.Helper()
+	var out []streamLine
+	sc := bufio.NewScanner(bytes.NewReader(rec.Body.Bytes()))
+	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	for sc.Scan() {
+		raw := append([]byte(nil), sc.Bytes()...)
+		var probe struct{ Type string }
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			t.Fatalf("a stream line is not JSON: %v\n%s", err, raw)
+		}
+		out = append(out, streamLine{Type: probe.Type, raw: raw})
+	}
+	return out
+}
+
+// run submits a file and returns the response once the run has finished.
+func run(t *testing.T, h *bulkImportHandler, ctx context.Context, body string, fields ...formField) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", body, fields...))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("start: status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	return decodeJob(t, rec)
+	h.handleRun(rec, runReq(t, ctx, "register.csv", body, fields...))
+	return rec
 }
 
-// waitDone polls a job until it leaves the running state.
-func waitDone(t *testing.T, h *bulkImportHandler, ctx context.Context, id string) jobResponse {
+// finalLine is the stream's last line, which must be a result or an error.
+func finalLine(t *testing.T, rec *httptest.ResponseRecorder) streamLine {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/risks/bulk-import/jobs/"+id, nil).WithContext(ctx)
-		req.SetPathValue("id", id)
-		rec := httptest.NewRecorder()
-		h.handleJob(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("job: status = %d, body = %s", rec.Code, rec.Body.String())
-		}
-		if j := decodeJob(t, rec); j.Status != bulkImportStatusRunning {
-			return j
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("job did not finish")
-		}
-		time.Sleep(5 * time.Millisecond)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
+	ls := events(t, rec)
+	if len(ls) == 0 {
+		t.Fatal("the stream is empty")
+	}
+	last := ls[len(ls)-1]
+	if last.Type != "result" && last.Type != "error" {
+		t.Fatalf("the stream did not end with a result or an error: %s", last.raw)
+	}
+	return last
+}
+
+func resultOf(t *testing.T, rec *httptest.ResponseRecorder) resultEvent {
+	t.Helper()
+	last := finalLine(t, rec)
+	if last.Type != "result" {
+		t.Fatalf("want a result, got %s", last.raw)
+	}
+	var ev resultEvent
+	last.as(t, &ev)
+	return ev
+}
+
+func errorOf(t *testing.T, rec *httptest.ResponseRecorder) errorEvent {
+	t.Helper()
+	last := finalLine(t, rec)
+	if last.Type != "error" {
+		t.Fatalf("want an error, got %s", last.raw)
+	}
+	var ev errorEvent
+	last.as(t, &ev)
+	return ev
 }
 
 func reportWith(findings ...bulkimport.Finding) func(bool) *bulkimport.Report {
@@ -213,16 +286,14 @@ func TestBulkImport_RequiresTheGlobalPrivilege(t *testing.T) {
 			h := newTestBulkHandler(f)
 
 			routes := map[string]func(http.ResponseWriter, *http.Request){
-				"template": h.handleTemplate, "start": h.handleStart, "job": h.handleJob, "artifact": h.handleArtifact,
+				"template": h.handleTemplate, "run": h.handleRun,
 			}
 			for name, fn := range routes {
 				var req *http.Request
-				if name == "start" {
-					req = startReq(t, tc.ctx, "r.csv", sampleCSV, dryRunFields()...)
+				if name == "run" {
+					req = runReq(t, tc.ctx, "r.csv", sampleCSV, dryRunFields()...)
 				} else {
 					req = httptest.NewRequest(http.MethodGet, "/x?register_id=3", nil).WithContext(tc.ctx)
-					req.SetPathValue("id", "abc")
-					req.SetPathValue("artifact", "errors")
 				}
 				rec := httptest.NewRecorder()
 				fn(rec, req)
@@ -243,7 +314,7 @@ func TestBulkImport_ScopedHolderIsRefusedForTheirOwnRegister(t *testing.T) {
 	h := newTestBulkHandler(&fakeBulkImporter{})
 	ctx := contextForGrants(t, nil, map[int]map[string]bool{3: {privilege.BulkUploadRisks: true}})
 	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "r.csv", sampleCSV, dryRunFields()...))
+	h.handleRun(rec, runReq(t, ctx, "r.csv", sampleCSV, dryRunFields()...))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
@@ -253,12 +324,12 @@ func TestBulkImport_NotConfiguredIsA503AfterTheAccessCheck(t *testing.T) {
 	h := newBulkImportHandler(nil)
 
 	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, contextForGrants(t, nil, nil), "r.csv", sampleCSV, dryRunFields()...))
+	h.handleRun(rec, runReq(t, contextForGrants(t, nil, nil), "r.csv", sampleCSV, dryRunFields()...))
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("an unauthorised caller must see 403, not learn the feature is off: %d", rec.Code)
 	}
 	rec = httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, adminCtx(t), "r.csv", sampleCSV, dryRunFields()...))
+	h.handleRun(rec, runReq(t, adminCtx(t), "r.csv", sampleCSV, dryRunFields()...))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}
@@ -335,7 +406,7 @@ func TestBulkImport_RejectsABadUpload(t *testing.T) {
 			f := &fakeBulkImporter{}
 			h := newTestBulkHandler(f)
 			rec := httptest.NewRecorder()
-			h.handleStart(rec, startReq(t, adminCtx(t), tc.fileName, tc.body, tc.fields...))
+			h.handleRun(rec, runReq(t, adminCtx(t), tc.fileName, tc.body, tc.fields...))
 			if rec.Code != tc.want {
 				t.Errorf("status = %d, want %d (%s)", rec.Code, tc.want, rec.Body.String())
 			}
@@ -346,272 +417,154 @@ func TestBulkImport_RejectsABadUpload(t *testing.T) {
 	}
 }
 
-func TestBulkImport_UnknownRegisterIsRefusedBeforeAJobExists(t *testing.T) {
+// A bad register is a plain 4xx before the stream opens, not an error line.
+func TestBulkImport_UnknownRegisterIsRefusedBeforeTheStreamOpens(t *testing.T) {
 	f := &fakeBulkImporter{targetErr: &bulkimport.InputError{Msg: "register not found"}}
 	h := newTestBulkHandler(f)
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, adminCtx(t), "r.csv", sampleCSV, dryRunFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422", rec.Code)
+	rec := run(t, h, adminCtx(t), sampleCSV, dryRunFields()...)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "register not found") {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if len(h.jobs) != 0 {
-		t.Error("a job was created for a register that does not exist")
+	if f.runCount() != 0 {
+		t.Error("a run started for a register that does not exist")
 	}
 }
 
-// ── a dry run ───────────────────────────────────────────────────────────────
+// ── a run ───────────────────────────────────────────────────────────────────
 
-func TestBulkImport_CleanDryRunReportsImportable(t *testing.T) {
+func TestBulkImport_CleanDryRunStreamsAResult(t *testing.T) {
 	f := &fakeBulkImporter{}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
 
-	accepted := start(t, h, ctx, sampleCSV, dryRunFields()...)
-	if accepted.Status != bulkImportStatusRunning || accepted.Mode != bulkImportModeDryRun || accepted.RegisterName != "Asgardeo" {
-		t.Errorf("accepted = %+v", accepted)
+	rec := run(t, h, adminCtx(t), sampleCSV, dryRunFields()...)
+	if got := rec.Header().Get("Content-Type"); got != bulkImportStreamMediaType {
+		t.Errorf("Content-Type = %q", got)
 	}
-	job := waitDone(t, h, ctx, accepted.ID)
+	if ls := events(t, rec); ls[0].Type != "ping" {
+		t.Errorf("the stream should open with a ping so the client sees it start, got %s", ls[0].raw)
+	}
 
-	if job.Status != bulkImportStatusDone || !job.Importable || job.ImportableUntil == "" {
-		t.Errorf("job = %+v, want a finished, importable dry run", job)
+	ev := resultOf(t, rec)
+	if ev.Mode != bulkImportModeDryRun || ev.RegisterID != 3 || ev.RegisterName != "Asgardeo" || ev.Template != "STANDARD" ||
+		ev.FileName != "register.csv" || len(ev.FileSHA256) != 64 || ev.Rows != 2 || ev.Outcome != "clean" {
+		t.Errorf("result = %+v", ev)
 	}
-	if job.Counts == nil || job.Counts.Rejects != 0 {
-		t.Errorf("counts = %+v", job.Counts)
+	if ev.Counts.Rejects != 0 || len(ev.Findings) != 0 {
+		t.Errorf("counts = %+v findings = %+v", ev.Counts, ev.Findings)
 	}
-	if f.runs[0].DryRun != true || f.runs[0].MaxRows != bulkImportMaxRows || f.runs[0].RegisterID != 3 {
-		t.Errorf("run request = %+v", f.runs[0])
+	if ev.Files == nil || ev.Files.ErrorsCSV != "" || ev.Files.Report == "" || ev.Files.RiskCodesCSV != "" {
+		t.Errorf("a clean run offers the report only: %+v", ev.Files)
+	}
+	if r := f.lastRun(); !r.DryRun || r.MaxRows != bulkImportMaxRows || r.RegisterID != 3 || r.AcknowledgeWarnings {
+		t.Errorf("run request = %+v", r)
+	}
+	if !bytes.Equal(f.files[0], []byte(sampleCSV)) {
+		t.Error("the run must get the uploaded bytes")
 	}
 }
 
-func TestBulkImport_DryRunWithARejectIsNotImportable(t *testing.T) {
+func TestBulkImport_RejectedRowsAreReportedAsFindings(t *testing.T) {
 	f := &fakeBulkImporter{report: reportWith(rejectFinding)}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
 
-	job := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	if job.Importable {
-		t.Fatal("a dry run with a rejected row must not authorise an import")
+	ev := resultOf(t, run(t, h, adminCtx(t), sampleCSV, dryRunFields()...))
+	if ev.Counts.Rejects != 1 || len(ev.Findings) != 1 || ev.Findings[0].Failure != "Quarter" || ev.Findings[0].CSVRow != 3 {
+		t.Errorf("findings = %+v counts = %+v", ev.Findings, ev.Counts)
 	}
-	if job.Counts.Rejects != 1 || len(job.Findings) != 1 || job.Findings[0].Failure != "Quarter" || job.Findings[0].CSVRow != 3 {
-		t.Errorf("findings = %+v counts = %+v", job.Findings, job.Counts)
-	}
-
-	// And the import itself is refused outright for that file.
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("import after a dirty dry run: status = %d, want 422", rec.Code)
-	}
-	if f.runCount() != 1 {
-		t.Errorf("runs = %d, want only the dry run", f.runCount())
+	if ev.Files == nil || ev.Files.ErrorsCSV == "" || ev.Files.Report == "" {
+		t.Errorf("a run with findings offers the errors file and the report: %+v", ev.Files)
 	}
 }
 
-// ── the dry-run-first rule ──────────────────────────────────────────────────
-
-func TestBulkImport_ImportNeedsADryRunOfTheSameFile(t *testing.T) {
+// The import is a run of its own: the server never trusts that a dry run came
+// first, so it carries the acknowledgement into the pipeline, which re-validates
+// and decides.
+func TestBulkImport_ImportRunsForRealAndCarriesTheAcknowledgement(t *testing.T) {
 	f := &fakeBulkImporter{}
 	h := newTestBulkHandler(f)
 	ctx := adminCtx(t)
 
-	// No dry run at all.
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "dry run") {
-		t.Fatalf("import with no dry run: status = %d, body = %s", rec.Code, rec.Body.String())
+	ev := resultOf(t, run(t, h, ctx, sampleCSV, importFields()...))
+	if ev.Mode != bulkImportModeImport {
+		t.Errorf("mode = %q", ev.Mode)
+	}
+	if r := f.lastRun(); r.DryRun || r.AcknowledgeWarnings {
+		t.Errorf("an import is a real run, unacknowledged unless the caller said so: %+v", r)
 	}
 
-	waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-
-	// A changed file.
-	rec = httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV+"2026,Q2\n", importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("import of a changed file: status = %d, want 422", rec.Code)
-	}
-
-	// A different register.
-	rec = httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, formField{"register_id", "4"}, formField{"mode", "import"}))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("import into another register: status = %d, want 422", rec.Code)
-	}
-
-	// Someone else: another admin's dry run does not authorise this one's import.
-	rec = httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, otherAdminCtx(t), "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("import authorised by someone else's dry run: status = %d, want 422", rec.Code)
-	}
-
-	if f.runCount() != 1 {
-		t.Errorf("runs = %d, want only the one dry run", f.runCount())
-	}
-
-	// The same file, register and caller: accepted.
-	job := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, importFields()...).ID)
-	if job.Mode != bulkImportModeImport || job.Status != bulkImportStatusDone {
-		t.Errorf("job = %+v", job)
-	}
-	if f.runs[1].DryRun {
-		t.Error("the import ran as a dry run")
-	}
-	if !bytes.Equal(f.files[0], f.files[1]) {
-		t.Error("the import must run the very bytes that were dry-run")
+	resultOf(t, run(t, h, ctx, sampleCSV, importFields(formField{"acknowledge_warnings", "true"})...))
+	if r := f.lastRun(); r.DryRun || !r.AcknowledgeWarnings {
+		t.Errorf("the acknowledgement must reach the pipeline: %+v", r)
 	}
 }
 
-func otherAdminCtx(t *testing.T) context.Context {
-	t.Helper()
-	return middleware.WithUserInfo(adminCtx(t), &middleware.UserInfo{Subject: "someone-else"})
-}
-
-func TestBulkImport_AnImportSpendsItsAuthorisation(t *testing.T) {
-	f := &fakeBulkImporter{}
+func TestBulkImport_ProgressIsStreamedBeforeTheResult(t *testing.T) {
+	f := &fakeBulkImporter{progress: []bulkimport.Progress{
+		{Phase: "preflight"}, {Phase: "write", Done: 1, Total: 4}, {Phase: "write", Done: 4, Total: 4},
+	}}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
 
-	waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, importFields()...).ID)
-
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("a second import of the same file: status = %d, want 422 (run the dry run again)", rec.Code)
+	rec := run(t, h, adminCtx(t), sampleCSV, importFields()...)
+	var got []progressEvent
+	for _, l := range events(t, rec) {
+		if l.Type == "progress" {
+			var p progressEvent
+			l.as(t, &p)
+			got = append(got, p)
+		}
 	}
+	if len(got) != 3 || got[0].Phase != "preflight" || got[1].Done != 1 || got[2].Done != 4 || got[2].Total != 4 {
+		t.Errorf("progress = %+v", got)
+	}
+	resultOf(t, rec)
 }
 
-// An import that fails part-way keeps its dry run approval, so the admin can run
-// the same file again to continue without a new dry run. The pipeline resumes, so
-// nothing is written twice.
-func TestBulkImport_FailedImportKeepsItsApprovalSoTheRetryIsAccepted(t *testing.T) {
-	f := &fakeBulkImporter{failImport: true}
+func TestBulkImport_QuietRunsKeepTheConnectionAlive(t *testing.T) {
+	f := &fakeBulkImporter{pause: 120 * time.Millisecond}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
+	h.heartbeat = 10 * time.Millisecond
 
-	waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-
-	failed := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, importFields()...).ID)
-	if failed.Status != bulkImportStatusFailed || failed.Importable {
-		t.Fatalf("the import should have failed: %+v", failed)
+	rec := run(t, h, adminCtx(t), sampleCSV, dryRunFields()...)
+	pings := 0
+	for _, l := range events(t, rec) {
+		if l.Type == "ping" {
+			pings++
+		}
 	}
-
-	// The approval is still there: the same file is accepted again, with no new dry run.
-	f.failImport = false
-	retried := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, importFields()...).ID)
-	if retried.Mode != bulkImportModeImport || retried.Status != bulkImportStatusDone {
-		t.Errorf("the retry = %+v, want a finished import", retried)
+	if pings < 3 { // the opening one plus at least two heartbeats
+		t.Errorf("pings = %d, want a heartbeat while the run is quiet", pings)
 	}
-	if f.runCount() != 3 { // the dry run, the import that failed, and the retry
-		t.Errorf("runs = %d, want 3", f.runCount())
-	}
-
-	// And once an import has succeeded the approval is spent.
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("a third import: status = %d, want 422 (the approval was spent by the successful one)", rec.Code)
-	}
-}
-
-// A dry run that fails approves nothing: only a finished, clean one does.
-func TestBulkImport_FailedDryRunDoesNotAuthoriseAnImport(t *testing.T) {
-	f := &fakeBulkImporter{failDryRun: true}
-	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
-
-	failed := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	if failed.Status != bulkImportStatusFailed || failed.Importable {
-		t.Fatalf("the dry run should have failed: %+v", failed)
-	}
-
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("import after a failed dry run: status = %d, want 422", rec.Code)
-	}
-}
-
-func TestBulkImport_DryRunAuthorisationExpires(t *testing.T) {
-	f := &fakeBulkImporter{}
-	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
-
-	waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	h.mu.Lock()
-	h.now = func() time.Time { return time.Now().Add(bulkImportDryRunTTL + time.Minute) }
-	h.mu.Unlock()
-
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("import after the window: status = %d, want 422", rec.Code)
-	}
-}
-
-// Option 1: warnings do not block the import, but they must be accepted.
-func TestBulkImport_WarningsMustBeAcknowledged(t *testing.T) {
-	f := &fakeBulkImporter{report: reportWith(warnFinding)}
-	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
-
-	job := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	if !job.Importable || job.Counts.Warnings != 1 {
-		t.Fatalf("a dry run with only warnings is importable: %+v", job)
-	}
-
-	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields()...))
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "warnings") {
-		t.Fatalf("unacknowledged: status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-
-	rec = httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "register.csv", sampleCSV, importFields(formField{"acknowledge_warnings", "true"})...))
-	if rec.Code != http.StatusAccepted {
-		t.Errorf("acknowledged: status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	waitDone(t, h, ctx, decodeJob(t, rec).ID)
+	resultOf(t, rec)
 }
 
 // ── one at a time ───────────────────────────────────────────────────────────
 
 func TestBulkImport_SecondRunWhileOneIsRunningIs409(t *testing.T) {
-	f := &fakeBulkImporter{gate: make(chan struct{})}
+	f := &fakeBulkImporter{gate: make(chan struct{}), started: make(chan struct{})}
 	h := newTestBulkHandler(f)
 	ctx := adminCtx(t)
 
-	first := start(t, h, ctx, sampleCSV, dryRunFields()...)
+	var wg sync.WaitGroup
+	first := httptest.NewRecorder()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		h.handleRun(first, runReq(t, ctx, "register.csv", sampleCSV, dryRunFields()...))
+	}()
+	<-f.started
 
 	rec := httptest.NewRecorder()
-	h.handleStart(rec, startReq(t, ctx, "other.csv", "Year\n1\n", dryRunFields()...))
+	h.handleRun(rec, runReq(t, ctx, "other.csv", "Year\n1\n", dryRunFields()...))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", rec.Code)
 	}
 
 	close(f.gate)
-	waitDone(t, h, ctx, first.ID)
+	wg.Wait()
+	resultOf(t, first)
 
 	// The slot is free again.
-	waitDone(t, h, ctx, start(t, h, ctx, "Year\n2\n", dryRunFields()...).ID)
-}
-
-func TestBulkImport_RunningJobReportsProgress(t *testing.T) {
-	f := &fakeBulkImporter{gate: make(chan struct{})}
-	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
-
-	job := start(t, h, ctx, sampleCSV, dryRunFields()...)
-	req := httptest.NewRequest(http.MethodGet, "/x", nil).WithContext(ctx)
-	req.SetPathValue("id", job.ID)
-	rec := httptest.NewRecorder()
-	h.handleJob(rec, req)
-	got := decodeJob(t, rec)
-	if got.Status != bulkImportStatusRunning || got.Counts != nil || got.Importable || len(got.Findings) != 0 {
-		t.Errorf("a running job shows no result yet: %+v", got)
-	}
-	close(f.gate)
-	waitDone(t, h, ctx, job.ID)
+	resultOf(t, run(t, h, ctx, "Year\n2\n", dryRunFields()...))
 }
 
 // ── failures ────────────────────────────────────────────────────────────────
@@ -619,45 +572,101 @@ func TestBulkImport_RunningJobReportsProgress(t *testing.T) {
 func TestBulkImport_FailedRunKeepsInternalDetailOutOfTheResponse(t *testing.T) {
 	f := &fakeBulkImporter{runErr: errors.Join(bulkimport.ErrStructural, errors.New("compliance-entity health check: dial tcp 10.0.0.7:8080: refused"))}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
 
-	job := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	if job.Status != bulkImportStatusFailed || job.Importable {
-		t.Fatalf("job = %+v", job)
+	ev := errorOf(t, run(t, h, adminCtx(t), sampleCSV, dryRunFields()...))
+	if strings.Contains(ev.Message, "10.0.0.7") || strings.Contains(ev.Message, "dial") {
+		t.Errorf("an internal address reached the response: %q", ev.Message)
 	}
-	if strings.Contains(job.Error, "10.0.0.7") || strings.Contains(job.Error, "dial") {
-		t.Errorf("an internal address reached the response: %q", job.Error)
-	}
-	if !strings.Contains(job.Error, "reference "+job.ID) {
-		t.Errorf("a failed job must give the reference to find it in the log by: %q", job.Error)
+	if ev.Reference == "" || !strings.Contains(ev.Message, "reference "+ev.Reference) {
+		t.Errorf("a failed run must give the reference to find it in the log by: %+v", ev)
 	}
 }
 
 func TestBulkImport_InputProblemsAreShownToTheAdmin(t *testing.T) {
 	f := &fakeBulkImporter{runErr: &bulkimport.InputError{Msg: "csv is missing column(s): Platform"}}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
 
-	job := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	if job.Status != bulkImportStatusFailed || job.Error != "csv is missing column(s): Platform" {
-		t.Errorf("job = %+v", job)
+	ev := errorOf(t, run(t, h, adminCtx(t), sampleCSV, dryRunFields()...))
+	if ev.Message != "csv is missing column(s): Platform" {
+		t.Errorf("error = %+v", ev)
 	}
 }
 
-func TestBulkImport_UnknownJobIs404(t *testing.T) {
-	h := newTestBulkHandler(&fakeBulkImporter{})
-	req := httptest.NewRequest(http.MethodGet, "/x", nil).WithContext(adminCtx(t))
-	req.SetPathValue("id", "nope")
-	rec := httptest.NewRecorder()
-	h.handleJob(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
+func TestBulkImport_APanicInARunIsAnErrorNotACrash(t *testing.T) {
+	f := &fakeBulkImporter{panicRun: true}
+	h := newTestBulkHandler(f)
+	ctx := adminCtx(t)
+
+	ev := errorOf(t, run(t, h, ctx, sampleCSV, dryRunFields()...))
+	if strings.Contains(ev.Message, "boom") || ev.Reference == "" {
+		t.Errorf("error = %+v", ev)
+	}
+
+	// The slot was released.
+	f.panicRun = false
+	resultOf(t, run(t, h, ctx, sampleCSV, dryRunFields()...))
+}
+
+// ── the client going away ───────────────────────────────────────────────────
+
+func TestBulkImport_ClosingTheConnectionStopsTheRun(t *testing.T) {
+	f := &fakeBulkImporter{holdUntilCancel: true, started: make(chan struct{})}
+	h := newTestBulkHandler(f)
+	ctx, cancel := context.WithCancel(adminCtx(t))
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.handleRun(httptest.NewRecorder(), runReq(t, ctx, "register.csv", sampleCSV, importFields()...))
+	}()
+	<-f.started
+	cancel() // the browser went away
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the run kept going after the client left")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.ctxErrs) != 1 || !errors.Is(f.ctxErrs[0], context.Canceled) {
+		t.Errorf("the run's context was not cancelled: %v", f.ctxErrs)
+	}
+	if !h.acquire() {
+		t.Error("the slot was not released")
+	}
+}
+
+// brokenWriter is a response whose client has gone: every write fails.
+type brokenWriter struct{ header http.Header }
+
+func (w *brokenWriter) Header() http.Header       { return w.header }
+func (w *brokenWriter) WriteHeader(int)           {}
+func (w *brokenWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+func TestBulkImport_AFailedWriteStopsTheRun(t *testing.T) {
+	f := &fakeBulkImporter{holdUntilCancel: true}
+	h := newTestBulkHandler(f)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.handleRun(&brokenWriter{header: http.Header{}}, runReq(t, adminCtx(t), "register.csv", sampleCSV, importFields()...))
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the run kept going after a write to the client failed")
+	}
+	if !h.acquire() {
+		t.Error("the slot was not released")
 	}
 }
 
 // ── downloads ───────────────────────────────────────────────────────────────
 
-func TestBulkImport_Downloads(t *testing.T) {
+func TestBulkImport_ResultCarriesTheDownloads(t *testing.T) {
 	rep := func(bool) *bulkimport.Report {
 		r := bulkimport.NewReport()
 		r.Add(bulkimport.Finding{MigrationID: 1, CSVRow: 2, RiskTitle: "=SUM(A1)", Severity: bulkimport.SevWarn, Failure: "Action Steps", Detail: "x"})
@@ -667,38 +676,13 @@ func TestBulkImport_Downloads(t *testing.T) {
 	}
 	f := &fakeBulkImporter{report: rep}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
 
-	job := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	if got := strings.Join(job.Downloads, ","); got != "errors,report,risk-codes" {
-		t.Errorf("downloads = %q", got)
+	ev := resultOf(t, run(t, h, adminCtx(t), sampleCSV, importFields()...))
+	if ev.Files == nil || ev.Files.ErrorsCSV == "" || ev.Files.Report == "" || !strings.Contains(ev.Files.RiskCodesCSV, "2025-ASG-Q1-0001") {
+		t.Fatalf("files = %+v", ev.Files)
 	}
-
-	get := func(artifact string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/x", nil).WithContext(ctx)
-		req.SetPathValue("id", job.ID)
-		req.SetPathValue("artifact", artifact)
-		rec := httptest.NewRecorder()
-		h.handleArtifact(rec, req)
-		return rec
-	}
-
-	errs := get("errors")
-	if errs.Code != http.StatusOK || !strings.HasPrefix(errs.Header().Get("Content-Type"), "text/csv") {
-		t.Fatalf("errors: status = %d, type = %q", errs.Code, errs.Header().Get("Content-Type"))
-	}
-	if strings.Contains(errs.Body.String(), ",=SUM") {
-		t.Errorf("a sheet-authored cell reached the download as a live formula:\n%s", errs.Body.String())
-	}
-	if codes := get("risk-codes"); codes.Code != http.StatusOK || !strings.Contains(codes.Body.String(), "2025-ASG-Q1-0001") {
-		t.Errorf("risk-codes: status = %d body = %s", codes.Code, codes.Body.String())
-	}
-	if txt := get("report"); txt.Code != http.StatusOK || !strings.HasPrefix(txt.Header().Get("Content-Type"), "text/plain") ||
-		txt.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Errorf("report: status = %d headers = %v", txt.Code, txt.Header())
-	}
-	if get("secrets").Code != http.StatusNotFound {
-		t.Error("an unknown artifact name must be 404")
+	if strings.Contains(ev.Files.ErrorsCSV, ",=SUM") {
+		t.Errorf("a sheet-authored cell reached the download as a live formula:\n%s", ev.Files.ErrorsCSV)
 	}
 }
 
@@ -709,32 +693,31 @@ func TestBulkImport_FindingsAreCapped(t *testing.T) {
 	}
 	f := &fakeBulkImporter{report: reportWith(many...)}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
 
-	job := waitDone(t, h, ctx, start(t, h, ctx, sampleCSV, dryRunFields()...).ID)
-	if len(job.Findings) != bulkImportMaxFindings || !job.FindingsTruncated {
-		t.Errorf("findings = %d truncated = %v", len(job.Findings), job.FindingsTruncated)
+	ev := resultOf(t, run(t, h, adminCtx(t), sampleCSV, dryRunFields()...))
+	if len(ev.Findings) != bulkImportMaxFindings || !ev.FindingsTruncated {
+		t.Errorf("findings = %d truncated = %v", len(ev.Findings), ev.FindingsTruncated)
 	}
-	if job.Counts.Warnings != bulkImportMaxFindings+50 {
-		t.Errorf("counts must still be complete: %+v", job.Counts)
+	if ev.Counts.Warnings != bulkImportMaxFindings+50 {
+		t.Errorf("counts must still be complete: %+v", ev.Counts)
+	}
+	if ev.Files == nil || ev.Files.ErrorsCSV == "" {
+		t.Error("the errors file has every finding")
 	}
 }
 
-func TestBulkImport_OldJobsAreForgotten(t *testing.T) {
+// The logger middleware wraps every response. A streamed run needs to flush
+// through it and move the server's deadlines, which http.ResponseController can
+// only do if the wrapper unwraps.
+func TestBulkImport_StreamsThroughTheLoggerMiddleware(t *testing.T) {
 	f := &fakeBulkImporter{}
 	h := newTestBulkHandler(f)
-	ctx := adminCtx(t)
+	wrapped := middleware.Logger(http.HandlerFunc(h.handleRun))
 
-	first := waitDone(t, h, ctx, start(t, h, ctx, "Year\n1\n", dryRunFields()...).ID)
-	h.mu.Lock()
-	h.now = func() time.Time { return time.Now().Add(bulkImportJobTTL + time.Hour) }
-	h.mu.Unlock()
-
-	req := httptest.NewRequest(http.MethodGet, "/x", nil).WithContext(ctx)
-	req.SetPathValue("id", first.ID)
 	rec := httptest.NewRecorder()
-	h.handleJob(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("a day-old job: status = %d, want 404", rec.Code)
+	wrapped.ServeHTTP(rec, runReq(t, adminCtx(t), "register.csv", sampleCSV, dryRunFields()...))
+	resultOf(t, rec)
+	if !rec.Flushed {
+		t.Error("the stream was not flushed through the middleware")
 	}
 }
