@@ -42,7 +42,7 @@ func postActionPlanSuggest(spy *spyActionPlanSuggestion, strategy string) *httpt
 	d := &Deps{ActionPlanSuggestionEnabled: true, ActionPlanSuggestion: spy}
 	body := `{"title":"t","description":"d","category_id":1,"treatment_strategy":"` + strategy + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/risks/suggest/action-plan", strings.NewReader(body)).
-		WithContext(contextWithGrants([]grant.Grant{agentGlobalGrant("risk-compliance-team")}))
+		WithContext(ctxFor(grant.Grant{RoleName: roleRiskComplianceTeam, ScopeType: grant.ScopeGlobal}))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	d.handleSuggestActionPlan(rec, req)
