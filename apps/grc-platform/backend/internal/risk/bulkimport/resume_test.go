@@ -139,3 +139,48 @@ func TestRun_DryRunAfterAStoppedRunSaysWhatIsLeft(t *testing.T) {
 		t.Errorf("counts = %+v, want 2 left to write and 1 already done", c)
 	}
 }
+
+// A real run that finds a warning writes nothing unless the caller has said they
+// accept warnings. The check is on what this run found, so it holds even if the
+// admin acknowledged a dry run that had none.
+func TestRun_ImportStopsOnWarningsUntilAcknowledged(t *testing.T) {
+	row := func() map[string]string {
+		return plainRow(map[string]string{"Git Issue URL": "Text"}) // dropped with a warning
+	}
+	fe := newFakeEntity(t)
+	svc := newRunService(t, fe)
+
+	res, err := svc.Run(context.Background(), runRequest(t, idStdReg, templateStandard, false, row()))
+	var in *InputError
+	if !errors.As(err, &in) || !strings.Contains(in.Msg, "warning") {
+		t.Fatalf("err = %v, want the warnings refusal", err)
+	}
+	if res == nil || res.Report.Counts().Warnings != 1 {
+		t.Fatalf("the refusal should still carry what was found: %+v", res)
+	}
+	if len(fe.createdRisks) != 0 || len(fe.usersCreated) != 0 || len(fe.grantPosts) != 0 {
+		t.Fatalf("nothing may be written before the warnings are accepted: risks=%d users=%d grants=%d",
+			len(fe.createdRisks), len(fe.usersCreated), len(fe.grantPosts))
+	}
+
+	req := runRequest(t, idStdReg, templateStandard, false, row())
+	req.AcknowledgeWarnings = true
+	res, err = svc.Run(context.Background(), req)
+	if err != nil || res.Outcome == OutcomeAborted {
+		t.Fatalf("acknowledged: outcome=%v err=%v", res.Outcome, err)
+	}
+	if len(fe.createdRisks) != 1 {
+		t.Errorf("created %d risks, want 1", len(fe.createdRisks))
+	}
+}
+
+// A dry run never needs the acknowledgement: it writes nothing.
+func TestRun_DryRunIgnoresTheWarningsGate(t *testing.T) {
+	fe := newFakeEntity(t)
+	svc := newRunService(t, fe)
+	res, err := svc.Run(context.Background(), runRequest(t, idStdReg, templateStandard, true,
+		plainRow(map[string]string{"Git Issue URL": "Text"})))
+	if err != nil || res.Report.Counts().Warnings != 1 {
+		t.Fatalf("err = %v, res = %+v", err, res)
+	}
+}

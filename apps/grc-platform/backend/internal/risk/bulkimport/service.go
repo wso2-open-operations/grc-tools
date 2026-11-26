@@ -78,8 +78,11 @@ type Request struct {
 	MigrationDate string
 	// MaxRows rejects a file with more data rows than this before anything is
 	// resolved or written. Zero means no limit.
-	MaxRows  int
-	Progress func(Progress)
+	MaxRows int
+	// AcknowledgeWarnings lets a real run proceed past warnings. Without it a real
+	// run whose own validation finds any warning stops before writing anything.
+	AcknowledgeWarnings bool
+	Progress            func(Progress)
 }
 
 // Result is what a run produced. Report is set whenever the run got far enough
@@ -161,10 +164,10 @@ func (s *Service) LoadTarget(ctx context.Context, registerID int) (Target, error
 // problem that makes the run untrustworthy (ErrStructural); row-level problems
 // are findings in the report.
 //
-// A real run never writes anything while a REJECT is outstanding: the caller
-// (the handler) only accepts a real run for a file whose dry run was clean, and
-// the pipeline re-checks that here, because reference data can change between
-// the two.
+// A real run never writes anything while a REJECT is outstanding, or a warning
+// the caller has not acknowledged. It does not rely on an earlier dry run having
+// been clean: it makes the same read-only pass itself first, so reference data
+// that changed since is caught here.
 func (s *Service) Run(ctx context.Context, req Request) (*Result, error) {
 	report := req.Progress
 	if report == nil {
@@ -239,14 +242,20 @@ func (s *Service) Run(ctx context.Context, req Request) (*Result, error) {
 		return res, nil
 	}
 
-	// A real run writes nothing while a row is rejected. The handler only
-	// accepts a real run for a file whose dry run was clean, but reference data
-	// can change in between (a customer deactivated, a person removed), and the
-	// point of the dry run is that no file with a bad row in it is imported.
+	// A real run writes nothing while a row is rejected: no file with a bad row
+	// in it is imported, whatever the caller did before.
 	if rep.Counts().Rejects > 0 {
 		s.log.Warn("bulk import has rejected rows — nothing written", "rejects", rep.Counts().Rejects)
 		res.Outcome = OutcomeFindings
 		return res, nil
+	}
+
+	// Warnings do not block, but the admin must have seen and accepted them. The
+	// caller says so; this check is on what this run found, so a warning that was
+	// not in the dry run (reference data changed) is not accepted unseen.
+	if w := rep.Counts().Warnings; w > 0 && !req.AcknowledgeWarnings {
+		return res, &InputError{Msg: fmt.Sprintf(
+			"The file has %d warning(s). Run a dry run, review them and confirm that you accept them before importing. Nothing was written.", w)}
 	}
 
 	// ── Provision: email → uuid → user.id, creating user rows (§6) ───────────
