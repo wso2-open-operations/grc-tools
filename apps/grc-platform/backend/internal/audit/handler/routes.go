@@ -129,6 +129,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// /api/v1/audits/{id}/... (see listFrameworkControls).
 	mux.HandleFunc("GET /api/v1/audits/frameworks/controls", fh.listFrameworkControls)
 	mux.HandleFunc("POST /api/v1/audits/frameworks/controls", fh.createFrameworkControl)
+	mux.HandleFunc("POST /api/v1/audits/frameworks/controls/bulk", fh.bulkCreateFrameworkControls)
 	mux.HandleFunc("GET /api/v1/audits/products", fh.listProducts)
 	mux.HandleFunc("POST /api/v1/audits/products", fh.createProduct)
 	mux.HandleFunc("GET /api/v1/audits/users", uh.listUsers)

@@ -18,6 +18,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -153,5 +155,166 @@ func TestCreateFramework_ValidatesName(t *testing.T) {
 		if got := statusOf(err); got != http.StatusUnprocessableEntity {
 			t.Errorf("%s: status = %d, want 422", name, got)
 		}
+	}
+}
+
+// stubFrameworkControlRepo serves a fixed current catalog and records creates.
+type stubFrameworkControlRepo struct {
+	repository.FrameworkControlRepository
+	current []*model.AuditFrameworkControl
+	created []model.CreateFrameworkControlRequest
+	failAt  int // 1-based create call that fails; 0 = never
+}
+
+func (s *stubFrameworkControlRepo) ListCurrent(_ context.Context, _ int) ([]*model.AuditFrameworkControl, error) {
+	return s.current, nil
+}
+func (s *stubFrameworkControlRepo) Create(_ context.Context, id int, req model.CreateFrameworkControlRequest, _ string) (*model.AuditFrameworkControl, error) {
+	if s.failAt > 0 && len(s.created)+1 == s.failAt {
+		return nil, errors.New("entity: connection refused 10.0.0.7:8080")
+	}
+	s.created = append(s.created, req)
+	return &model.AuditFrameworkControl{ID: len(s.created), FrameworkID: id, ControlNumber: req.ControlNumber}, nil
+}
+
+func validControl(num string) model.CreateFrameworkControlRequest {
+	return model.CreateFrameworkControlRequest{
+		ControlNumber: num, Description: "d", RequirementType: "DESIGN", ControlType: "NON_CONFIG", Scope: "COMMON",
+	}
+}
+
+func newBulkSvc(existing ...string) (FrameworkService, *stubFrameworkControlRepo) {
+	cr := &stubFrameworkControlRepo{}
+	for _, n := range existing {
+		cr.current = append(cr.current, &model.AuditFrameworkControl{ControlNumber: n})
+	}
+	fr := &stubFrameworkRepo{fw: &model.AuditFramework{ID: 1, Name: "ISO", Status: "ACTIVE"}}
+	return NewFrameworkService(fr, nil, cr), cr
+}
+
+func TestBulkCreateFrameworkControls_CreatesAllInOrder(t *testing.T) {
+	svc, cr := newBulkSvc("A-1")
+	got, err := svc.BulkCreateFrameworkControls(context.Background(), 1,
+		[]model.CreateFrameworkControlRequest{validControl(" A-2 "), validControl("A-3")}, "a@b.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || len(cr.created) != 2 || cr.created[0].ControlNumber != "A-2" {
+		t.Errorf("created = %+v (control numbers must be trimmed, order kept)", cr.created)
+	}
+}
+
+func TestBulkCreateFrameworkControls_RejectsWholeFileAndWritesNothing(t *testing.T) {
+	bad := validControl("A-5")
+	bad.Scope = "NOPE"
+	cases := map[string][]model.CreateFrameworkControlRequest{
+		"empty":                {},
+		"invalid row":          {validControl("A-4"), bad},
+		"dup in file":          {validControl("A-4"), validControl("a-4")},
+		"dup of existing":      {validControl("a-1")},
+		"blank control number": {validControl("  ")},
+	}
+	for name, reqs := range cases {
+		svc, cr := newBulkSvc("A-1")
+		_, err := svc.BulkCreateFrameworkControls(context.Background(), 1, reqs, "a@b.c")
+		if got := statusOf(err); got != http.StatusUnprocessableEntity {
+			t.Errorf("%s: status = %d, want 422", name, got)
+		}
+		if len(cr.created) != 0 {
+			t.Errorf("%s: nothing may be written when any row is rejected", name)
+		}
+	}
+}
+
+func TestBulkCreateFrameworkControls_ErrorNamesTheRow(t *testing.T) {
+	svc, _ := newBulkSvc()
+	bad := validControl("A-2")
+	bad.RequirementType = "X"
+	_, err := svc.BulkCreateFrameworkControls(context.Background(), 1, []model.CreateFrameworkControlRequest{validControl("A-1"), bad}, "a@b.c")
+	if err == nil || !strings.Contains(err.Error(), "row 2") {
+		t.Errorf("error = %v, want it to name row 2", err)
+	}
+}
+
+func TestBulkCreateFrameworkControls_UnknownFramework(t *testing.T) {
+	svc, _ := newBulkSvc()
+	_, err := svc.BulkCreateFrameworkControls(context.Background(), 99, []model.CreateFrameworkControlRequest{validControl("A-1")}, "a@b.c")
+	if got := statusOf(err); got != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", got)
+	}
+}
+
+func TestFrameworkControl_LengthLimitsMatchTheColumns(t *testing.T) {
+	svc, cr := newBulkSvc()
+	longEvidence := strings.Repeat("x", maxFrameworkControlTextBytes+1)
+	okNumber := validControl(strings.Repeat("é", maxFrameworkControlNumberLength)) // 60 chars, 120 bytes: fits
+	if _, err := svc.CreateFrameworkControl(context.Background(), 1, okNumber, "a@b.c"); err != nil {
+		t.Fatalf("a 60-character control number must be accepted: %v", err)
+	}
+	tooLong := map[string]model.CreateFrameworkControlRequest{
+		"control number": validControl(strings.Repeat("a", maxFrameworkControlNumberLength+1)),
+		"description": func() model.CreateFrameworkControlRequest {
+			c := validControl("B")
+			c.Description = longEvidence
+			return c
+		}(),
+		"evidence": func() model.CreateFrameworkControlRequest {
+			c := validControl("C")
+			c.EvidenceRequirement = &longEvidence
+			return c
+		}(),
+	}
+	for name, req := range tooLong {
+		before := len(cr.created)
+		if got := statusOf(func() error { _, err := svc.CreateFrameworkControl(context.Background(), 1, req, "a@b.c"); return err }()); got != http.StatusUnprocessableEntity {
+			t.Errorf("%s: status = %d, want 422", name, got)
+		}
+		if len(cr.created) != before {
+			t.Errorf("%s: must not be written", name)
+		}
+		// The same value is refused in bulk, before any row is written.
+		svc2, cr2 := newBulkSvc()
+		_, err := svc2.BulkCreateFrameworkControls(context.Background(), 1, []model.CreateFrameworkControlRequest{validControl("OK-1"), req}, "a@b.c")
+		if got := statusOf(err); got != http.StatusUnprocessableEntity || len(cr2.created) != 0 {
+			t.Errorf("%s (bulk): status = %d, written = %d, want 422 and nothing written", name, got, len(cr2.created))
+		}
+	}
+}
+
+func TestBulkCreateFrameworkControls_RowCap(t *testing.T) {
+	svc, cr := newBulkSvc()
+	reqs := make([]model.CreateFrameworkControlRequest, maxBulkFrameworkControls+1)
+	for i := range reqs {
+		reqs[i] = validControl(fmt.Sprintf("C-%d", i))
+	}
+	_, err := svc.BulkCreateFrameworkControls(context.Background(), 1, reqs, "a@b.c")
+	if got := statusOf(err); got != http.StatusUnprocessableEntity || len(cr.created) != 0 {
+		t.Errorf("status = %d, written = %d, want 422 and nothing written", got, len(cr.created))
+	}
+	if _, err := svc.BulkCreateFrameworkControls(context.Background(), 1, reqs[:maxBulkFrameworkControls], "a@b.c"); err != nil {
+		t.Errorf("exactly %d rows must be accepted: %v", maxBulkFrameworkControls, err)
+	}
+}
+
+func TestBulkCreateFrameworkControls_PartialFailureReportsCountWithoutLeakingTheCause(t *testing.T) {
+	svc, cr := newBulkSvc()
+	cr.failAt = 3
+	reqs := []model.CreateFrameworkControlRequest{validControl("A-1"), validControl("A-2"), validControl("A-3"), validControl("A-4")}
+	_, err := svc.BulkCreateFrameworkControls(context.Background(), 1, reqs, "a@b.c")
+	if got := statusOf(err); got != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", got)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "2 of 4") || strings.Contains(msg, "10.0.0.7") || strings.Contains(msg, "refused") {
+		t.Errorf("message = %q, want the count and none of the data service's error text", msg)
+	}
+}
+
+func TestBulkCreateFrameworkControls_FirstRowFailureIsNotMasked(t *testing.T) {
+	svc, cr := newBulkSvc()
+	cr.failAt = 1
+	_, err := svc.BulkCreateFrameworkControls(context.Background(), 1, []model.CreateFrameworkControlRequest{validControl("A-1")}, "a@b.c")
+	if err == nil || statusOf(err) == http.StatusUnprocessableEntity || statusOf(err) == http.StatusConflict {
+		t.Errorf("err = %v: with nothing saved the underlying error must come back as-is (a 500 once mapped)", err)
 	}
 }

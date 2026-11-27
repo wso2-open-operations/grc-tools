@@ -52,3 +52,11 @@ type CreateFrameworkControlRequest struct {
 	ControlType         string  `json:"controlType"`     // CONFIG | NON_CONFIG
 	Scope               string  `json:"scope"`           // COMMON | PRODUCT_SPECIFIC
 }
+
+// BulkCreateFrameworkControlsRequest is the payload for
+// POST /api/v1/audits/frameworks/controls/bulk. Every row is validated before
+// any is written, so a bad row rejects the whole file.
+type BulkCreateFrameworkControlsRequest struct {
+	FrameworkID int                             `json:"frameworkId"`
+	Controls    []CreateFrameworkControlRequest `json:"controls"`
+}

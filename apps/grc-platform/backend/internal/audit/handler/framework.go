@@ -233,3 +233,24 @@ func (h *frameworkHandler) createFrameworkControl(w http.ResponseWriter, r *http
 	}
 	response.WriteJSONValue(w, http.StatusCreated, fc)
 }
+
+// bulkCreateFrameworkControls handles POST /api/v1/audits/frameworks/controls/bulk.
+func (h *frameworkHandler) bulkCreateFrameworkControls(w http.ResponseWriter, r *http.Request) {
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ManageFrameworks) {
+		return
+	}
+	var req model.BulkCreateFrameworkControlsRequest
+	if err := response.DecodeJSONLimit(w, r, &req, maxBulkBodyBytes); err != nil {
+		return
+	}
+	actor := auth.FromContext(r.Context()).Subject
+	controls, err := h.svc.BulkCreateFrameworkControls(r.Context(), req.FrameworkID, req.Controls, actor)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	response.WriteJSONValue(w, http.StatusCreated, model.FrameworkControlListResponse{
+		Controls: controls,
+		Total:    len(controls),
+	})
+}
