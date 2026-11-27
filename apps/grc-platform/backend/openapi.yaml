@@ -374,6 +374,40 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/audits/frameworks/controls/bulk:
+    post:
+      tags:
+      - Audit Framework Controls
+      summary: Add many controls to a framework
+      description: 'Validates every row first and rejects the whole request (422, row-numbered) if any row is invalid or repeats a control number already in the framework or earlier in the request. Max 500 rows.'
+      operationId: bulkCreateAuditFrameworkControls
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkCreateFrameworkControlsRequest'
+      responses:
+        '201':
+          description: Framework controls created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FrameworkControlListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /api/v1/audits/products:
     get:
       tags:
@@ -5185,6 +5219,19 @@ components:
           enum:
           - COMMON
           - PRODUCT_SPECIFIC
+    BulkCreateFrameworkControlsRequest:
+      type: object
+      required:
+      - frameworkId
+      - controls
+      properties:
+        frameworkId:
+          type: integer
+        controls:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/CreateFrameworkControlRequest'
     AuditProduct:
       type: object
       properties:

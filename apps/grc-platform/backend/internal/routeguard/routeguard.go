@@ -48,19 +48,20 @@ var externalVisible = map[string]bool{
 
 	// ── Audit Hub: lookups ───────────────────────────────────────────────────
 	// Gated on AUDIT_VIEW_AUDITS, which the auditor holds — not admin-only.
-	"GET /api/v1/audits/frameworks":           true,
-	"GET /api/v1/audits/frameworks/controls":  true,
-	"GET /api/v1/audits/products":             true,
-	"GET /api/v1/audits/teams":                true,
-	"POST /api/v1/audits/frameworks":          false,
-	"PUT /api/v1/audits/frameworks/{id}":      false,
-	"DELETE /api/v1/audits/frameworks/{id}":   false,
-	"POST /api/v1/audits/frameworks/controls": false,
-	"POST /api/v1/audits/products":            false,
-	"POST /api/v1/audits/teams":               false,
-	"PUT /api/v1/audits/teams/{id}":           false,
-	"GET /api/v1/audits/users":                false,
-	"GET /api/v1/audits/auditor-candidates":   false,
+	"GET /api/v1/audits/frameworks":                true,
+	"GET /api/v1/audits/frameworks/controls":       true,
+	"GET /api/v1/audits/products":                  true,
+	"GET /api/v1/audits/teams":                     true,
+	"POST /api/v1/audits/frameworks":               false,
+	"PUT /api/v1/audits/frameworks/{id}":           false,
+	"DELETE /api/v1/audits/frameworks/{id}":        false,
+	"POST /api/v1/audits/frameworks/controls":      false,
+	"POST /api/v1/audits/frameworks/controls/bulk": false,
+	"POST /api/v1/audits/products":                 false,
+	"POST /api/v1/audits/teams":                    false,
+	"PUT /api/v1/audits/teams/{id}":                false,
+	"GET /api/v1/audits/users":                     false,
+	"GET /api/v1/audits/auditor-candidates":        false,
 
 	// ── Audit Hub: ops trigger ───────────────────────────────────────────────
 	"POST /api/v1/audits/reminders/run": false,

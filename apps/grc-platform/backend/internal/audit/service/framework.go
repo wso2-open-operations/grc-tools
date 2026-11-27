@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -65,6 +66,10 @@ type FrameworkService interface {
 	FrameworkInScope(ctx context.Context, frameworkID int, scope model.Scope, userID int, scopeTeamIDs []int) (bool, error)
 	ListFrameworkControls(ctx context.Context, frameworkID int) ([]*model.AuditFrameworkControl, error)
 	CreateFrameworkControl(ctx context.Context, frameworkID int, req model.CreateFrameworkControlRequest, createdBy string) (*model.AuditFrameworkControl, error)
+	// BulkCreateFrameworkControls validates every row (and rejects control
+	// numbers repeated in the file or already in the framework) before writing
+	// any, then creates them in order.
+	BulkCreateFrameworkControls(ctx context.Context, frameworkID int, reqs []model.CreateFrameworkControlRequest, createdBy string) ([]*model.AuditFrameworkControl, error)
 }
 
 type frameworkService struct {
@@ -161,21 +166,87 @@ func (s *frameworkService) ListFrameworkControls(ctx context.Context, frameworkI
 	return s.frameworkControlRepo.ListCurrent(ctx, frameworkID)
 }
 
+// validateFrameworkControl checks one control definition and returns the first
+// problem as a plain message, or "" when valid.
+func validateFrameworkControl(req model.CreateFrameworkControlRequest) string {
+	switch {
+	case strings.TrimSpace(req.ControlNumber) == "":
+		return "controlNumber is required"
+	case strings.TrimSpace(req.Description) == "":
+		return "description is required"
+	case req.RequirementType != "DESIGN" && req.RequirementType != "OE":
+		return "requirementType must be DESIGN or OE"
+	case req.ControlType != "CONFIG" && req.ControlType != "NON_CONFIG":
+		return "controlType must be CONFIG or NON_CONFIG"
+	case req.Scope != "COMMON" && req.Scope != "PRODUCT_SPECIFIC":
+		return "scope must be COMMON or PRODUCT_SPECIFIC"
+	}
+	return ""
+}
+
 func (s *frameworkService) CreateFrameworkControl(ctx context.Context, frameworkID int, req model.CreateFrameworkControlRequest, createdBy string) (*model.AuditFrameworkControl, error) {
-	if req.ControlNumber == "" {
-		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "controlNumber is required"}
-	}
-	if req.Description == "" {
-		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "description is required"}
-	}
-	if req.RequirementType != "DESIGN" && req.RequirementType != "OE" {
-		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "requirementType must be DESIGN or OE"}
-	}
-	if req.ControlType != "CONFIG" && req.ControlType != "NON_CONFIG" {
-		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "controlType must be CONFIG or NON_CONFIG"}
-	}
-	if req.Scope != "COMMON" && req.Scope != "PRODUCT_SPECIFIC" {
-		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "scope must be COMMON or PRODUCT_SPECIFIC"}
+	if msg := validateFrameworkControl(req); msg != "" {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: msg}
 	}
 	return s.frameworkControlRepo.Create(ctx, frameworkID, req, createdBy)
+}
+
+func (s *frameworkService) BulkCreateFrameworkControls(ctx context.Context, frameworkID int, reqs []model.CreateFrameworkControlRequest, createdBy string) ([]*model.AuditFrameworkControl, error) {
+	unprocessable := func(msg string) error {
+		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: msg}
+	}
+	if len(reqs) == 0 {
+		return nil, unprocessable("controls must not be empty")
+	}
+	if len(reqs) > maxBulkControls {
+		return nil, unprocessable(fmt.Sprintf("controls must not exceed %d items per request", maxBulkControls))
+	}
+	fw, err := s.frameworkRepo.GetByID(ctx, frameworkID)
+	if err != nil {
+		return nil, err
+	}
+	if fw == nil {
+		return nil, &apierror.Error{StatusCode: http.StatusNotFound, Body: "framework not found"}
+	}
+	existing, err := s.frameworkControlRepo.ListCurrent(ctx, frameworkID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(existing)+len(reqs))
+	for _, c := range existing {
+		seen[strings.ToLower(strings.TrimSpace(c.ControlNumber))] = struct{}{}
+	}
+	var problems []string
+	for i := range reqs {
+		reqs[i].ControlNumber = strings.TrimSpace(reqs[i].ControlNumber)
+		reqs[i].Description = strings.TrimSpace(reqs[i].Description)
+		if msg := validateFrameworkControl(reqs[i]); msg != "" {
+			problems = append(problems, fmt.Sprintf("row %d: %s", i+1, msg))
+			continue
+		}
+		key := strings.ToLower(reqs[i].ControlNumber)
+		if _, dup := seen[key]; dup {
+			problems = append(problems, fmt.Sprintf("row %d: control %q already exists in this framework or earlier in the file", i+1, reqs[i].ControlNumber))
+			continue
+		}
+		seen[key] = struct{}{}
+	}
+	if len(problems) > 0 {
+		const maxShown = 10
+		shown := problems
+		if len(shown) > maxShown {
+			shown = append(shown[:maxShown:maxShown], fmt.Sprintf("…and %d more", len(problems)-maxShown))
+		}
+		return nil, unprocessable(strings.Join(shown, "; "))
+	}
+	created := make([]*model.AuditFrameworkControl, 0, len(reqs))
+	for i, req := range reqs {
+		fc, err := s.frameworkControlRepo.Create(ctx, frameworkID, req, createdBy)
+		if err != nil {
+			// Earlier rows are already saved; say so, so the user re-uploads only the rest.
+			return nil, unprocessable(fmt.Sprintf("row %d failed after %d control(s) were added: %v", i+1, len(created), err))
+		}
+		created = append(created, fc)
+	}
+	return created, nil
 }
