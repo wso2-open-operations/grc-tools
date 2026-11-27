@@ -379,7 +379,7 @@ paths:
       tags:
       - Audit Framework Controls
       summary: Add many controls to a framework
-      description: 'Validates every row first and rejects the whole request (422, row-numbered) if any row is invalid or repeats a control number already in the framework or earlier in the request. Max 500 rows.'
+      description: 'Validates every row first and rejects the whole request (422, row-numbered) if any row is invalid or repeats a control number already in the framework or earlier in the request. Max 200 rows. Rows are then saved one at a time; if the data service fails part-way the response is 409 saying how many were added.'
       operationId: bulkCreateAuditFrameworkControls
       requestBody:
         required: true
@@ -402,6 +402,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Some controls were added before an error stopped the upload; the message gives the count
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -5229,9 +5231,43 @@ components:
           type: integer
         controls:
           type: array
-          maxItems: 500
+          minItems: 1
+          maxItems: 200
           items:
-            $ref: '#/components/schemas/CreateFrameworkControlRequest'
+            $ref: '#/components/schemas/FrameworkControlInput'
+    FrameworkControlInput:
+      type: object
+      description: One control in a bulk request. Same as CreateFrameworkControlRequest without frameworkId, which is sent once on the request.
+      required:
+      - controlNumber
+      - description
+      - requirementType
+      - controlType
+      - scope
+      properties:
+        controlNumber:
+          type: string
+          maxLength: 60
+        description:
+          type: string
+        evidenceRequirement:
+          type: string
+          nullable: true
+        requirementType:
+          type: string
+          enum:
+          - DESIGN
+          - OE
+        controlType:
+          type: string
+          enum:
+          - CONFIG
+          - NON_CONFIG
+        scope:
+          type: string
+          enum:
+          - COMMON
+          - PRODUCT_SPECIFIC
     AuditProduct:
       type: object
       properties:

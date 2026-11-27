@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -166,14 +167,34 @@ func (s *frameworkService) ListFrameworkControls(ctx context.Context, frameworkI
 	return s.frameworkControlRepo.ListCurrent(ctx, frameworkID)
 }
 
+// Column limits of audit_framework_control (see Resources/audit_schema.sql):
+// control_number is VARCHAR(60), which counts characters; description and
+// evidence_requirement are TEXT, which holds 65,535 bytes. Checked up front so a
+// too-long value is a clear 422 rather than a failed insert, which in a bulk
+// request would leave earlier rows saved.
+const (
+	maxFrameworkControlNumberLength = 60
+	maxFrameworkControlTextBytes    = 65535
+)
+
+// maxBulkFrameworkControls bounds one bulk request. Rows are saved one at a time
+// through the data service, so this is kept well under maxBulkControls.
+const maxBulkFrameworkControls = 200
+
 // validateFrameworkControl checks one control definition and returns the first
 // problem as a plain message, or "" when valid.
 func validateFrameworkControl(req model.CreateFrameworkControlRequest) string {
 	switch {
 	case strings.TrimSpace(req.ControlNumber) == "":
 		return "controlNumber is required"
+	case utf8.RuneCountInString(strings.TrimSpace(req.ControlNumber)) > maxFrameworkControlNumberLength:
+		return fmt.Sprintf("controlNumber must be at most %d characters", maxFrameworkControlNumberLength)
 	case strings.TrimSpace(req.Description) == "":
 		return "description is required"
+	case len(req.Description) > maxFrameworkControlTextBytes:
+		return "description is too long"
+	case req.EvidenceRequirement != nil && len(*req.EvidenceRequirement) > maxFrameworkControlTextBytes:
+		return "evidenceRequirement is too long"
 	case req.RequirementType != "DESIGN" && req.RequirementType != "OE":
 		return "requirementType must be DESIGN or OE"
 	case req.ControlType != "CONFIG" && req.ControlType != "NON_CONFIG":
@@ -198,8 +219,8 @@ func (s *frameworkService) BulkCreateFrameworkControls(ctx context.Context, fram
 	if len(reqs) == 0 {
 		return nil, unprocessable("controls must not be empty")
 	}
-	if len(reqs) > maxBulkControls {
-		return nil, unprocessable(fmt.Sprintf("controls must not exceed %d items per request", maxBulkControls))
+	if len(reqs) > maxBulkFrameworkControls {
+		return nil, unprocessable(fmt.Sprintf("controls must not exceed %d items per request", maxBulkFrameworkControls))
 	}
 	fw, err := s.frameworkRepo.GetByID(ctx, frameworkID)
 	if err != nil {
@@ -243,8 +264,18 @@ func (s *frameworkService) BulkCreateFrameworkControls(ctx context.Context, fram
 	for i, req := range reqs {
 		fc, err := s.frameworkControlRepo.Create(ctx, frameworkID, req, createdBy)
 		if err != nil {
-			// Earlier rows are already saved; say so, so the user re-uploads only the rest.
-			return nil, unprocessable(fmt.Sprintf("row %d failed after %d control(s) were added: %v", i+1, len(created), err))
+			if len(created) == 0 {
+				return nil, err // nothing saved: the caller maps it (logged, generic 500)
+			}
+			// Earlier rows are already saved, so say how many, but keep the
+			// data service's error text out of the response.
+			slog.ErrorContext(ctx, "bulk framework control create failed part-way",
+				"frameworkId", frameworkID, "row", i+1, "added", len(created), "err", err)
+			return nil, &apierror.Error{
+				StatusCode: http.StatusConflict,
+				Body: fmt.Sprintf("%d of %d controls were added before an error stopped the upload. Reload the list to see them, then upload the remaining rows.",
+					len(created), len(reqs)),
+			}
 		}
 		created = append(created, fc)
 	}
