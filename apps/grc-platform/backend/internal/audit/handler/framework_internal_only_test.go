@@ -1,0 +1,87 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package handler
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
+)
+
+type countingFrameworkService struct {
+	service.FrameworkService
+	calls int
+}
+
+func (s *countingFrameworkService) ListFrameworks(context.Context, model.Scope, int, []int, string) ([]*model.AuditFramework, error) {
+	s.calls++
+	return nil, nil
+}
+
+func (s *countingFrameworkService) FrameworkInScope(context.Context, int, model.Scope, int, []int) (bool, error) {
+	s.calls++
+	return true, nil
+}
+
+func (s *countingFrameworkService) ListFrameworkControls(context.Context, int) ([]*model.AuditFrameworkControl, error) {
+	s.calls++
+	return nil, nil
+}
+
+// The framework catalog is internal-only: the external auditor holds
+// ViewAudits but not ViewInternalComments and must be refused before the
+// service is touched. Internal roles still get through.
+func TestFrameworkReads_InternalOnly(t *testing.T) {
+	external := map[string]bool{privilege.ViewAudits: true, privilege.ValidateEvidence: true,
+		privilege.SelectSample: true, privilege.AddComment: true}
+	internal := map[string]bool{privilege.ViewAudits: true, privilege.ViewAllAudits: true,
+		privilege.ViewInternalComments: true}
+
+	endpoints := map[string]func(*frameworkHandler) func(http.ResponseWriter, *http.Request){
+		"list frameworks": func(h *frameworkHandler) func(http.ResponseWriter, *http.Request) { return h.listFrameworks },
+		"list controls":   func(h *frameworkHandler) func(http.ResponseWriter, *http.Request) { return h.listFrameworkControls },
+	}
+	for name, handle := range endpoints {
+		for who, tc := range map[string]struct {
+			privs map[string]bool
+			code  int
+		}{
+			"external auditor": {external, http.StatusForbidden},
+			"internal":         {internal, http.StatusOK},
+		} {
+			t.Run(name+"/"+who, func(t *testing.T) {
+				svc := &countingFrameworkService{}
+				rec := httptest.NewRecorder()
+				handle(&frameworkHandler{svc: svc})(rec, requestAs(t, 7, tc.privs, "/api/v1/audits/frameworks?frameworkId=1", nil))
+				if rec.Code != tc.code {
+					t.Errorf("status = %d, want %d", rec.Code, tc.code)
+				}
+				if tc.code == http.StatusForbidden && svc.calls != 0 {
+					t.Errorf("service calls = %d, want 0 for a refused caller", svc.calls)
+				}
+				if tc.code == http.StatusOK && svc.calls == 0 {
+					t.Errorf("service was never called for an allowed caller")
+				}
+			})
+		}
+	}
+}

@@ -29,7 +29,8 @@ import { AuditPrivilege } from "@modules/audit/privileges";
 export const auditRoutes = (
   <Route path="audit">
     <Route index element={<Navigate to="audits" replace />} />
-    <Route path="frameworks" element={<AuditPrivilegeGuard privilege={AuditPrivilege.ViewAudits}><FrameworksPage /></AuditPrivilegeGuard>} />
+    {/* Internal-only: external auditors must not reach Frameworks by typing the URL. */}
+    <Route path="frameworks" element={<AuditPrivilegeGuard privilege={AuditPrivilege.ViewInternalComments}><FrameworksPage /></AuditPrivilegeGuard>} />
     <Route path="audits" element={<AuditPrivilegeGuard privilege={AuditPrivilege.ViewAudits}><AuditsListPage /></AuditPrivilegeGuard>} />
     <Route path="audits/create" element={<AuditPrivilegeGuard privilege={AuditPrivilege.CreateAudit}><CreateAuditPage /></AuditPrivilegeGuard>} />
     <Route path="audits/:auditId" element={<AuditDetailPage />} />
