@@ -142,6 +142,14 @@ const (
 	// the codebase checks it. Do not reuse it for a new purpose.
 	CreateManagementActionPlan = "RISK_CREATE_MANAGEMENT_ACTION_PLAN"
 
+	// BulkUploadRisks gates importing a historical risk register from a CSV
+	// (the /api/v1/risks/bulk-import routes). It is held only by the Compliance
+	// Admin, and the import requires it GLOBAL — see auth.RequireGlobalPrivilege
+	// for why a register-scoped grant is not enough: the import provisions user
+	// rows and writes role grants, including a GLOBAL Risk Management grant for
+	// an ACCEPT + HIGH row's approver.
+	BulkUploadRisks = "RISK_BULK_UPLOAD"
+
 	// CompleteActionSteps gates viewing/completing the steps of a plan the
 	// caller is action_owner_id on — applies uniformly to STANDARD and
 	// MANAGEMENT plans; ownership is checked separately at the handler/service
@@ -216,6 +224,7 @@ func AllRiskPrivileges() []string {
 		OwnerRejectRisk, ManagementRejectRisk, ComplianceRejectRisk,
 		CompleteRisk, CloseRisk, EscalateRisk, AssessRisk,
 		ManageTeams, ManageRiskScores, ManageActionPlans, ManageComplianceRefs,
+		BulkUploadRisks,
 	}
 }
 

@@ -32,6 +32,10 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer, so handlers
+// behind this middleware can flush and extend deadlines (streamed responses).
+func (rw *responseWriter) Unwrap() http.ResponseWriter { return rw.ResponseWriter }
+
 // Logger logs each completed request with method, path, status, and elapsed time.
 // Correlation ID is included automatically via ctxHandler.
 func Logger(next http.Handler) http.Handler {

@@ -17,9 +17,15 @@
 package main
 
 import (
+	"context"
+	"log/slog"
+	"strings"
+	"time"
+
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/config"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/bulkimport"
 	riskhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/handler"
 	riskentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository/entity"
 	riskservice "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/service"
@@ -63,6 +69,7 @@ func buildRiskDeps(
 	actionPlanRepo := riskentity.NewActionPlanRepository(ec)
 	riskRepo := riskentity.NewRiskRepository(ec)
 	return riskhandler.Deps{
+		BulkImport:           newBulkImporter(ec, scimClient),
 		Risk:                 riskservice.NewRiskService(riskRepo, actionPlanRepo),
 		Assessment:           riskservice.NewRiskAssessmentService(riskentity.NewAssessmentRepository(ec)),
 		Team:                 riskservice.NewTeamService(riskentity.NewTeamRepository(ec)),
@@ -90,4 +97,37 @@ func buildRiskDeps(
 		LeadEscalationEmails: leadEscalationEmails,
 		ActivityLog:          activityLog,
 	}
+}
+
+// bulkImportHTTPTimeout is the per-request timeout of the import's own entity
+// client. Longer than the shared client's: the import writes a risk with its
+// children in one request, and the entity can be slow under a large run.
+const bulkImportHTTPTimeout = 90 * time.Second
+
+// newBulkImporter wires the Compliance Admin's bulk risk import. It returns nil —
+// which the handlers answer with 503 — when no directory is configured, because
+// the import resolves every person in the sheet through it and, without one,
+// would reject every row.
+//
+// The import keeps its own client on the entity's URL rather than sharing ec: it
+// needs each response's raw status and body to tell a row-level refusal from an
+// outage, which ec folds into a message.
+func newBulkImporter(ec *entityclient.Client, scimClient *scim.Client) riskhandler.BulkImporter {
+	if scimClient == nil {
+		return nil
+	}
+	lookup := func(ctx context.Context, email string) (string, bool, error) {
+		u, err := scimClient.LookupByEmail(ctx, email)
+		if err != nil {
+			return "", false, err
+		}
+		// LookupByEmail answers (nil, nil) for no match and for an ambiguous one.
+		// A disabled account is no account: nobody who can no longer sign in may be
+		// named as a risk's owner.
+		if u == nil || !strings.EqualFold(strings.TrimSpace(u.Email), strings.TrimSpace(email)) || u.State == scim.AccountDisabled {
+			return "", false, nil
+		}
+		return u.UUID, true, nil
+	}
+	return bulkimport.NewService(bulkimport.NewEntityClient(ec.BaseURL(), bulkImportHTTPTimeout), lookup, slog.Default())
 }

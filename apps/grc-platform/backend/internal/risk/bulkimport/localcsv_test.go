@@ -1,0 +1,106 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package bulkimport
+
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+// localTestCSV mirrors the structure of
+// "Risk_Test_Full.xlsx - New Risk Form Structure.csv" in the planning-docs area
+// — the hand-cleaned register used for a local -scim-snapshot run — but with
+// synthetic person emails (never a real colleague's address; see
+// snapshotFixtureUsers) in place of whichever two real people that untracked
+// file is pointed at for an actual local run. This test is the regression
+// lock that the shape stays fully valid: 5 rows, zero REJECTs, the dates /
+// aliases / buckets all landing where the runbook says.
+const localTestCSV = `Year,Quarter,Source Register,Customer,Deployment Type,Product,Environment,Risk Title,Risk Description,Risk Category,Risk Identified By,Select Employee/ Name of External Person/ Tool,Risk Identified Date,Risk Assigned To,Gross Likelihood,Gross Impact,Residual Likelihood,Residual Impact,Impact Description,Implementation Date,Reassessment Date,Assignment Team,Risk Owner,Management Approver,Action Owner,Action Plan Description,Action Steps,Treatment Strategy,Progress,Git Issue URL,Email Subject,Remarks,Workflow Status,Migration ID
+2025,Q3,Managed Services,BankOne,Private Cloud,APIM; MI,Production; DR,Supplier contract renewal delay,Delay in renewing supplier contracts may cause service interruption and unplanned cost increases.,Access Control & Credentials,Employee,User One,"January 10, 2025",user1@wso2.com,3,2,3,2,Service interruption and unplanned cost increases for the organisation.,"June 30, 2025",30th Sep 2025,SRE One,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2025,"Action Item -1
+Action 2",Accept,WIP,https://github.com/wso2/product-risk/issues/101,Risk identification on threat models,Raised during the Q3 threat-model review.,APPROVED,1
+2025,Q3,Managed Services,BankOne,Managed Services - Customer's On Prem,IS,Non-Production,Employee security training gap,Absence of regular security awareness training increases susceptibility to phishing and social engineering.,"Logging, Monitoring & Detection",Employee,User Two,"February 5, 2025",user2@wso2.com,2,3,2,3,"Higher susceptibility to phishing, social engineering and insider threats.","September 30, 2025",31st Dec 2025,SRE Two,user1@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2026,"Action Item -1
+Action 2",Transfer,WIP,,Hackathon findings - ABC,,CLOSED,2
+2025,Q4,Managed Services,Bank Of China,Private Cloud,APIM,Production,Business continuity plan not tested,Without regular BCP drills the organisation cannot validate critical operations during a disruption.,Access Control & Credentials,Employee,User Two,"March 15, 2025",user2@wso2.com,3,2,3,2,Cannot validate the ability to maintain critical operations during a major incident.,2025-12-31,30th Jun 2026,SRE Three,user1@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2027,"Action Item -1
+Action 2",Remediate,WIP,,Risk identification on threat models,,APPROVED,3
+2026,Q1,Managed Services,BankOne,Private Cloud,MI,DR,Regulatory data localisation requirement,Emerging regulations may mandate that customer data be stored within specific geographic regions.,Data Exposure & Privacy (PII),Employee,User One,"April 1, 2025",user1@wso2.com,3,1,3,1,Significant infrastructure changes and additional compliance effort.,"March 31, 2026",30th Jun 2026,SRE Two,user2@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2028,"Action Item -1
+Action 2",Avoid,WIP,,Hackathon findings - ABC,,CLOSED,4
+2026,Q3,Managed Services,Bank Of China,Private Cloud,IS; MI,Production; Non-Production,Payment gateway single point of failure,Exclusive reliance on a single payment gateway provider risks halting revenue collection on any outage.,Process & Documentation Gaps,Employee,User One,"May 20, 2025",user1@wso2.com,3,3,3,3,Any provider downtime directly halts revenue collection and customer transactions.,2025-10-31,31st Dec 2025,SRE One,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2029,"Action Item -1
+Action 2",Accept,WIP,,External report,,APPROVED,5
+`
+
+func TestLocalTestCSV_ParsesCleanAndFullyResolves(t *testing.T) {
+	rd := fixtureRefData(t)
+
+	rows, fs, err := parseSheet(strings.NewReader(localTestCSV), rd, msTarget(t, rd))
+	if err != nil {
+		t.Fatalf("parseSheet: %v", err)
+	}
+	if len(rows) != 5 {
+		t.Fatalf("got %d rows, want 5", len(rows))
+	}
+	for _, f := range fs {
+		if f.Severity == SevReject {
+			t.Errorf("parse REJECT on a supposedly-clean row: %+v", f)
+		}
+	}
+
+	wantBucket := map[int]string{1: "APPROVED", 2: "CLOSED", 3: "APPROVED", 4: "CLOSED", 5: "APPROVED"}
+	for _, r := range rows {
+		if r.WorkflowStatus != wantBucket[r.MigrationID] {
+			t.Errorf("row %d bucket = %q, want %q", r.MigrationID, r.WorkflowStatus, wantBucket[r.MigrationID])
+		}
+	}
+
+	r1 := rows[0]
+	if r1.RiskIdentifiedDate != "2025-01-10" || r1.ImplementationDate != "2025-06-30" || r1.ReassessmentDate != "2025-09-30" {
+		t.Errorf("row 1 dates: id=%q impl=%q re=%q", r1.RiskIdentifiedDate, r1.ImplementationDate, r1.ReassessmentDate)
+	}
+	if r1.CustomerID != 20 || len(r1.ProductIDs) != 2 || len(r1.Environments) != 2 {
+		t.Errorf("row 1 template fields: customer=%d products=%v environments=%v", r1.CustomerID, r1.ProductIDs, r1.Environments)
+	}
+	if r1.GitIssueURL != "https://github.com/wso2/product-risk/issues/101" {
+		t.Errorf("row 1 real git URL should survive: %q", r1.GitIssueURL)
+	}
+	if rows[3].TreatmentStrategy != "AVOID" {
+		t.Errorf("row 4 'Avoid' should map to AVOID: %q", rows[3].TreatmentStrategy)
+	}
+	if r4 := rows[3]; r4.ImplementationDate != "2026-03-31" {
+		t.Errorf(`row 4 "March 31, 2026" should parse: %q`, r4.ImplementationDate)
+	}
+
+	// Resolve against the snapshot file that ships beside the CSV.
+	res := NewResolver(nil, snapshotLookup(snapshotFixtureUsers()), true)
+	rfs, err := res.Apply(context.Background(), rows)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, f := range rfs {
+		if f.Severity == SevReject {
+			t.Errorf("resolve REJECT — every person should resolve: %+v", f)
+		}
+	}
+}
+
+func snapshotFixtureUsers() []DirectoryUser {
+	// The two synthetic people localTestCSV uses, with placeholder uuids.
+	// Resolution only cares that each email maps to exactly one uuid.
+	return []DirectoryUser{
+		{Email: "user1@wso2.com", UUID: "11111111-1111-4111-8111-111111111111"},
+		{Email: "user2@wso2.com", UUID: "22222222-2222-4222-8222-222222222222"},
+	}
+}

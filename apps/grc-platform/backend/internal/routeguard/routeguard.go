@@ -206,13 +206,16 @@ var externalVisible = map[string]bool{
 	"POST /api/v1/risks/{id}/escalate":                              false,
 	"GET /api/v1/risks/{id}/escalations":                            false,
 	"POST /api/v1/risks/escalations/run":                            false,
-	"POST /api/v1/risks/reminders/run":                              false,
-	"GET /api/v1/risks/{id}/history":                                false,
-	"POST /api/v1/risks/{id}/escalations/{escalationId}/comment":    false,
-	"POST /api/v1/risks/{id}/evidence":                              false,
-	"GET /api/v1/risks/{id}/evidence":                               false,
-	"DELETE /api/v1/risks/{id}/evidence/{fileId}":                   false,
-	"GET /api/v1/risks/{id}/evidence/{fileId}/download":             false,
+	// Bulk risk import: Compliance Admin only (RISK_BULK_UPLOAD, GLOBAL).
+	"GET /api/v1/risks/bulk-import/template":                     false,
+	"POST /api/v1/risks/bulk-import":                             false,
+	"POST /api/v1/risks/reminders/run":                           false,
+	"GET /api/v1/risks/{id}/history":                             false,
+	"POST /api/v1/risks/{id}/escalations/{escalationId}/comment": false,
+	"POST /api/v1/risks/{id}/evidence":                           false,
+	"GET /api/v1/risks/{id}/evidence":                            false,
+	"DELETE /api/v1/risks/{id}/evidence/{fileId}":                false,
+	"GET /api/v1/risks/{id}/evidence/{fileId}/download":          false,
 
 	// ── Admin Console ────────────────────────────────────────────────────────
 	"GET /api/v1/admin/directory/search":               false,

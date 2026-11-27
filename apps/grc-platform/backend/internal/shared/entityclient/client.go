@@ -48,6 +48,11 @@ func New(baseURL string) *Client {
 	}
 }
 
+// BaseURL is the entity's root URL, for components that speak the entity's HTTP
+// API with their own client (the bulk import keeps the raw status and body of
+// every response, which this client folds into a message).
+func (c *Client) BaseURL() string { return c.baseURL }
+
 // entityError mirrors the entity's error body: {"code":..,"message":".."}.
 type entityError struct {
 	Message string `json:"message"`
