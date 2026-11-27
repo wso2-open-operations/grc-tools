@@ -77,4 +77,11 @@ type CreateAssessmentRequest struct {
 	// Current is the risk as loaded by the handler, so the repository can write
 	// a change-log entry per field that actually changed. Never read from JSON.
 	Current *RiskDetail `json:"-"`
+
+	// AILikelihoodSuggestion is the Residual counterpart to
+	// CreateRiskRequest.AILikelihoodSuggestion — set only when the user
+	// clicked "Suggest Likelihood" during this reassessment. Every
+	// reassessment is a fresh opportunity to suggest (unlike Gross, which is
+	// creation-only), since Likelihood is re-checked live each time.
+	AILikelihoodSuggestion *AILikelihoodSuggestion `json:"ai_likelihood_suggestion,omitempty"`
 }
